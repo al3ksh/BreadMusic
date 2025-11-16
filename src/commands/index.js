@@ -4,7 +4,7 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 const { ensureVoice, ensurePlayer, CommandError } = require('../music/utils');
-const { buildTrackEmbed } = require('../music/embeds');
+const { buildTrackEmbed, buildNowPlayingEmbed } = require('../music/embeds');
 const { savePlayerState } = require('../state/queueStore');
 const {
   getConfig,
@@ -281,27 +281,7 @@ const commands = [
     async execute(interaction) {
       await interaction.deferReply({ ephemeral: true });
       const { player } = await ensurePlayer(interaction);
-      const current = player.queue.current;
-      if (!current) {
-        await interaction.editReply('Nothing is playing.');
-        return;
-      }
-
-      const embed = new EmbedBuilder()
-        .setTitle('Now Playing')
-        .setDescription(`[${current.info.title}](${current.info.uri ?? ''})`)
-        .addFields(
-          {
-              name: 'Duration',
-              value: formatDuration(current.info.duration ?? current.info.length ?? 0),
-            },
-          {
-            name: 'Source',
-            value: current.info.uri ?? 'No link',
-          },
-        )
-        .setColor('#22d3ee');
-
+      const embed = buildNowPlayingEmbed(player, player.queue.current);
       await interaction.editReply({ embeds: [embed] });
     },
   },

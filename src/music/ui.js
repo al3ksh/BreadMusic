@@ -1,10 +1,5 @@
-const {
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-} = require('discord.js');
-const { formatDuration, buildProgressBar } = require('../utils/time');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { buildNowPlayingEmbed } = require('./embeds');
 
 const BUTTON_PREFIX = 'music';
 const BUTTONS = {
@@ -17,7 +12,6 @@ const BUTTONS = {
 };
 
 const EMOJI = {
-  NOW_PLAYING: '\u{1F3B6}',
   PLAY: '\u25B6\uFE0F',
   PAUSE: '\u23F8\uFE0F',
   SKIP: '\u23ED\uFE0F',
@@ -34,66 +28,9 @@ class MusicUI {
   }
 
   buildNowPlayingPayload(player, track) {
-    if (!track) {
-      return {
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('Nothing playing')
-            .setDescription('Queue is empty.')
-            .setColor('#6b7280'),
-        ],
-        components: [],
-      };
-    }
-
-    const duration = track.info.duration ?? track.info.length ?? 0;
-    const position = player.position ?? 0;
-    const progressBar = buildProgressBar(position, duration, 18);
-
-    const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI.NOW_PLAYING} Now Playing`)
-      .setURL(track.info.uri ?? null)
-      .setDescription(`**${track.info.title ?? 'Unknown track'}**\n${progressBar}\n${formatDuration(position)} / ${formatDuration(duration)}`)
-      .setColor('#22d3ee')
-      .addFields(
-        {
-          name: '🎙️ Artist',
-          value: track.info.author ?? 'Unknown',
-          inline: true,
-        },
-        {
-          name: '⏱️ Duration',
-          value: formatDuration(duration, { forceHours: false }),
-          inline: true,
-        },
-        { name: '🔊 Volume', value: `${player.volume}%`, inline: true },
-        { name: '🔁 Loop', value: player.repeatMode ?? 'off', inline: true },
-        {
-          name: '📡 Source',
-          value: track.info.uri ? `[Open track](${track.info.uri})` : 'None',
-          inline: true,
-        },
-        {
-          name: '🎧 Channel',
-          value: player.voiceChannelId ? `<#${player.voiceChannelId}>` : 'Not connected',
-          inline: true,
-        },
-      )
-      .setFooter({
-        text: track.requester
-          ? `Requested by ${track.requester.username ?? track.requester.tag ?? track.requester.id}`
-          : 'Requested by Unknown',
-      })
-      .setTimestamp();
-
-    const artworkUrl = resolveArtwork(track);
-    if (artworkUrl) {
-      embed.setThumbnail(artworkUrl);
-    }
-
     return {
-      embeds: [embed],
-      components: this.buildControlRows(player),
+      embeds: [buildNowPlayingEmbed(player, track)],
+      components: track ? this.buildControlRows(player) : [],
     };
   }
 
@@ -236,15 +173,3 @@ module.exports = {
   BUTTON_PREFIX,
 };
 
-function resolveArtwork(track) {
-  if (track.info.artworkUrl) return track.info.artworkUrl;
-  const identifier = track.info.identifier;
-  if (
-    identifier &&
-    (track.info.sourceName === 'youtube' ||
-      (track.info.uri && /youtu(\.be|be\.com)/i.test(track.info.uri)))
-  ) {
-    return `https://img.youtube.com/vi/${identifier}/hqdefault.jpg`;
-  }
-  return null;
-}

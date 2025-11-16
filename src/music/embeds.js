@@ -1,5 +1,15 @@
 const { EmbedBuilder } = require('discord.js');
-const { formatDuration } = require('../utils/time');
+const { formatDuration, buildProgressBar } = require('../utils/time');
+
+const LABELS = {
+  TITLE: '🎶',
+  ARTIST: '🎙️ Artist',
+  DURATION: '⏱️ Duration',
+  VOLUME: '🔊 Volume',
+  LOOP: '🔁 Loop',
+  SOURCE: '📡 Source',
+  CHANNEL: '🔈 Channel',
+};
 
 function buildTrackEmbed(track, requester, voiceChannelId) {
   const requesterLabel = requester?.tag ?? requester?.username ?? requester?.id ?? 'Unknown user';
@@ -8,17 +18,17 @@ function buildTrackEmbed(track, requester, voiceChannelId) {
     : `${track.info.title ?? 'Unknown title'}`;
 
   const embed = new EmbedBuilder()
-    .setTitle('✅ Added to queue')
+    .setTitle('➕ Added to queue')
     .setDescription(description)
     .addFields(
-      { name: '🎙️ Artist', value: track.info.author ?? 'Unknown', inline: true },
+      { name: LABELS.ARTIST, value: track.info.author ?? 'Unknown', inline: true },
       {
-        name: '⏱️ Duration',
+        name: LABELS.DURATION,
         value: formatDuration(track.info.duration ?? track.info.length ?? 0),
         inline: true,
       },
       {
-        name: '🎧 Channel',
+        name: LABELS.CHANNEL,
         value: voiceChannelId ? `<#${voiceChannelId}>` : 'Not connected',
         inline: true,
       },
@@ -35,9 +45,73 @@ function buildTrackEmbed(track, requester, voiceChannelId) {
   return embed;
 }
 
+function buildNowPlayingEmbed(player, track) {
+  if (!track) {
+    return new EmbedBuilder()
+      .setTitle('Nothing playing')
+      .setDescription('Queue is empty.')
+      .setColor('#6b7280');
+  }
+
+  const duration = track.info.duration ?? track.info.length ?? 0;
+  const position = player?.position ?? 0;
+  const progressBar = buildProgressBar(position, duration, 18);
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${LABELS.TITLE} Now Playing`)
+    .setURL(track.info.uri ?? null)
+    .setDescription(
+      `**${track.info.title ?? 'Unknown track'}**\n${progressBar}\n${formatDuration(position)} / ${formatDuration(
+        duration,
+      )}`,
+    )
+    .setColor('#22d3ee')
+    .addFields(
+      { name: LABELS.ARTIST, value: track.info.author ?? 'Unknown', inline: true },
+      { name: LABELS.DURATION, value: formatDuration(duration), inline: true },
+      { name: LABELS.VOLUME, value: formatVolume(player?.volume), inline: true },
+      { name: LABELS.LOOP, value: formatLoopMode(player?.repeatMode), inline: true },
+      {
+        name: LABELS.SOURCE,
+        value: track.info.uri ? `[Open track](${track.info.uri})` : 'None',
+        inline: true,
+      },
+      {
+        name: LABELS.CHANNEL,
+        value: player?.voiceChannelId ? `<#${player.voiceChannelId}>` : 'Not connected',
+        inline: true,
+      },
+    )
+    .setFooter({
+      text: track.requester
+        ? `Requested by ${track.requester.username ?? track.requester.tag ?? track.requester.id}`
+        : 'Requested by Unknown',
+    })
+    .setTimestamp();
+
+  const artworkUrl = resolveArtwork(track);
+  if (artworkUrl) {
+    embed.setThumbnail(artworkUrl);
+  }
+
+  return embed;
+}
+
+function formatLoopMode(mode) {
+  if (!mode || mode === 'off') return 'Off';
+  if (mode === 'track') return 'Track';
+  if (mode === 'queue') return 'Queue';
+  return mode;
+}
+
+function formatVolume(volume) {
+  if (!Number.isFinite(volume)) return '100%';
+  return `${volume}%`;
+}
+
 function resolveArtwork(track) {
-  if (track.info.artworkUrl) return track.info.artworkUrl;
-  const identifier = track.info.identifier;
+  if (track?.info?.artworkUrl) return track.info.artworkUrl;
+  const identifier = track?.info?.identifier;
   if (
     identifier &&
     (track.info.sourceName === 'youtube' ||
@@ -50,4 +124,6 @@ function resolveArtwork(track) {
 
 module.exports = {
   buildTrackEmbed,
+  buildNowPlayingEmbed,
+  resolveArtwork,
 };
