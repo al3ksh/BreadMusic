@@ -1,0 +1,18 @@
+{
+  "name": "bread",
+  "version": "1.0.0",
+  "description": "Podstawowy bot muzyczny z komendami slash i Lavalink.",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js",
+    "register": "node src/register-commands.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.24.2",
+    "dotenv": "^17.2.3",
+    "lavalink-client": "^2.6.6"
+  }
+}

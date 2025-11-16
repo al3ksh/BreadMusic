@@ -1,0 +1,22 @@
+server:
+  port: 2333
+
+lavalink:
+  server:
+    password: "youshallnotpass"
+    bufferDurationMs: 400
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: true
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+
+spring:
+  main:
+    allow-bean-definition-overriding: true
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
