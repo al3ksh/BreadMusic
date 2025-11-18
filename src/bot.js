@@ -13,7 +13,7 @@ const { MusicUI, BUTTON_PREFIX, BUTTONS } = require('./music/ui');
 const { handleSkipRequest } = require('./music/skipManager');
 const { buildTrackEmbed } = require('./music/embeds');
 const { savePlayerState, hydratePlayer, resetAllQueues } = require('./state/queueStore');
-const { scheduleIdleLeave, clearIdle } = require('./music/idleTracker');
+const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer } = require('./music/idleTracker');
 const { resetVotes } = require('./music/voteManager');
 const { getConfig, listConfigs } = require('./state/guildConfig');
 const { createSelection } = require('./state/searchCache');
@@ -158,10 +158,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+  const guildId = newState.guild?.id ?? oldState.guild?.id;
+  if (!guildId) return;
+  const player = client.lavalink.getPlayer(guildId);
+  if (!player || !player.voiceChannelId) return;
+
+  const affectedChannels = [oldState.channelId, newState.channelId];
+  if (!affectedChannels.includes(player.voiceChannelId)) return;
+
+  handleVoiceStateUpdate(player, client);
+});
+
 client.lavalink.on('trackStart', async (player, track) => {
   resetVotes(player.guildId);
-  clearIdle(player.guildId);
-    await savePlayerState(player).catch((error) =>
+  await savePlayerState(player).catch((error) =>
     console.error('Failed to save queue:', error),
   );
   await client.musicUI.sendNowPlaying(player, track);
@@ -169,10 +180,10 @@ client.lavalink.on('trackStart', async (player, track) => {
 
 client.lavalink.on('trackEnd', async (player, track, payload) => {
   await savePlayerState(player).catch(() => {});
-  const configForGuild = getConfig(player.guildId);
   await client.musicUI.refresh(player);
   if (!player.queue.current && player.queue.tracks.length === 0) {
-    scheduleIdleLeave(player, configForGuild);
+    scheduleIdleLeave(player, client);
+    handleVoiceStateUpdate(player, client);
   }
 
   console.log(
@@ -193,7 +204,7 @@ client.lavalink.on('trackStuck', (player, track, payload) => {
 });
 
 client.lavalink.on('playerDestroy', async (player) => {
-  clearIdle(player.guildId);
+  clearEmptyChannelTimer(player.guildId);
   await client.musicUI.clear(player.guildId);
 });
 

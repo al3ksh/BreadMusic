@@ -1,33 +1,69 @@
-const idleTimers = new Map();
+const emptyChannelTimers = new Map();
 
-function scheduleIdleLeave(player, config) {
+const EMPTY_CHANNEL_TIMEOUT = 30 * 1000;
+
+function scheduleIdleLeave(player, client) {
   if (!player) return;
-  clearIdle(player.guildId);
-  if (config.stayInChannel) return;
-  if (!config.afkTimeout || config.afkTimeout <= 0) return;
+  const guildId = player.guildId;
+
+  if (channelHasListeners(player, client)) {
+    clearEmptyChannelTimer(guildId);
+    return;
+  }
+
+  if (emptyChannelTimers.has(guildId)) return;
 
   const timeout = setTimeout(async () => {
+    emptyChannelTimers.delete(guildId);
     try {
-      if (!player.queue.current && player.queue.tracks.length === 0) {
-        await player.destroy('idle-timeout', true);
-      }
+      const latestPlayer = client?.lavalink?.getPlayer(guildId) ?? player;
+      if (!latestPlayer || latestPlayer.destroyed) return;
+      if (channelHasListeners(latestPlayer, client)) return;
+      await latestPlayer.destroy('idle-timeout', true);
     } catch (error) {
-      console.error('Idle leave failed', error);
+      console.error('Empty channel leave failed', error);
     }
-  }, config.afkTimeout);
+  }, EMPTY_CHANNEL_TIMEOUT);
 
-  idleTimers.set(player.guildId, timeout);
+  emptyChannelTimers.set(guildId, timeout);
 }
 
-function clearIdle(guildId) {
-  const timeout = idleTimers.get(guildId);
+function handleVoiceStateUpdate(player, client) {
+  if (!player) return;
+  if (channelHasListeners(player, client)) {
+    clearEmptyChannelTimer(player.guildId);
+    return;
+  }
+  scheduleIdleLeave(player, client);
+}
+
+function channelHasListeners(player, client) {
+  if (!client) return true;
+  const guild = client.guilds.cache.get(player.guildId);
+  if (!guild) return true;
+  const voiceChannelId = player.voiceChannelId;
+  if (!voiceChannelId) return true;
+
+  const listeners = guild.voiceStates?.cache?.filter((state) => {
+    if (state.channelId !== voiceChannelId) return false;
+    if (state.id === client.user?.id) return false;
+    const member = state.member ?? guild.members.cache.get(state.id);
+    return member ? !member.user?.bot : true;
+  });
+
+  return (listeners?.size ?? 0) > 0;
+}
+
+function clearEmptyChannelTimer(guildId) {
+  const timeout = emptyChannelTimers.get(guildId);
   if (timeout) {
     clearTimeout(timeout);
-    idleTimers.delete(guildId);
+    emptyChannelTimers.delete(guildId);
   }
 }
 
 module.exports = {
   scheduleIdleLeave,
-  clearIdle,
+  handleVoiceStateUpdate,
+  clearEmptyChannelTimer,
 };

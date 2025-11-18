@@ -7,7 +7,7 @@ const DEFAULT_CONFIG = {
   maxVolume: 100,
   voteSkipPercent: 0.6,
   stayInChannel: false,
-  afkTimeout: 5 * 60 * 1000,
+  afkTimeout: 2.5 * 60 * 1000,
   persistentQueue: true,
   twentyFourSevenChannelId: null,
   defaultVolume: 60,
@@ -18,12 +18,28 @@ const DEFAULT_CONFIG = {
   announceChannelId: null,
 };
 
+const OLD_DEFAULT_AFK_TIMEOUT = 5 * 60 * 1000;
+
 const configStore = new FileStore('configs.json', {});
 
 function getConfig(guildId) {
   if (!guildId) return { ...DEFAULT_CONFIG };
   const stored = configStore.get(guildId, {});
-  return { ...DEFAULT_CONFIG, ...stored };
+  const merged = { ...DEFAULT_CONFIG, ...stored };
+
+  let shouldPersist = false;
+  if (typeof stored.afkTimeout === 'undefined') {
+    shouldPersist = true;
+  } else if (stored.afkTimeout === OLD_DEFAULT_AFK_TIMEOUT) {
+    merged.afkTimeout = DEFAULT_CONFIG.afkTimeout;
+    shouldPersist = true;
+  }
+
+  if (shouldPersist) {
+    configStore.set(guildId, { ...stored, afkTimeout: merged.afkTimeout });
+  }
+
+  return merged;
 }
 
 function setConfig(guildId, partial) {
