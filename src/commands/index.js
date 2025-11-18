@@ -41,6 +41,14 @@ const MONSTER_BREAD_IMAGE_PATH = path.resolve(
   'monsterbread.png',
 );
 
+const FILTER_PRESET_CHOICES = [
+  { value: 'bassboost', label: 'Bassboost', description: 'Boosted bass EQ curve.' },
+  { value: 'nightcore', label: 'Nightcore', description: 'Faster tempo + higher pitch.' },
+  { value: 'vaporwave', label: 'Vaporwave', description: 'Slower tempo + detuned vibe.' },
+  { value: 'soft', label: 'Soft', description: 'Gentle EQ tuned for vocals.' },
+  { value: 'karaoke', label: 'Karaoke', description: 'Reduces lead vocals.' },
+];
+
 const FILTER_PRESETS = {
   bassboost: async (manager) => manager.setEQPreset('BassboostMedium'),
   nightcore: async (manager) => manager.toggleNightcore(1.25, 1.2, 1),
@@ -499,11 +507,10 @@ const commands = [
               .setDescription('Preset name')
               .setRequired(true)
               .addChoices(
-                { name: 'Bassboost', value: 'bassboost' },
-                { name: 'Nightcore', value: 'nightcore' },
-                { name: 'Vaporwave', value: 'vaporwave' },
-                { name: 'Soft', value: 'soft' },
-                { name: 'Karaoke', value: 'karaoke' },
+                ...FILTER_PRESET_CHOICES.map(({ label, value }) => ({
+                  name: label,
+                  value,
+                })),
               ),
           ),
       )
@@ -516,16 +523,25 @@ const commands = [
       const sub = interaction.options.getSubcommand();
 
       if (sub === 'list') {
-        const filters = player.filterManager.filters;
-        const entries = Object.entries(filters)
-          .map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`)
-          .join('\n');
-        await interaction.editReply(`Current filters:\n${entries || 'none'}`);
+        const activePreset = player.filterManager.activePreset || null;
+        const description = FILTER_PRESET_CHOICES.map(({ label, value, description }) => {
+          const status = activePreset === value ? 'ON' : 'OFF';
+          const details = description ? ` - ${description}` : '';
+          return `- [${status}] ${label}${details}`;
+        }).join('\n');
+
+        const embed = new EmbedBuilder()
+          .setTitle('Filter presets')
+          .setColor('#0ea5e9')
+          .setDescription(description);
+
+        await interaction.editReply({ embeds: [embed] });
         return;
       }
 
       if (sub === 'clear') {
         await player.filterManager.resetFilters();
+        player.filterManager.activePreset = null;
         await interaction.editReply('Filters cleared.');
         return;
       }
@@ -535,6 +551,7 @@ const commands = [
       if (!handler) throw new CommandError('Unknown preset.');
       await handler(player.filterManager);
       await player.filterManager.applyPlayerFilters();
+      player.filterManager.activePreset = preset;
       await interaction.editReply(`Applied preset **${preset}**.`);
     },
   },
