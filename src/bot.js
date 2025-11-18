@@ -9,7 +9,11 @@ const {
 const { LavalinkManager } = require('lavalink-client');
 const { loadConfig } = require('./config');
 const { CommandError, ensurePlayer } = require('./music/utils');
-const { commands } = require('./commands');
+const {
+  commands,
+  buildHelpEmbed,
+  buildHelpComponents,
+} = require('./commands');
 const { MusicUI, BUTTON_PREFIX, BUTTONS } = require('./music/ui');
 const { handleSkipRequest } = require('./music/skipManager');
 const { buildTrackEmbed } = require('./music/embeds');
@@ -34,6 +38,8 @@ const {
   buildComponents: buildBlackjackComponents,
   BUTTON_PREFIX: BLACKJACK_BUTTON_PREFIX,
 } = require('./games/blackjack');
+
+const HELP_BUTTON_PREFIX = 'help:';
 
 const config = loadConfig();
 
@@ -151,6 +157,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.customId.startsWith(BLACKJACK_BUTTON_PREFIX)) {
         await handleBlackjackButton(interaction);
+        return;
+      }
+
+      if (interaction.customId.startsWith(HELP_BUTTON_PREFIX)) {
+        await handleHelpButton(interaction);
         return;
       }
     }
@@ -308,6 +319,31 @@ async function handleBlackjackButton(interaction) {
   if (updatedGame.finished) {
     endBlackjack(userId);
   }
+
+  await interaction.update({ embeds: [embed], components });
+}
+
+async function handleHelpButton(interaction) {
+  const [, action, userId, pageString] = interaction.customId.split(':');
+
+  if (interaction.user.id !== userId) {
+    await interaction.reply({ content: 'This help menu is not for you.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  let pageIndex = parseInt(pageString, 10);
+  if (action === 'prev') {
+    pageIndex--;
+  } else if (action === 'next') {
+    pageIndex++;
+  }
+
+  // Bounds check (assuming 3 categories: Music, Misc, Fun)
+  if (pageIndex < 0) pageIndex = 0;
+  if (pageIndex > 2) pageIndex = 2;
+
+  const embed = buildHelpEmbed(pageIndex);
+  const components = buildHelpComponents(pageIndex, userId);
 
   await interaction.update({ embeds: [embed], components });
 }

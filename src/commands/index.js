@@ -5,6 +5,9 @@ const {
   AttachmentBuilder,
   ChannelType,
   MessageFlags,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } = require('discord.js');
 const path = require('path');
 const { ensureVoice, ensurePlayer, CommandError } = require('../music/utils');
@@ -63,27 +66,94 @@ async function queuePersist(player) {
   await savePlayerState(player).catch(() => {});
 }
 
+const HELP_CATEGORIES = [
+  {
+    name: 'Music',
+    description: 'Control playback, queue, and audio filters.',
+    commands: [
+      { name: '/play', value: 'Play or queue a track/playlist.' },
+      { name: '/pause', value: 'Pause playback.' },
+      { name: '/resume', value: 'Resume playback.' },
+      { name: '/skip', value: 'Skip the current track.' },
+      { name: '/stop', value: 'Stop playback and clear queue.' },
+      { name: '/queue', value: 'Show the queue.' },
+      { name: '/nowplaying', value: 'Show current track info.' },
+      { name: '/loop', value: 'Set repeat mode (off/track/queue).' },
+      { name: '/shuffle', value: 'Shuffle the queue.' },
+      { name: '/volume', value: 'Set volume.' },
+      { name: '/seek', value: 'Seek to a specific time.' },
+      { name: '/filter', value: 'Apply audio filters.' },
+      { name: '/leave', value: 'Disconnect the bot.' },
+      { name: '/clearqueue', value: 'Clear upcoming tracks.' },
+      { name: '/remove', value: 'Remove specific tracks.' },
+      { name: '/move', value: 'Move a track in the queue.' },
+      { name: '/skipto', value: 'Skip to a specific track.' },
+      { name: '/back', value: 'Play previous track.' },
+      { name: '/replay', value: 'Replay current track.' },
+      { name: '/crossfade', value: 'Set crossfade duration.' },
+    ],
+  },
+  {
+    name: 'Misc',
+    description: 'Configuration and system commands.',
+    commands: [
+      { name: '/help', value: 'Show this help menu.' },
+      { name: '/ping', value: 'Check latency.' },
+      { name: '/config', value: 'Manage guild settings (DJ role, etc).' },
+    ],
+  },
+  {
+    name: 'Fun',
+    description: 'Games and memes.',
+    commands: [
+      { name: '/bread', value: 'Get some bread.' },
+      { name: '/blackjack', value: 'Play blackjack.' },
+    ],
+  },
+];
+
+function buildHelpEmbed(pageIndex) {
+  const category = HELP_CATEGORIES[pageIndex];
+  const embed = new EmbedBuilder()
+    .setTitle(`NeoBeat Buddy - Help (${category.name})`)
+    .setDescription(category.description)
+    .setColor('#10b981')
+    .setFooter({ text: `Page ${pageIndex + 1}/${HELP_CATEGORIES.length}` });
+
+  for (const cmd of category.commands) {
+    embed.addFields({ name: cmd.name, value: cmd.value, inline: true });
+  }
+
+  return embed;
+}
+
+function buildHelpComponents(pageIndex, userId) {
+  const row = new ActionRowBuilder();
+
+  const prevButton = new ButtonBuilder()
+    .setCustomId(`help:prev:${userId}:${pageIndex}`)
+    .setLabel('◀')
+    .setStyle(ButtonStyle.Primary)
+    .setDisabled(pageIndex === 0);
+
+  const nextButton = new ButtonBuilder()
+    .setCustomId(`help:next:${userId}:${pageIndex}`)
+    .setLabel('▶')
+    .setStyle(ButtonStyle.Primary)
+    .setDisabled(pageIndex === HELP_CATEGORIES.length - 1);
+
+  row.addComponents(prevButton, nextButton);
+  return [row];
+}
+
 const commands = [
   {
     data: new SlashCommandBuilder().setName('help').setDescription('Command list and quick tips.'),
     async execute(interaction) {
-      const embed = new EmbedBuilder()
-        .setTitle('NeoBeat Buddy - help')
-        .setDescription(
-          'All controls use slash commands + buttons. Most popular: `/play`, `/queue`, `/filter preset bassboost`.\nRemember that DJ role (or Manage Guild) is required for administrative commands.',
-        )
-        .addFields(
-          { name: '/play <link/query>', value: 'Adds a track or playlist. Shows a select menu with top 5 matches.' },
-          { name: '/queue', value: 'Displays the queue with pagination + ETA.' },
-          { name: '/loop off|track|queue', value: 'Sets repeat mode for the current track or entire queue.' },
-          { name: '/filter preset <name>', value: 'Quick presets: bassboost, nightcore, vaporwave, soft, karaoke.' },
-          { name: '/config set', value: 'Adjust provider, maxVolume, 24/7 settings, vote skip threshold and more.' },
-          { name: '/clearqueue', value: 'DJ-only: clear upcoming tracks while current song keeps playing.' },
-          { name: '/ping', value: 'Check bot latency + heartbeat.' },
-        )
-        .setColor('#10b981');
-
-      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      const pageIndex = 0;
+      const embed = buildHelpEmbed(pageIndex);
+      const components = buildHelpComponents(pageIndex, interaction.user.id);
+      await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -740,4 +810,6 @@ const commands = [
 
 module.exports = {
   commands,
+  buildHelpEmbed,
+  buildHelpComponents,
 };
