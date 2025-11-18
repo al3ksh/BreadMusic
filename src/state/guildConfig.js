@@ -1,5 +1,5 @@
 const { FileStore } = require('./fileStore');
-const { CommandError } = require('../music/utils');
+const { CommandError } = require('../utils/commandError');
 
 const DEFAULT_CONFIG = {
   preferredSource: null,

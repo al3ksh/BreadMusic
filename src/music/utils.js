@@ -1,13 +1,6 @@
 const { hydratePlayer } = require('../state/queueStore');
 const { getConfig } = require('../state/guildConfig');
-
-class CommandError extends Error {
-  constructor(message, options = {}) {
-    super(message);
-    this.name = 'CommandError';
-    this.ephemeral = options.ephemeral ?? true;
-  }
-}
+const { CommandError } = require('../utils/commandError');
 
 async function resolveVoiceState(interaction) {
   if (!interaction.guild) {

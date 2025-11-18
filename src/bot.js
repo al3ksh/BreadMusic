@@ -4,6 +4,7 @@ const {
   GatewayIntentBits,
   Events,
   ActivityType,
+  MessageFlags,
 } = require('discord.js');
 const { LavalinkManager } = require('lavalink-client');
 const { loadConfig } = require('./config');
@@ -227,7 +228,7 @@ client
 async function handleMusicButton(interaction) {
   const [, action, guildId] = interaction.customId.split(':');
     if (!guildId || guildId !== interaction.guildId) {
-    await interaction.reply({ content: 'Invalid button.', ephemeral: true });
+    await interaction.reply({ content: 'Invalid button.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -248,7 +249,7 @@ async function handleMusicButton(interaction) {
 async function handleQueueButton(interaction) {
   const [, action, guildId, pageString, ownerId] = interaction.customId.split(':');
   if (ownerId && ownerId !== interaction.user.id) {
-    await interaction.reply({ content: 'Only the author can use this pagination.', ephemeral: true });
+    await interaction.reply({ content: 'Only the author can use this pagination.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -277,13 +278,13 @@ async function handleQueueButton(interaction) {
 async function handleBlackjackButton(interaction) {
   const [, action, userId] = interaction.customId.split(':');
   if (interaction.user.id !== userId) {
-    await interaction.reply({ content: 'Only the player can use these controls.', ephemeral: true });
+    await interaction.reply({ content: 'Only the player can use these controls.', flags: MessageFlags.Ephemeral });
     return;
   }
 
   const game = getBlackjackGame(userId);
   if (!game) {
-    await interaction.reply({ content: 'This blackjack game has ended.', ephemeral: true });
+    await interaction.reply({ content: 'This blackjack game has ended.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -297,7 +298,7 @@ async function handleBlackjackButton(interaction) {
   }
 
   if (!updatedGame) {
-    await interaction.reply({ content: 'This blackjack game has ended.', ephemeral: true });
+    await interaction.reply({ content: 'This blackjack game has ended.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -327,7 +328,7 @@ async function skipTrack(interaction) {
     const restarted = await restartCurrent(player);
     if (!restarted) {
       await interaction
-        .followUp({ content: 'Nothing is playing to restart.', ephemeral: true })
+        .followUp({ content: 'Nothing is playing to restart.', flags: MessageFlags.Ephemeral })
         .catch(() => {});
     }
     return;
@@ -337,7 +338,7 @@ async function skipTrack(interaction) {
     await savePlayerState(player).catch(() => {});
     await client.musicUI.refresh(player);
   } else {
-    await interaction.followUp({ content: result.message, ephemeral: true }).catch(() => {});
+    await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 }
 
@@ -358,7 +359,7 @@ async function playPrevious(interaction) {
     const restarted = await restartCurrent(player);
     if (!restarted) {
       await interaction
-        .followUp({ content: 'Nothing is playing to restart.', ephemeral: true })
+        .followUp({ content: 'Nothing is playing to restart.', flags: MessageFlags.Ephemeral })
         .catch(() => {});
     }
     return;
@@ -366,7 +367,7 @@ async function playPrevious(interaction) {
   const current = player.queue.current;
   const previous = await player.queue.shiftPrevious();
   if (!previous) {
-    await interaction.followUp({ content: 'No previous track.', ephemeral: true }).catch(() => {});
+    await interaction.followUp({ content: 'No previous track.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
   if (current) {
@@ -382,7 +383,7 @@ async function replayTrack(interaction) {
   const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
   const current = player.queue.current;
   if (!current) {
-    await interaction.followUp({ content: 'Nothing is playing.', ephemeral: true }).catch(() => {});
+    await interaction.followUp({ content: 'Nothing is playing.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
   await player.play({ clientTrack: current, startTime: 0 });
@@ -405,7 +406,7 @@ async function shuffleQueue(interaction) {
   await interaction.deferUpdate();
   const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
   if (player.queue.tracks.length === 0) {
-    await interaction.followUp({ content: 'No tracks to shuffle.', ephemeral: true }).catch(() => {});
+    await interaction.followUp({ content: 'No tracks to shuffle.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
   await player.queue.shuffle();
@@ -553,7 +554,10 @@ async function handleInteractionError(interaction, error) {
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply({ content });
     } else {
-      await interaction.reply({ content, ephemeral });
+      await interaction.reply({
+        content,
+        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+      });
     }
   }
 }

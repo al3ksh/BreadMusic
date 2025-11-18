@@ -4,6 +4,7 @@ const {
   PermissionFlagsBits,
   AttachmentBuilder,
   ChannelType,
+  MessageFlags,
 } = require('discord.js');
 const path = require('path');
 const { ensureVoice, ensurePlayer, CommandError } = require('../music/utils');
@@ -12,6 +13,7 @@ const { savePlayerState } = require('../state/queueStore');
 const {
   getConfig,
   setConfig,
+  deleteConfig,
   assertDJ,
   hasDJPermissions,
   formatConfig,
@@ -81,7 +83,7 @@ const commands = [
         )
         .setColor('#10b981');
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -120,7 +122,7 @@ const commands = [
       if (selectionExpired && !resolvedTrack) {
         await interaction.reply({
           content: 'That autocomplete result expired. Please try again.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -128,7 +130,7 @@ const commands = [
       if (!resolvedTrack) {
         const restrictionMessage = getYouTubeOnlyQueryError(rawQuery);
         if (restrictionMessage) {
-          await interaction.reply({ content: restrictionMessage, ephemeral: true });
+          await interaction.reply({ content: restrictionMessage, flags: MessageFlags.Ephemeral });
           return;
         }
       }
@@ -184,7 +186,7 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('skip').setDescription('Skip the current track.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       const result = await handleSkipRequest(interaction, player, config);
       if (result.skipped) {
@@ -199,7 +201,7 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('pause').setDescription('Pause playback.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
       if (player.paused) {
         await interaction.editReply('Playback is already paused.');
@@ -213,7 +215,7 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('resume').setDescription('Resume playback.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
       if (!player.paused) {
         await interaction.editReply('Nothing is paused right now.');
@@ -230,7 +232,7 @@ const commands = [
       .setDescription('Stop playback and clear the queue.')
       .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       assertDJ(interaction, config);
       await player.stopPlaying(true);
@@ -245,7 +247,7 @@ const commands = [
       .setName('clearqueue')
       .setDescription('Clear upcoming tracks but keep the current song playing.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       assertDJ(interaction, config);
 
@@ -267,7 +269,7 @@ const commands = [
       .setDescription('Disconnect the bot from the voice channel.')
       .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction);
       await player.destroy('manual-leave', true);
       await interaction.client.musicUI.clear(interaction.guildId);
@@ -277,7 +279,7 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('queue').setDescription('Show the queue with pagination.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction);
       if (!player.queue.current) {
         await interaction.editReply('The queue is empty.');
@@ -299,7 +301,7 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('nowplaying').setDescription('Aktualny utwor.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction);
       const embed = buildNowPlayingEmbed(player, player.queue.current);
       await interaction.editReply({ embeds: [embed] });
@@ -316,7 +318,7 @@ const commands = [
         option.setName('end').setDescription('End position (inclusive)').setRequired(false),
       ),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       assertDJ(interaction, config);
 
@@ -342,7 +344,7 @@ const commands = [
         option.setName('to').setDescription('Destination position.').setRequired(true),
       ),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       assertDJ(interaction, config);
 
@@ -372,7 +374,7 @@ const commands = [
         option.setName('position').setDescription('Time mm:ss or hh:mm:ss.').setRequired(true),
       ),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
       if (!player.queue.current) {
         throw new CommandError('Nothing is playing.');
@@ -390,7 +392,7 @@ const commands = [
         option.setName('index').setDescription('Target position.').setRequired(true),
       ),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
       const index = interaction.options.getInteger('index', true);
 
@@ -407,7 +409,7 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('back').setDescription('Go back to the previous track.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
       const previous = await player.queue.shiftPrevious();
       if (!previous) {
@@ -423,7 +425,7 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('replay').setDescription('Replay from start.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
       if (!player.queue.current) {
         await interaction.editReply('No active track.');
@@ -437,7 +439,7 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('shuffle').setDescription('Shuffle the queue.'),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
       if (player.queue.tracks.length === 0) {
         await interaction.editReply('No tracks to shuffle.');
@@ -465,7 +467,7 @@ const commands = [
           ),
       ),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
       const mode = interaction.options.getString('mode', true);
       await player.setRepeatMode(mode);
@@ -481,7 +483,7 @@ const commands = [
         option.setName('value').setDescription('Volume in %').setRequired(true),
       ),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       assertDJ(interaction, config);
 
@@ -517,7 +519,7 @@ const commands = [
       .addSubcommand((sub) => sub.setName('clear').setDescription('Reset filters.'))
       .addSubcommand((sub) => sub.setName('list').setDescription('Show active filters.')),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       assertDJ(interaction, config);
       const sub = interaction.options.getSubcommand();
@@ -563,7 +565,7 @@ const commands = [
         option.setName('seconds').setDescription('Time in seconds').setRequired(true),
       ),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const seconds = Math.max(0, interaction.options.getInteger('seconds', true));
       const updated = setConfig(interaction.guildId, { crossfadeSeconds: seconds });
       await interaction.editReply(`Crossfade set to ${updated.crossfadeSeconds}s.`);
@@ -612,18 +614,34 @@ const commands = [
                 { name: 'Spotify', value: 'spsearch' },
               ),
           ),
-      ),
+      )
+      .addSubcommand((sub) => sub.setName('reset').setDescription('Restore default settings.')),
     async execute(interaction) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const sub = interaction.options.getSubcommand();
       if (sub === 'get') {
         const config = getConfig(interaction.guildId);
-        await interaction.editReply(`\`\`\`\n${formatConfig(config)}\n\`\`\``);
+        const embed = new EmbedBuilder()
+          .setTitle('Current configuration')
+          .setColor('#14b8a6')
+          .setDescription(`\`\`\`\n${formatConfig(config)}\n\`\`\``);
+        await interaction.editReply({ embeds: [embed] });
         return;
       }
 
       if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
         throw new CommandError('Manage Guild permission is required.');
+      }
+
+      if (sub === 'reset') {
+        deleteConfig(interaction.guildId);
+        const fresh = getConfig(interaction.guildId);
+        const embed = new EmbedBuilder()
+          .setTitle('Configuration reset')
+          .setColor('#f97316')
+          .setDescription(`\`\`\`\n${formatConfig(fresh)}\n\`\`\``);
+        await interaction.editReply({ embeds: [embed] });
+        return;
       }
 
       const updates = {};
@@ -647,7 +665,11 @@ const commands = [
       if (prefSource) updates.preferredSource = prefSource;
 
       const updated = setConfig(interaction.guildId, updates);
-      await interaction.editReply(`Saved settings:\n\`\`\`\n${formatConfig(updated)}\n\`\`\``);
+      const embed = new EmbedBuilder()
+        .setTitle('Configuration updated')
+        .setColor('#6366f1')
+        .setDescription(`\`\`\`\n${formatConfig(updated)}\n\`\`\``);
+      await interaction.editReply({ embeds: [embed] });
     },
   },
   {
@@ -719,6 +741,3 @@ const commands = [
 module.exports = {
   commands,
 };
-
-
-
