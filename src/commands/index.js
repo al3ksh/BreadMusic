@@ -2,7 +2,10 @@ const {
   SlashCommandBuilder,
   EmbedBuilder,
   PermissionFlagsBits,
+  AttachmentBuilder,
+  ChannelType,
 } = require('discord.js');
+const path = require('path');
 const { ensureVoice, ensurePlayer, CommandError } = require('../music/utils');
 const { buildTrackEmbed, buildNowPlayingEmbed } = require('../music/embeds');
 const { savePlayerState } = require('../state/queueStore');
@@ -28,6 +31,15 @@ const {
 const { applyPreferredSource, getYouTubeOnlyQueryError } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
 const { deleteInteractionReply } = require('../utils/interactions');
+
+const BREAD_IMAGE_PATH = path.resolve(__dirname, '..', 'assets', 'images', 'bread.png');
+const MONSTER_BREAD_IMAGE_PATH = path.resolve(
+  __dirname,
+  '..',
+  'assets',
+  'images',
+  'monsterbread.png',
+);
 
 const FILTER_PRESETS = {
   bassboost: async (manager) => manager.setEQPreset('BassboostMedium'),
@@ -619,6 +631,52 @@ const commands = [
 
       const updated = setConfig(interaction.guildId, updates);
       await interaction.editReply(`Saved settings:\n\`\`\`\n${formatConfig(updated)}\n\`\`\``);
+    },
+  },
+  {
+    data: new SlashCommandBuilder().setName('bread').setDescription('Send some fresh bread.'),
+    async execute(interaction) {
+      const breadAttachment = new AttachmentBuilder(BREAD_IMAGE_PATH).setName('bread.png');
+      const breadEmbed = new EmbedBuilder()
+        .setTitle('Fresh bread delivery')
+        .setDescription('Because bread makes everything better.')
+        .setImage('attachment://bread.png')
+        .setColor('#f59e0b');
+      await interaction.reply({ embeds: [breadEmbed], files: [breadAttachment] });
+
+      const sendableChannels = interaction.guild?.channels?.cache.filter((channel) => {
+        if (channel.type !== ChannelType.GuildText) return false;
+        const permissions = channel.permissionsFor(interaction.client.user);
+        return (
+          permissions?.has(PermissionFlagsBits.ViewChannel) &&
+          permissions?.has(PermissionFlagsBits.SendMessages)
+        );
+      });
+
+      if (!sendableChannels?.size) return;
+
+      const alternativeChannels = sendableChannels.filter(
+        (channel) => channel.id !== interaction.channelId,
+      );
+      const pool = alternativeChannels.size ? alternativeChannels : sendableChannels;
+      const poolArray = [...pool.values()];
+      const randomChannel = poolArray[Math.floor(Math.random() * poolArray.length)];
+      if (!randomChannel) return;
+
+      const monsterAttachment = new AttachmentBuilder(
+        MONSTER_BREAD_IMAGE_PATH,
+      ).setName('monsterbread.png');
+      const monsterEmbed = new EmbedBuilder()
+        .setTitle('Monster Bread is coming')
+        .setDescription('Who dares to take a slice?')
+        .setImage('attachment://monsterbread.png')
+        .setColor('#8b5cf6');
+
+      try {
+        await randomChannel.send({ embeds: [monsterEmbed], files: [monsterAttachment] });
+      } catch {
+        // Sending to a random channel is best-effort.
+      }
     },
   },
   {
