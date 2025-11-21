@@ -20,7 +20,7 @@ const { buildTrackEmbed } = require('./music/embeds');
 const { savePlayerState, hydratePlayer, resetAllQueues } = require('./state/queueStore');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer } = require('./music/idleTracker');
 const { resetVotes } = require('./music/voteManager');
-const { getConfig, listConfigs } = require('./state/guildConfig');
+const { getConfig, listConfigs, assertDJ } = require('./state/guildConfig');
 const { createSelection } = require('./state/searchCache');
 const {
   buildQueueEmbed,
@@ -266,10 +266,27 @@ async function handleQueueButton(interaction) {
 
   if (action === 'close') {
     try {
-      await interaction.message.delete();
+      await interaction.deferUpdate();
+      await interaction.deleteReply();
     } catch (error) {
-      await interaction.update({ components: [] }).catch(() => {});
+      await interaction.editReply({ content: '\u200b', embeds: [], components: [] }).catch(() => {});
     }
+    return;
+  }
+
+  if (action === 'clear') {
+    const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+    assertDJ(interaction, config);
+
+    player.queue.tracks.splice(0, player.queue.tracks.length);
+    await savePlayerState(player).catch(() => {});
+    await client.musicUI.refresh(player);
+
+    const pageData = buildQueueEmbed(player, 0);
+    await interaction.update({
+      embeds: [pageData.embed],
+      components: buildQueueComponents(guildId, 0, pageData.totalPages, ownerId ?? interaction.user.id),
+    });
     return;
   }
 
