@@ -12,22 +12,19 @@ function formatDuration(ms, options = {}) {
 
 function buildProgressBar(position, duration, size = 16) {
   if (!Number.isFinite(duration) || duration <= 0) {
-    return `[${'-'.repeat(size)}]`;
+    return '🔘' + '▬'.repeat(size);
   }
 
   const ratio = Math.max(0, Math.min(1, position / duration));
-  const progressIndex = Math.round(ratio * (size - 1));
-  let bar = '';
-  for (let i = 0; i < size; i += 1) {
-    if (i === progressIndex) {
-      bar += '#';
-    } else if (i < progressIndex) {
-      bar += '=';
-    } else {
-      bar += '-';
-    }
-  }
-  return `[${bar}]`;
+  const progressIndex = Math.round(ratio * size);
+  
+  const lineChar = '▬';
+  const knobChar = '🔘';
+
+  const before = lineChar.repeat(progressIndex);
+  const after = lineChar.repeat(Math.max(0, size - progressIndex));
+  
+  return `${before}${knobChar}${after}`;
 }
 
 function parseTimecode(input) {
