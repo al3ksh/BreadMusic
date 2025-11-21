@@ -58,10 +58,9 @@ function buildNowPlayingEmbed(player, track) {
   const progressBar = buildProgressBar(position, duration, 18);
 
   const embed = new EmbedBuilder()
-    .setTitle(`${LABELS.TITLE} Now Playing`)
-    .setURL(track.info.uri ?? null)
+    .setTitle('Now Playing')
     .setDescription(
-      `**${track.info.title ?? 'Unknown track'}**\n${progressBar}\n${formatDuration(position)} / ${formatDuration(
+      `[${track.info.author ?? 'Unknown'} - ${track.info.title ?? 'Unknown'}](${track.info.uri ?? ''})\n${progressBar}\n${formatDuration(position)} / ${formatDuration(
         duration,
       )}`,
     )
@@ -73,7 +72,7 @@ function buildNowPlayingEmbed(player, track) {
       { name: LABELS.LOOP, value: formatLoopMode(player?.repeatMode), inline: true },
       {
         name: LABELS.SOURCE,
-        value: track.info.uri ? `[Open track](${track.info.uri})` : 'None',
+        value: track.info.sourceName ?? 'Unknown',
         inline: true,
       },
       {
