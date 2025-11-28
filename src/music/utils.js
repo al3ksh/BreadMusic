@@ -50,6 +50,7 @@ async function ensurePlayer(interaction, options = {}) {
       voiceChannelId: userChannelId,
       textChannelId: interaction.channelId,
       selfDeaf: true,
+      volume: guildConfig.defaultVolume ?? 60,
     });
 
     await player.connect();
