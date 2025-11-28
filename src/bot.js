@@ -41,7 +41,14 @@ const {
 
 const HELP_BUTTON_PREFIX = 'help:';
 
+// Stałe konfiguracyjne
+const ACTIVITY_ROTATION_INTERVAL = 45_000;
+const NODE_RECONNECT_DELAY = 5_000;
+const AUTOCOMPLETE_TIMEOUT = 2_500;
+const MAX_AUTOCOMPLETE_RESULTS = 5;
+
 const config = loadConfig();
+let isShuttingDown = false;
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
@@ -63,25 +70,30 @@ let activityIntervalId;
 
 function startActivityRotation() {
   if (!activityRotation.length) return;
-  let index = 0;
+  // Losowy start dla większej różnorodności
+  let index = Math.floor(Math.random() * activityRotation.length);
+  
   const applyPresence = () => {
-    const current = activityRotation[index % activityRotation.length];
-    client.user.setPresence({
-      status: 'online',
-      activities: [
-        {
+    if (isShuttingDown) return;
+    try {
+      const current = activityRotation[index % activityRotation.length];
+      client.user.setPresence({
+        status: 'online',
+        activities: [{
           name: current.name,
           type: current.type,
           url: current.url,
-        },
-      ],
-    });
-    index += 1;
+        }],
+      });
+      index += 1;
+    } catch (error) {
+      console.error('Failed to update presence:', error.message);
+    }
   };
 
   applyPresence();
   clearInterval(activityIntervalId);
-  activityIntervalId = setInterval(applyPresence, 45_000);
+  activityIntervalId = setInterval(applyPresence, ACTIVITY_ROTATION_INTERVAL);
 }
 
 client.commands = new Collection();
@@ -127,11 +139,14 @@ client.once(Events.ClientReady, async (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Ignoruj interakcje podczas zamykania bota
+  if (isShuttingDown) return;
+
   if (interaction.isAutocomplete()) {
     try {
       await handleAutocomplete(interaction);
-    } catch (error) {
-      console.error('Autocomplete error:', error);
+    } catch {
+      // Autocomplete errors są normalne (timeout), nie logujemy
     }
     return;
   }
@@ -198,9 +213,12 @@ client.lavalink.on('trackEnd', async (player, track, payload) => {
     handleVoiceStateUpdate(player, client);
   }
 
-  console.log(
-    `[TrackEnd] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} reason=${payload.reason}`,
-  );
+  // Loguj tylko niestandardowe powody zakończenia
+  if (payload.reason !== 'finished') {
+    console.log(
+      `[TrackEnd] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} reason=${payload.reason}`,
+    );
+  }
 });
 
 client.lavalink.on('trackException', (player, track, payload) => {
@@ -220,13 +238,26 @@ client.lavalink.on('playerDestroy', async (player) => {
   await client.musicUI.clear(player.guildId);
 });
 
+// Śledzenie prób reconnect dla exponential backoff
+const nodeReconnectAttempts = new Map();
+
 client.lavalink.nodeManager.on('disconnect', (node, reason) => {
   console.warn(`Node ${node.id} disconnected:`, reason?.message ?? reason);
-  setTimeout(() => node.connect().catch(() => {}), 5_000);
+  
+  const attempts = nodeReconnectAttempts.get(node.id) ?? 0;
+  const delay = Math.min(NODE_RECONNECT_DELAY * Math.pow(2, attempts), 60_000);
+  
+  nodeReconnectAttempts.set(node.id, attempts + 1);
+  
+  setTimeout(() => {
+    if (isShuttingDown) return;
+    node.connect().catch(() => {});
+  }, delay);
 });
 
 client.lavalink.nodeManager.on('connect', (node) => {
   console.log(`Node ${node.id} connected.`);
+  nodeReconnectAttempts.set(node.id, 0);
 });
 
 client
@@ -238,8 +269,8 @@ client
 
 async function handleMusicButton(interaction) {
   const [, action, guildId] = interaction.customId.split(':');
-    if (!guildId || guildId !== interaction.guildId) {
-    await interaction.reply({ content: 'Invalid button.', flags: MessageFlags.Ephemeral });
+  if (!guildId || guildId !== interaction.guildId) {
+    await interaction.reply({ content: 'Invalid button.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
 
@@ -260,21 +291,21 @@ async function handleMusicButton(interaction) {
 async function handleQueueButton(interaction) {
   const [, action, guildId, pageString, ownerId] = interaction.customId.split(':');
   if (ownerId && ownerId !== interaction.user.id) {
-    await interaction.reply({ content: 'Only the author can use this pagination.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: 'Only the author can use this pagination.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
 
   if (action === 'close') {
     try {
-      await interaction.deferUpdate();
-      await interaction.deleteReply();
-    } catch (error) {
-      await interaction.editReply({ content: '\u200b', embeds: [], components: [] }).catch(() => {});
+      await interaction.message.delete();
+    } catch {
+      await interaction.update({ content: '\u200b', embeds: [], components: [] }).catch(() => {});
     }
     return;
   }
 
   if (action === 'clear') {
+    await interaction.deferUpdate();
     const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
     assertDJ(interaction, config);
 
@@ -283,7 +314,7 @@ async function handleQueueButton(interaction) {
     await client.musicUI.refresh(player);
 
     const pageData = buildQueueEmbed(player, 0);
-    await interaction.update({
+    await interaction.editReply({
       embeds: [pageData.embed],
       components: buildQueueComponents(guildId, 0, pageData.totalPages, ownerId ?? interaction.user.id),
     });
@@ -300,21 +331,23 @@ async function handleQueueButton(interaction) {
   await interaction.update({
     embeds: [pageData.embed],
     components: buildQueueComponents(guildId, nextPage, pageData.totalPages, ownerId ?? interaction.user.id),
-  });
+  }).catch(() => {});
 }
 
 async function handleBlackjackButton(interaction) {
   const [, action, userId] = interaction.customId.split(':');
   if (interaction.user.id !== userId) {
-    await interaction.reply({ content: 'Only the player can use these controls.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: 'Only the player can use these controls.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
 
   const game = getBlackjackGame(userId);
   if (!game) {
-    await interaction.reply({ content: 'This blackjack game has ended.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: 'This blackjack game has ended.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
+
+  await interaction.deferUpdate();
 
   let updatedGame;
   if (action === 'hit') {
@@ -326,7 +359,7 @@ async function handleBlackjackButton(interaction) {
   }
 
   if (!updatedGame) {
-    await interaction.reply({ content: 'This blackjack game has ended.', flags: MessageFlags.Ephemeral });
+    await interaction.followUp({ content: 'This blackjack game has ended.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
 
@@ -337,14 +370,14 @@ async function handleBlackjackButton(interaction) {
     endBlackjack(userId);
   }
 
-  await interaction.update({ embeds: [embed], components });
+  await interaction.editReply({ embeds: [embed], components }).catch(() => {});
 }
 
 async function handleHelpButton(interaction) {
   const [, action, userId, pageString] = interaction.customId.split(':');
 
   if (interaction.user.id !== userId) {
-    await interaction.reply({ content: 'This help menu is not for you.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: 'This help menu is not for you.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
 
@@ -356,13 +389,12 @@ async function handleHelpButton(interaction) {
   }
 
   // Bounds check (assuming 3 categories: Music, Misc, Fun)
-  if (pageIndex < 0) pageIndex = 0;
-  if (pageIndex > 2) pageIndex = 2;
+  pageIndex = Math.max(0, Math.min(2, pageIndex));
 
   const embed = buildHelpEmbed(pageIndex);
   const components = buildHelpComponents(pageIndex, userId);
 
-  await interaction.update({ embeds: [embed], components });
+  await interaction.update({ embeds: [embed], components }).catch(() => {});
 }
 
 async function togglePlayPause(interaction) {
@@ -431,19 +463,6 @@ async function playPrevious(interaction) {
   await client.musicUI.refresh(player);
 }
 
-async function replayTrack(interaction) {
-  await interaction.deferUpdate();
-  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
-  const current = player.queue.current;
-  if (!current) {
-    await interaction.followUp({ content: 'Nothing is playing.', flags: MessageFlags.Ephemeral }).catch(() => {});
-    return;
-  }
-  await player.play({ clientTrack: current, startTime: 0 });
-  await savePlayerState(player).catch(() => {});
-  await client.musicUI.refresh(player);
-}
-
 async function toggleLoop(interaction) {
   await interaction.deferUpdate();
   const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
@@ -490,6 +509,7 @@ async function handleAutocomplete(interaction) {
     return;
   }
 
+  // URL - od razu zwróć bez wyszukiwania
   if (/^https?:\/\//i.test(trimmed)) {
     await interaction
       .respond([{ name: truncateLabel(trimmed, 100), value: trimmed.slice(0, 100) }])
@@ -505,22 +525,28 @@ async function handleAutocomplete(interaction) {
     return;
   }
 
-  const config = getConfig(interaction.guildId);
+  const guildConfig = getConfig(interaction.guildId);
   const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform;
-  const query = applyPreferredSource(trimmed, config, defaultSource);
+  const query = applyPreferredSource(trimmed, guildConfig, defaultSource);
 
   let result;
   try {
-    result = await node.search({ query }, interaction.user);
-  } catch (error) {
-    console.error('Autocomplete search failed:', error);
+    // Timeout dla wyszukiwania - autocomplete musi być szybkie
+    result = await Promise.race([
+      node.search({ query }, interaction.user),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Search timeout')), AUTOCOMPLETE_TIMEOUT)
+      ),
+    ]);
+  } catch {
+    // Timeout lub błąd - zwróć raw query
     await interaction
-      .respond([{ name: `Search failed for "${truncateLabel(trimmed, 60)}"`, value: trimmed }])
+      .respond([{ name: truncateLabel(trimmed, 100), value: trimmed.slice(0, 100) }])
       .catch(() => {});
     return;
   }
 
-  const tracks = result?.tracks?.slice(0, 5) ?? [];
+  const tracks = result?.tracks?.slice(0, MAX_AUTOCOMPLETE_RESULTS) ?? [];
   if (!tracks.length) {
     await interaction
       .respond([{ name: `No matches for "${truncateLabel(trimmed, 60)}"`, value: trimmed }])
@@ -586,24 +612,33 @@ async function restoreTwentyFourSevenPlayers() {
 }
 
 async function handleInteractionError(interaction, error) {
-  const isUnknownInteraction =
-    error?.code === 10062 ||
-    error?.message === 'Unknown interaction' ||
-    error?.rawError?.message === 'Unknown interaction';
+  // Kody błędów Discord API które można zignorować
+  const ignoredCodes = [
+    10062, // Unknown Interaction
+    10008, // Unknown Message
+    40060, // Interaction already acknowledged
+  ];
 
-  if (isUnknownInteraction) {
-    console.warn('Ignoring Unknown Interaction (probably client timeout).');
+  const errorCode = error?.code ?? error?.rawError?.code;
+  if (ignoredCodes.includes(errorCode)) {
+    // Te błędy są normalne i nie wymagają logowania
     return;
   }
 
-  console.error('Command execution error:', error);
+  // Loguj tylko nieoczekiwane błędy
   const isCommandError = error instanceof CommandError;
+  if (!isCommandError) {
+    console.error('Command execution error:', error);
+  }
+
   const content = isCommandError
     ? error.message
     : 'Something went wrong. Please try again.';
   const ephemeral = isCommandError ? error.ephemeral : true;
 
-  if (interaction.isRepliable()) {
+  try {
+    if (!interaction.isRepliable()) return;
+
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply({ content });
     } else {
@@ -612,5 +647,63 @@ async function handleInteractionError(interaction, error) {
         flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
     }
+  } catch {
+    // Nie można odpowiedzieć - interakcja wygasła
   }
 }
+
+// Graceful shutdown - czyszczenie zasobów przy zamykaniu
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  
+  console.log(`\n[${signal}] Shutting down gracefully...`);
+
+  // Zatrzymaj rotację aktywności
+  clearInterval(activityIntervalId);
+
+  // Zapisz stan wszystkich playerów
+  const players = client.lavalink?.players?.values() ?? [];
+  for (const player of players) {
+    try {
+      await savePlayerState(player);
+      await player.destroy('Bot shutting down', false);
+    } catch {
+      // Ignoruj błędy podczas zamykania
+    }
+  }
+
+  // Wyczyść UI
+  for (const guildId of client.musicUI?.messages?.keys() ?? []) {
+    await client.musicUI.clear(guildId).catch(() => {});
+  }
+
+  // Rozłącz klienta Discord
+  try {
+    client.destroy();
+  } catch {
+    // Ignoruj
+  }
+
+  console.log('Shutdown complete.');
+  process.exit(0);
+}
+
+// Obsługa sygnałów zamknięcia
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Obsługa nieobsłużonych błędów (zapobieganie crashom)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Nie zamykaj procesu dla mniejszych błędów
+  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+    return;
+  }
+  // Dla poważnych błędów - graceful shutdown
+  gracefulShutdown('uncaughtException');
+});
