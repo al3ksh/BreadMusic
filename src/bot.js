@@ -18,7 +18,7 @@ const { MusicUI, BUTTON_PREFIX, BUTTONS } = require('./music/ui');
 const { handleSkipRequest } = require('./music/skipManager');
 const { buildTrackEmbed } = require('./music/embeds');
 const { savePlayerState, hydratePlayer, resetAllQueues } = require('./state/queueStore');
-const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer } = require('./music/idleTracker');
+const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
 const { resetVotes } = require('./music/voteManager');
 const { getConfig, listConfigs, assertDJ } = require('./state/guildConfig');
 const { createSelection } = require('./state/searchCache');
@@ -41,7 +41,6 @@ const {
 
 const HELP_BUTTON_PREFIX = 'help:';
 
-// Stałe konfiguracyjne
 const ACTIVITY_ROTATION_INTERVAL = 45_000;
 const NODE_RECONNECT_DELAY = 5_000;
 const AUTOCOMPLETE_TIMEOUT = 2_500;
@@ -70,7 +69,6 @@ let activityIntervalId;
 
 function startActivityRotation() {
   if (!activityRotation.length) return;
-  // Losowy start dla większej różnorodności
   let index = Math.floor(Math.random() * activityRotation.length);
   
   const applyPresence = () => {
@@ -139,15 +137,12 @@ client.once(Events.ClientReady, async (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  // Ignoruj interakcje podczas zamykania bota
   if (isShuttingDown) return;
 
   if (interaction.isAutocomplete()) {
     try {
       await handleAutocomplete(interaction);
-    } catch {
-      // Autocomplete errors są normalne (timeout), nie logujemy
-    }
+    } catch {}
     return;
   }
 
@@ -199,6 +194,7 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
 
 client.lavalink.on('trackStart', async (player, track) => {
   resetVotes(player.guildId);
+  clearIdleTimer(player.guildId);
   await savePlayerState(player).catch((error) =>
     console.error('Failed to save queue:', error),
   );
@@ -213,7 +209,6 @@ client.lavalink.on('trackEnd', async (player, track, payload) => {
     handleVoiceStateUpdate(player, client);
   }
 
-  // Loguj tylko niestandardowe powody zakończenia
   if (payload.reason !== 'finished') {
     console.log(
       `[TrackEnd] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} reason=${payload.reason}`,
@@ -238,7 +233,6 @@ client.lavalink.on('playerDestroy', async (player) => {
   await client.musicUI.clear(player.guildId);
 });
 
-// Śledzenie prób reconnect dla exponential backoff
 const nodeReconnectAttempts = new Map();
 
 client.lavalink.nodeManager.on('disconnect', (node, reason) => {
@@ -388,7 +382,6 @@ async function handleHelpButton(interaction) {
     pageIndex++;
   }
 
-  // Bounds check (assuming 3 categories: Music, Misc, Fun)
   pageIndex = Math.max(0, Math.min(2, pageIndex));
 
   const embed = buildHelpEmbed(pageIndex);
@@ -509,7 +502,6 @@ async function handleAutocomplete(interaction) {
     return;
   }
 
-  // URL - od razu zwróć bez wyszukiwania
   if (/^https?:\/\//i.test(trimmed)) {
     await interaction
       .respond([{ name: truncateLabel(trimmed, 100), value: trimmed.slice(0, 100) }])
@@ -531,7 +523,6 @@ async function handleAutocomplete(interaction) {
 
   let result;
   try {
-    // Timeout dla wyszukiwania - autocomplete musi być szybkie
     result = await Promise.race([
       node.search({ query }, interaction.user),
       new Promise((_, reject) => 
@@ -539,7 +530,6 @@ async function handleAutocomplete(interaction) {
       ),
     ]);
   } catch {
-    // Timeout lub błąd - zwróć raw query
     await interaction
       .respond([{ name: truncateLabel(trimmed, 100), value: trimmed.slice(0, 100) }])
       .catch(() => {});
@@ -612,20 +602,11 @@ async function restoreTwentyFourSevenPlayers() {
 }
 
 async function handleInteractionError(interaction, error) {
-  // Kody błędów Discord API które można zignorować
-  const ignoredCodes = [
-    10062, // Unknown Interaction
-    10008, // Unknown Message
-    40060, // Interaction already acknowledged
-  ];
+  const ignoredCodes = [10062, 10008, 40060];
 
   const errorCode = error?.code ?? error?.rawError?.code;
-  if (ignoredCodes.includes(errorCode)) {
-    // Te błędy są normalne i nie wymagają logowania
-    return;
-  }
+  if (ignoredCodes.includes(errorCode)) return;
 
-  // Loguj tylko nieoczekiwane błędy
   const isCommandError = error instanceof CommandError;
   if (!isCommandError) {
     console.error('Command execution error:', error);
@@ -647,63 +628,46 @@ async function handleInteractionError(interaction, error) {
         flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
     }
-  } catch {
-    // Nie można odpowiedzieć - interakcja wygasła
-  }
+  } catch {}
 }
 
-// Graceful shutdown - czyszczenie zasobów przy zamykaniu
 async function gracefulShutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
   
   console.log(`\n[${signal}] Shutting down gracefully...`);
 
-  // Zatrzymaj rotację aktywności
   clearInterval(activityIntervalId);
 
-  // Zapisz stan wszystkich playerów
   const players = client.lavalink?.players?.values() ?? [];
   for (const player of players) {
     try {
       await savePlayerState(player);
       await player.destroy('Bot shutting down', false);
-    } catch {
-      // Ignoruj błędy podczas zamykania
-    }
+    } catch {}
   }
 
-  // Wyczyść UI
   for (const guildId of client.musicUI?.messages?.keys() ?? []) {
     await client.musicUI.clear(guildId).catch(() => {});
   }
 
-  // Rozłącz klienta Discord
   try {
     client.destroy();
-  } catch {
-    // Ignoruj
-  }
+  } catch {}
 
   console.log('Shutdown complete.');
   process.exit(0);
 }
 
-// Obsługa sygnałów zamknięcia
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-// Obsługa nieobsłużonych błędów (zapobieganie crashom)
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  // Nie zamykaj procesu dla mniejszych błędów
-  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
-    return;
-  }
-  // Dla poważnych błędów - graceful shutdown
+  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') return;
   gracefulShutdown('uncaughtException');
 });

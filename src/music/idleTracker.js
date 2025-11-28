@@ -1,8 +1,36 @@
 const emptyChannelTimers = new Map();
+const idleTimers = new Map();
 
 const EMPTY_CHANNEL_TIMEOUT = 30 * 1000;
+const IDLE_TIMEOUT = 300 * 1000;
 
 function scheduleIdleLeave(player, client) {
+  if (!player) return;
+  const guildId = player.guildId;
+
+  if (player.queue.current || player.playing) {
+    clearIdleTimer(guildId);
+    return;
+  }
+
+  if (idleTimers.has(guildId)) return;
+
+  const timeout = setTimeout(async () => {
+    idleTimers.delete(guildId);
+    try {
+      const latestPlayer = client?.lavalink?.getPlayer(guildId) ?? player;
+      if (!latestPlayer || latestPlayer.destroyed) return;
+      if (latestPlayer.queue.current || latestPlayer.playing) return;
+      await latestPlayer.destroy('idle-timeout', true);
+    } catch (error) {
+      console.error('Idle leave failed:', error);
+    }
+  }, IDLE_TIMEOUT);
+
+  idleTimers.set(guildId, timeout);
+}
+
+function scheduleEmptyChannelLeave(player, client) {
   if (!player) return;
   const guildId = player.guildId;
 
@@ -19,9 +47,9 @@ function scheduleIdleLeave(player, client) {
       const latestPlayer = client?.lavalink?.getPlayer(guildId) ?? player;
       if (!latestPlayer || latestPlayer.destroyed) return;
       if (channelHasListeners(latestPlayer, client)) return;
-      await latestPlayer.destroy('idle-timeout', true);
+      await latestPlayer.destroy('empty-channel', true);
     } catch (error) {
-      console.error('Empty channel leave failed', error);
+      console.error('Empty channel leave failed:', error);
     }
   }, EMPTY_CHANNEL_TIMEOUT);
 
@@ -30,11 +58,13 @@ function scheduleIdleLeave(player, client) {
 
 function handleVoiceStateUpdate(player, client) {
   if (!player) return;
+
   if (channelHasListeners(player, client)) {
     clearEmptyChannelTimer(player.guildId);
     return;
   }
-  scheduleIdleLeave(player, client);
+
+  scheduleEmptyChannelLeave(player, client);
 }
 
 function channelHasListeners(player, client) {
@@ -62,8 +92,24 @@ function clearEmptyChannelTimer(guildId) {
   }
 }
 
+function clearIdleTimer(guildId) {
+  const timeout = idleTimers.get(guildId);
+  if (timeout) {
+    clearTimeout(timeout);
+    idleTimers.delete(guildId);
+  }
+}
+
+function clearAllTimers(guildId) {
+  clearEmptyChannelTimer(guildId);
+  clearIdleTimer(guildId);
+}
+
 module.exports = {
   scheduleIdleLeave,
+  scheduleEmptyChannelLeave,
   handleVoiceStateUpdate,
   clearEmptyChannelTimer,
+  clearIdleTimer,
+  clearAllTimers,
 };
