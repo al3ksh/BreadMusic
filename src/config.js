@@ -62,6 +62,8 @@ function loadConfig() {
     });
   }
 
+  const enabledSources = ['youtube', 'soundcloud', 'bandcamp', 'spotify'];
+
   return {
     token: DISCORD_TOKEN,
     clientId: DISCORD_CLIENT_ID,
@@ -69,6 +71,7 @@ function loadConfig() {
     lavalink: {
       nodes,
       defaultSource: DEFAULT_SOURCE || 'ytsearch',
+      enabledSources,
     },
     behavior: {
       idleTimeoutMs: Number(IDLE_TIMEOUT_MS ?? 300000),

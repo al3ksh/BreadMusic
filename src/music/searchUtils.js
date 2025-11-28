@@ -1,47 +1,55 @@
 const YOUTUBE_PREFIX = 'ytsearch';
+const SPOTIFY_PREFIX = 'spsearch';
+const SOUNDCLOUD_PREFIX = 'scsearch';
+
+const VALID_PREFIXES = [YOUTUBE_PREFIX, SPOTIFY_PREFIX, SOUNDCLOUD_PREFIX];
 
 function applyPreferredSource(query, guildConfig = {}, defaultSource = YOUTUBE_PREFIX) {
   const trimmed = query.trim();
   if (!trimmed) return trimmed;
 
-  if (/^https?:\/\//i.test(trimmed) || /^[a-z]+search:/i.test(trimmed)) {
-    return trimmed;
-  }
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^[a-z]+search:/i.test(trimmed)) return trimmed;
 
-  const prefix = resolveYouTubePrefix(guildConfig.preferredSource ?? defaultSource ?? YOUTUBE_PREFIX);
+  const prefix = resolveSearchPrefix(guildConfig.preferredSource ?? defaultSource ?? YOUTUBE_PREFIX);
   return `${prefix}:${trimmed}`;
 }
 
-function resolveYouTubePrefix(candidate) {
+function resolveSearchPrefix(candidate) {
   if (typeof candidate !== 'string') return YOUTUBE_PREFIX;
   const normalized = candidate.toLowerCase();
-  if (normalized === YOUTUBE_PREFIX) return YOUTUBE_PREFIX;
-  // Other providers are not supported right now, always fall back to YouTube search.
+  if (VALID_PREFIXES.includes(normalized)) return normalized;
+  if (normalized === 'spotify') return SPOTIFY_PREFIX;
+  if (normalized === 'soundcloud') return SOUNDCLOUD_PREFIX;
+  if (normalized === 'youtube') return YOUTUBE_PREFIX;
   return YOUTUBE_PREFIX;
 }
 
-function getYouTubeOnlyQueryError(rawQuery = '') {
-  const trimmed = rawQuery.trim();
-  if (!trimmed) {
-    return 'Please provide a song name or a YouTube link.';
+function isSpotifyUrl(url) {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === 'open.spotify.com' || hostname === 'spotify.com';
+  } catch {
+    return false;
   }
+}
 
-  if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const { hostname } = new URL(trimmed);
-      if (isYouTubeHost(hostname)) return null;
-      return 'Supported inputs: YouTube video links, YouTube playlists, or plain text YouTube searches.';
-    } catch {
-      return 'Please provide a valid YouTube link or just type what to search on YouTube.';
-    }
+function isSupportedUrl(url) {
+  try {
+    const { hostname } = new URL(url);
+    const normalized = hostname.toLowerCase();
+    return (
+      isYouTubeHost(normalized) ||
+      normalized === 'open.spotify.com' ||
+      normalized === 'spotify.com' ||
+      normalized === 'soundcloud.com' ||
+      normalized.endsWith('.soundcloud.com') ||
+      normalized === 'bandcamp.com' ||
+      normalized.endsWith('.bandcamp.com')
+    );
+  } catch {
+    return false;
   }
-
-  const explicitSearch = /^([a-z0-9]+search):/i.exec(trimmed);
-  if (explicitSearch && explicitSearch[1].toLowerCase() !== YOUTUBE_PREFIX) {
-    return 'Only YouTube search is supported right now. Use plain text or YouTube links.';
-  }
-
-  return null;
 }
 
 function isYouTubeHost(hostname = '') {
@@ -51,5 +59,10 @@ function isYouTubeHost(hostname = '') {
 
 module.exports = {
   applyPreferredSource,
-  getYouTubeOnlyQueryError,
+  isSpotifyUrl,
+  isSupportedUrl,
+  isYouTubeHost,
+  YOUTUBE_PREFIX,
+  SPOTIFY_PREFIX,
+  SOUNDCLOUD_PREFIX,
 };

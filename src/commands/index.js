@@ -33,7 +33,7 @@ const {
   buildEmbed: buildBlackjackEmbed,
   buildComponents: buildBlackjackComponents,
 } = require('../games/blackjack');
-const { applyPreferredSource, getYouTubeOnlyQueryError } = require('../music/searchUtils');
+const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
 const { deleteInteractionReply } = require('../utils/interactions');
 
@@ -197,14 +197,6 @@ const commands = [
         return;
       }
 
-      if (!resolvedTrack) {
-        const restrictionMessage = getYouTubeOnlyQueryError(rawQuery);
-        if (restrictionMessage) {
-          await interaction.reply({ content: restrictionMessage, flags: MessageFlags.Ephemeral });
-          return;
-        }
-      }
-
       await interaction.deferReply();
       const { player, voiceChannelId, config } = await ensureVoice(interaction, {
         requireSameChannel: true,
@@ -222,7 +214,8 @@ const commands = [
         const prefixedQuery = applyPreferredSource(rawQuery, config, defaultSource);
         const searchResult = await player.search(prefixedQuery, interaction.user);
         if (!searchResult || !searchResult.tracks.length) {
-          await interaction.editReply('No results found for that query.');
+          await interaction.deleteReply().catch(() => {});
+          await interaction.followUp({ content: 'No results found for that query.', flags: MessageFlags.Ephemeral });
           return;
         }
         isPlaylist = Boolean(searchResult.playlist);
