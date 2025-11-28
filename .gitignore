@@ -40,3 +40,4 @@ configs.json
 # Lavalink logs
 lavalink/logs/
 lavalink/*.log
+lavalink/application.yml

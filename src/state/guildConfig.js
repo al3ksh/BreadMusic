@@ -11,11 +11,6 @@ const DEFAULT_CONFIG = {
   persistentQueue: false,
   twentyFourSevenChannelId: null,
   defaultVolume: 100,
-  announceTracks: true,
-  crossfadeSeconds: 0,
-  normalizeAudio: false,
-  autoplay: false,
-  announceChannelId: null,
 };
 
 const OLD_DEFAULT_AFK_TIMEOUT = 5 * 60 * 1000;
@@ -82,11 +77,7 @@ function formatConfig(config) {
     `afkTimeout: ${(config.afkTimeout / 60000).toFixed(1)} min`,
     `persistentQueue: ${config.persistentQueue ? 'yes' : 'no'}`,
     `twentyFourSevenChannelId: ${config.twentyFourSevenChannelId ?? 'none'}`,
-    `announceChannelId: ${config.announceChannelId ?? 'none'}`,
     `defaultVolume: ${config.defaultVolume}`,
-    `crossfadeSeconds: ${config.crossfadeSeconds}`,
-    `normalizeAudio: ${config.normalizeAudio ? 'yes' : 'no'}`,
-    `autoplay: ${config.autoplay ? 'yes' : 'no'}`,
   ].join('\n');
 }
 

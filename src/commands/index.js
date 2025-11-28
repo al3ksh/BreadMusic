@@ -90,7 +90,6 @@ const HELP_CATEGORIES = [
       { name: '/skipto', value: 'Skip to a specific track.' },
       { name: '/back', value: 'Play previous track.' },
       { name: '/replay', value: 'Replay current track.' },
-      { name: '/crossfade', value: 'Set crossfade duration.' },
     ],
   },
   {
@@ -622,20 +621,6 @@ const commands = [
   },
   {
     data: new SlashCommandBuilder()
-      .setName('crossfade')
-      .setDescription('Set crossfade (seconds).')
-      .addIntegerOption((option) =>
-        option.setName('seconds').setDescription('Time in seconds').setRequired(true),
-      ),
-    async execute(interaction) {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const seconds = Math.max(0, interaction.options.getInteger('seconds', true));
-      const updated = setConfig(interaction.guildId, { crossfadeSeconds: seconds });
-      await interaction.editReply(`Crossfade set to ${updated.crossfadeSeconds}s.`);
-    },
-  },
-  {
-    data: new SlashCommandBuilder()
       .setName('config')
       .setDescription('Manage guild settings.')
       .addSubcommand((sub) =>
@@ -657,9 +642,6 @@ const commands = [
           )
           .addChannelOption((option) =>
             option.setName('voice_channel').setDescription('24/7 voice channel').setRequired(false),
-          )
-          .addChannelOption((option) =>
-            option.setName('announce_channel').setDescription('Announcement text channel.'),
           )
           .addIntegerOption((option) =>
             option.setName('afk_timeout').setDescription('AFK timeout in minutes.'),
@@ -718,8 +700,6 @@ const commands = [
       if (stay !== null) updates.stayInChannel = stay;
       const voiceChannel = interaction.options.getChannel('voice_channel');
       if (voiceChannel) updates.twentyFourSevenChannelId = voiceChannel.id;
-      const announceChannel = interaction.options.getChannel('announce_channel');
-      if (announceChannel) updates.announceChannelId = announceChannel.id;
       const afk = interaction.options.getInteger('afk_timeout');
       if (afk !== null) updates.afkTimeout = Math.max(1, afk) * 60 * 1000;
       const persistent = interaction.options.getBoolean('persistent_queue');

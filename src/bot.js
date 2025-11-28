@@ -198,10 +198,7 @@ client.lavalink.on('trackStart', async (player, track) => {
   await savePlayerState(player).catch((error) =>
     console.error('Failed to save queue:', error),
   );
-  const trackConfig = getConfig(player.guildId);
-  if (trackConfig.announceTracks !== false) {
-    await client.musicUI.sendNowPlaying(player, track);
-  }
+  await client.musicUI.sendNowPlaying(player, track);
 });
 
 client.lavalink.on('trackEnd', async (player, track, payload) => {
@@ -582,7 +579,6 @@ async function restoreTwentyFourSevenPlayers() {
     if (!guild) continue;
 
     const textChannelId =
-      guildConfig.announceChannelId ??
       guild.systemChannelId ??
       guild.publicUpdatesChannelId ??
       guild.channels.cache.find((channel) => channel.isTextBased() && channel.viewable)?.id;
