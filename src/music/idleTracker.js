@@ -1,3 +1,5 @@
+const { clearStoredQueue } = require('../state/queueStore');
+
 const emptyChannelTimers = new Map();
 const idleTimers = new Map();
 
@@ -47,6 +49,8 @@ function scheduleEmptyChannelLeave(player, client) {
       const latestPlayer = client?.lavalink?.getPlayer(guildId) ?? player;
       if (!latestPlayer || latestPlayer.destroyed) return;
       if (channelHasListeners(latestPlayer, client)) return;
+      latestPlayer.queue.tracks.splice(0, latestPlayer.queue.tracks.length);
+      clearStoredQueue(guildId);
       await latestPlayer.destroy('empty-channel', true);
     } catch (error) {
       console.error('Empty channel leave failed:', error);

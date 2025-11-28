@@ -290,11 +290,9 @@ async function handleQueueButton(interaction) {
   }
 
   if (action === 'close') {
-    try {
-      await interaction.message.delete();
-    } catch {
+    await interaction.message.delete().catch(async () => {
       await interaction.update({ content: '\u200b', embeds: [], components: [] }).catch(() => {});
-    }
+    });
     return;
   }
 
