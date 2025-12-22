@@ -11,6 +11,7 @@ const DEFAULT_CONFIG = {
   persistentQueue: false,
   twentyFourSevenChannelId: null,
   defaultVolume: 100,
+  autoplay: false,
 };
 
 const OLD_DEFAULT_AFK_TIMEOUT = 5 * 60 * 1000;

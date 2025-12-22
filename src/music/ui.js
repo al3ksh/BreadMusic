@@ -24,7 +24,8 @@ const EMOJI = {
 class MusicUI {
   constructor(client) {
     this.client = client;
-    this.messages = new Map(); // guildId -> { message, trackId }
+    this.messages = new Map(); 
+    this.locks = new Map(); // guildId -> Promise (mutex to prevent race conditions)
   }
 
   buildNowPlayingPayload(player, track) {
@@ -95,36 +96,50 @@ class MusicUI {
   async sendNowPlaying(player, track) {
     const payload = this.buildNowPlayingPayload(player, track);
     const trackId = track?.info?.identifier ?? null;
-    await this.upsertMessage(player, payload, trackId, true);
+    await this.withLock(player.guildId, () => this.upsertMessage(player, payload, trackId));
   }
 
   async refresh(player) {
     const payload = this.buildNowPlayingPayload(player, player.queue.current);
     const trackId = player.queue.current?.info?.identifier ?? null;
-    await this.upsertMessage(player, payload, trackId, false);
+    await this.withLock(player.guildId, () => this.upsertMessage(player, payload, trackId));
   }
 
-  async upsertMessage(player, payload, trackId, allowChannelChange) {
-    const record = this.messages.get(player.guildId);
+  async withLock(guildId, fn) {
+    const existing = this.locks.get(guildId);
+    if (existing) {
+      await existing.catch(() => {});
+    }
+    
+    const promise = fn();
+    this.locks.set(guildId, promise);
+    
+    try {
+      return await promise;
+    } finally {
+      if (this.locks.get(guildId) === promise) {
+        this.locks.delete(guildId);
+      }
+    }
+  }
+
+  async upsertMessage(player, payload, trackId) {
+    const guildId = player.guildId;
+    const record = this.messages.get(guildId);
     const existing = record?.message;
     const sameChannel = existing && existing.channelId === player.textChannelId;
 
     if (existing && sameChannel && record.trackId === trackId) {
       try {
         await existing.edit(payload);
-        record.trackId = trackId;
         return;
       } catch (error) {
         if (error.code !== 10008 && error.code !== 50083) {
           console.error('Failed to edit now-playing message:', error);
           return;
         }
-        this.messages.delete(player.guildId);
+        this.messages.delete(guildId);
       }
-    }
-
-    if (!allowChannelChange && existing && sameChannel) {
-      return;
     }
 
     const channelId = player.textChannelId;
@@ -133,20 +148,20 @@ class MusicUI {
     const channel = this.client.channels.cache.get(channelId);
     if (!channel || !channel.isTextBased()) return;
 
-    const previous = this.messages.get(player.guildId);
-    if (previous?.message) {
+    if (existing) {
       try {
-        await previous.message.delete();
+        await existing.delete();
       } catch (error) {
         if (error.code !== 10008) {
           console.error('Failed to delete previous now-playing message:', error);
         }
       }
+      this.messages.delete(guildId);
     }
 
     try {
       const message = await channel.send(payload);
-      this.messages.set(player.guildId, { message, trackId });
+      this.messages.set(guildId, { message, trackId });
     } catch (error) {
       console.error('Failed to send now-playing embed:', error);
     }

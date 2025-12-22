@@ -40,6 +40,7 @@ const {
   BUTTON_PREFIX: BLACKJACK_BUTTON_PREFIX,
 } = require('./games/blackjack');
 const { hasBalance } = require('./games/economy');
+const { handleAutoplay, clearAutoplayState, addToRecentTracks } = require('./music/autoplay');
 
 const HELP_BUTTON_PREFIX = 'help:';
 
@@ -197,6 +198,7 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
 client.lavalink.on('trackStart', async (player, track) => {
   resetVotes(player.guildId);
   clearIdleTimer(player.guildId);
+  addToRecentTracks(player.guildId, track);
   await savePlayerState(player).catch((error) =>
     console.error('Failed to save queue:', error),
   );
@@ -205,17 +207,6 @@ client.lavalink.on('trackStart', async (player, track) => {
 
 client.lavalink.on('trackEnd', async (player, track, payload) => {
   await savePlayerState(player).catch(() => {});
-  await client.musicUI.refresh(player);
-  if (!player.queue.current && player.queue.tracks.length === 0) {
-    scheduleIdleLeave(player, client);
-    handleVoiceStateUpdate(player, client);
-  }
-
-  if (payload.reason !== 'finished') {
-    console.log(
-      `[TrackEnd] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} reason=${payload.reason}`,
-    );
-  }
 });
 
 client.lavalink.on('trackException', (player, track, payload) => {
@@ -230,8 +221,20 @@ client.lavalink.on('trackStuck', (player, track, payload) => {
   );
 });
 
+client.lavalink.on('queueEnd', async (player, track) => {
+  await savePlayerState(player).catch(() => {});
+  
+  const autoplayTriggered = await handleAutoplay(player, track, client);
+  if (!autoplayTriggered) {
+    await client.musicUI.refresh(player);
+    scheduleIdleLeave(player, client);
+    handleVoiceStateUpdate(player, client);
+  }
+});
+
 client.lavalink.on('playerDestroy', async (player) => {
   clearEmptyChannelTimer(player.guildId);
+  clearAutoplayState(player.guildId);
   await client.musicUI.clear(player.guildId);
 });
 
@@ -247,8 +250,8 @@ client.lavalink.nodeManager.on('disconnect', (node, reason) => {
   
   setTimeout(() => {
     if (isShuttingDown) return;
-    if (node && typeof node.connect === 'function') {
-      node.connect().catch(() => {});
+    if (node?.connected === false && typeof node?.connect === 'function') {
+      node.connect().catch((err) => console.warn(`Failed to reconnect node ${node.id}:`, err.message));
     }
   }, delay);
 });
@@ -426,10 +429,18 @@ async function skipTrack(interaction) {
     }
     return;
   }
-  const result = await handleSkipRequest(interaction, player, config);
+  const result = await handleSkipRequest(interaction, player, config, client);
   if (result.skipped) {
+    if (result.needsAutoplay && result.lastTrack) {
+      const autoplayResult = await handleAutoplay(player, result.lastTrack, client);
+      if (!autoplayResult) {
+        await interaction.followUp({ 
+          content: 'Skipped the track. Autoplay couldn\'t find similar tracks.', 
+          flags: MessageFlags.Ephemeral 
+        }).catch(() => {});
+      }
+    }
     await savePlayerState(player).catch(() => {});
-    await client.musicUI.refresh(player);
   } else {
     await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral }).catch(() => {});
   }

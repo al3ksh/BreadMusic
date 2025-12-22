@@ -62,6 +62,7 @@ const {
 const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
 const { deleteInteractionReply } = require('../utils/interactions');
+const { isAutoplayEnabled, toggleAutoplay } = require('../music/autoplay');
 
 const BREAD_IMAGE_PATH = path.resolve(__dirname, '..', 'assets', 'images', 'bread.png');
 const MONSTER_BREAD_IMAGE_PATH = path.resolve(
@@ -116,6 +117,7 @@ const HELP_CATEGORIES = [
       { name: '/skipto', value: 'Skip to a specific track.' },
       { name: '/back', value: 'Play previous track.' },
       { name: '/replay', value: 'Replay current track.' },
+      { name: '/autoplay', value: 'Toggle autoplay mode.' },
     ],
   },
   {
@@ -263,7 +265,14 @@ const commands = [
         tracksToAdd = isPlaylist ? searchResult.tracks : [searchResult.tracks[0]];
       }
 
-      await player.queue.add(isPlaylist ? tracksToAdd : tracksToAdd[0]);
+      const autoplayIndex = player.queue.tracks.findIndex(t => t.isAutoplay);
+      if (autoplayIndex !== -1) {
+        const tracksArray = isPlaylist ? tracksToAdd : [tracksToAdd[0]];
+        player.queue.tracks.splice(autoplayIndex, 0, ...tracksArray);
+      } else {
+        await player.queue.add(isPlaylist ? tracksToAdd : tracksToAdd[0]);
+      }
+      
       if (!player.playing && !player.paused) {
         await player.play();
       }
@@ -291,10 +300,13 @@ const commands = [
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
-      const result = await handleSkipRequest(interaction, player, config);
+      const result = await handleSkipRequest(interaction, player, config, interaction.client);
       if (result.skipped) {
+        if (result.needsAutoplay && result.lastTrack) {
+          const { handleAutoplay } = require('../music/autoplay');
+          await handleAutoplay(player, result.lastTrack, interaction.client);
+        }
         await queuePersist(player);
-        await interaction.client.musicUI.refresh(player);
         await deleteInteractionReply(interaction);
         return;
       }
@@ -552,6 +564,26 @@ const commands = [
       await queuePersist(player);
       await interaction.client.musicUI.refresh(player);
       await deleteInteractionReply(interaction);
+    },
+  },
+  {
+    data: new SlashCommandBuilder().setName('autoplay').setDescription('Toggle autoplay - automatically plays similar tracks.'),
+    async execute(interaction) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await ensurePlayer(interaction, { requireSameChannel: true });
+      
+      const enabled = toggleAutoplay(interaction.guildId);
+      
+      const embed = new EmbedBuilder()
+        .setTitle(enabled ? 'Autoplay Enabled' : 'Autoplay Disabled')
+        .setDescription(
+          enabled
+            ? 'When the queue ends, I\'ll automatically find and play similar tracks based on the last played song.'
+            : 'Autoplay has been turned off. Playback will stop when the queue is empty.'
+        )
+        .setColor(enabled ? '#22c55e' : '#ef4444');
+      
+      await interaction.editReply({ embeds: [embed] });
     },
   },
   {
