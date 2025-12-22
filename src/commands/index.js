@@ -32,7 +32,33 @@ const {
   endGame: endBlackjack,
   buildEmbed: buildBlackjackEmbed,
   buildComponents: buildBlackjackComponents,
+  getGame: getBlackjackGame,
 } = require('../games/blackjack');
+const {
+  getBalance,
+  addBalance,
+  claimHourly,
+  getLeaderboard,
+  hasBalance,
+  HOURLY_COOLDOWN,
+} = require('../games/economy');
+const {
+  playSlots,
+  playRoulette,
+  playCoinflip,
+  buildSlotsEmbed,
+  buildRouletteEmbed,
+  buildCoinflipEmbed,
+} = require('../games/gambling');
+const {
+  playRPS,
+  magic8Ball,
+  rollDice,
+  buildRPSEmbed,
+  build8BallEmbed,
+  buildDiceEmbed,
+  RPS_CHOICES,
+} = require('../games/fun');
 const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
 const { deleteInteractionReply } = require('../utils/interactions');
@@ -106,7 +132,22 @@ const HELP_CATEGORIES = [
     description: 'Games and memes.',
     commands: [
       { name: '/bread', value: 'Get some bread.' },
-      { name: '/blackjack', value: 'Play blackjack.' },
+      { name: '/blackjack', value: 'Play blackjack (bet optional).' },
+      { name: '/slots', value: 'Spin the slot machine.' },
+      { name: '/roulette', value: 'Spin the roulette wheel.' },
+      { name: '/coinflip', value: 'Flip a coin.' },
+      { name: '/rps', value: 'Rock, paper, scissors.' },
+      { name: '/8ball', value: 'Ask the magic 8-ball.' },
+      { name: '/roll', value: 'Roll dice.' },
+    ],
+  },
+  {
+    name: 'Economy',
+    description: 'Currency and leaderboards.',
+    commands: [
+      { name: '/hourly', value: 'Claim hourly reward.' },
+      { name: '/balance', value: 'Check your balance.' },
+      { name: '/leaderboard', value: 'See top earners.' },
     ],
   },
 ];
@@ -465,7 +506,7 @@ const commands = [
       await player.queue.splice(0, index - 1);
       await player.skip();
       await queuePersist(player);
-      await interaction.editReply(`Skoczono do pozycji ${index}.`);
+      await interaction.editReply(`Skipped to position ${index}.`);
     },
   },
   {
@@ -770,13 +811,322 @@ const commands = [
     },
   },
   {
-    data: new SlashCommandBuilder().setName('blackjack').setDescription('Play blackjack versus the dealer.'),
+    data: new SlashCommandBuilder()
+      .setName('blackjack')
+      .setDescription('Play blackjack versus the dealer.')
+      .addIntegerOption((option) =>
+        option.setName('bet').setDescription('Amount to bet (optional)').setMinValue(1),
+      ),
     async execute(interaction) {
-      endBlackjack(interaction.user.id);
-      const game = startBlackjack(interaction.user.id);
+      const bet = interaction.options.getInteger('bet') || 0;
+
+      if (bet > 0 && !hasBalance(interaction.user.id, bet)) {
+        await interaction.reply({ content: `You don't have enough 🍞! Your balance: ${getBalance(interaction.user.id)} 🍞`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      if (getBlackjackGame(interaction.user.id)) {
+        await interaction.reply({ content: 'You already have an active game! Finish it first.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const game = startBlackjack(interaction.user.id, bet);
+      if (game.error) {
+        await interaction.reply({ content: game.error, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
       const embed = buildBlackjackEmbed(interaction.user, game);
-      const components = buildBlackjackComponents(interaction.user.id, false);
+      const canDouble = game.player.length === 2 && !game.finished && bet > 0 && hasBalance(interaction.user.id, bet);
+      const components = buildBlackjackComponents(interaction.user.id, game.finished, canDouble);
       await interaction.reply({ embeds: [embed], components });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('hourly')
+      .setDescription('Claim your hourly reward.'),
+    async execute(interaction) {
+      const result = claimHourly(interaction.user.id);
+
+      if (!result.success) {
+        const minutes = Math.floor(result.remaining / 60000);
+        const seconds = Math.floor((result.remaining % 60000) / 1000);
+        await interaction.reply({
+          content: `⏰ You need to wait **${minutes}m ${seconds}s** for your next reward.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('💰 Hourly Reward')
+        .setColor('#22c55e')
+        .setDescription(`You received **${result.reward}** 🍞!`)
+        .addFields({ name: 'New balance', value: `${result.newBalance} 🍞` });
+
+      await interaction.reply({ embeds: [embed] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('balance')
+      .setDescription('Check your balance.')
+      .addUserOption((option) =>
+        option.setName('user').setDescription('User to check (optional)'),
+      ),
+    async execute(interaction) {
+      const targetUser = interaction.options.getUser('user') || interaction.user;
+      const balance = getBalance(targetUser.id);
+
+      const embed = new EmbedBuilder()
+        .setTitle(`💰 Balance - ${targetUser.username}`)
+        .setColor('#6366f1')
+        .setDescription(`**${balance}** 🍞`)
+        .setThumbnail(targetUser.displayAvatarURL());
+
+      await interaction.reply({ embeds: [embed] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('leaderboard')
+      .setDescription('See top earners on this server.'),
+    async execute(interaction) {
+      await interaction.deferReply();
+      
+      try {
+        let memberIds;
+        try {
+          const guildMembers = await interaction.guild.members.fetch();
+          memberIds = new Set(guildMembers.keys());
+        } catch {
+          memberIds = new Set(interaction.guild.members.cache.keys());
+        }
+        
+        const allUsers = getLeaderboard(1000);
+        const guildTop = allUsers
+          .filter((entry) => memberIds.has(entry.userId))
+          .slice(0, 10);
+
+        if (guildTop.length === 0) {
+          await interaction.editReply('Nobody on this server has any money yet!');
+          return;
+        }
+
+        const medals = ['👑', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+        
+        const lines = await Promise.all(
+          guildTop.map(async (entry, i) => {
+            try {
+              const user = await interaction.client.users.fetch(entry.userId);
+              const medal = medals[i] || `${i + 1}.`;
+              const balanceFormatted = entry.balance.toLocaleString();
+              const isRequester = entry.userId === interaction.user.id;
+              const name = isRequester ? `**${user.username}** ⬅️` : `**${user.username}**`;
+              return `${medal} │ ${name} │ \`${balanceFormatted}\` 🍞`;
+            } catch {
+              const balanceFormatted = entry.balance.toLocaleString();
+              return `${medals[i] || `${i + 1}.`} │ Unknown │ \`${balanceFormatted}\` 🍞`;
+            }
+          }),
+        );
+
+        const allGuildUsers = allUsers.filter((entry) => memberIds.has(entry.userId));
+        const requesterIndex = allGuildUsers.findIndex((e) => e.userId === interaction.user.id);
+        const requesterBalance = getBalance(interaction.user.id);
+        
+        let yourPositionText;
+        if (requesterIndex === -1 || requesterBalance === 0) {
+          yourPositionText = `You're not ranked yet! Use \`/hourly\` to start.`;
+        } else if (requesterIndex < 10) {
+          yourPositionText = `You're in the **top 10**! 🎉`;
+        } else {
+          yourPositionText = `#${requesterIndex + 1} │ \`${requesterBalance.toLocaleString()}\` 🍞`;
+        }
+
+        // Calculate total bread on server
+        const totalBread = guildTop.reduce((sum, e) => sum + e.balance, 0).toLocaleString();
+
+        const embed = new EmbedBuilder()
+          .setTitle('🏆 Bread Leaderboard')
+          .setColor('#fbbf24')
+          .setDescription(`\`\`\`\n${interaction.guild.name}\n\`\`\`\n${lines.join('\n')}`)
+          .addFields(
+            { name: '📍 Your Position', value: yourPositionText, inline: true },
+            { name: '💰 Total Server Bread', value: `\`${totalBread}\` 🍞`, inline: true },
+          )
+          .setThumbnail(interaction.guild.iconURL({ dynamic: true }))
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+      } catch (error) {
+        console.error('Leaderboard error:', error);
+        await interaction.editReply('Failed to load leaderboard.').catch(() => {});
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('slots')
+      .setDescription('Spin the slot machine.')
+      .addIntegerOption((option) =>
+        option.setName('bet').setDescription('Amount to bet').setRequired(true).setMinValue(1),
+      ),
+    async execute(interaction) {
+      const bet = interaction.options.getInteger('bet', true);
+      const result = playSlots(interaction.user.id, bet);
+
+      if (!result.success) {
+        await interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const embed = buildSlotsEmbed(result.result, bet, result.winnings, result.isWin, result.newBalance);
+      try {
+        await interaction.reply({ embeds: [embed] });
+      } catch {
+        addBalance(interaction.user.id, bet - result.winnings);
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('roulette')
+      .setDescription('Spin the roulette wheel.')
+      .addIntegerOption((option) =>
+        option.setName('bet').setDescription('Amount to bet').setRequired(true).setMinValue(1),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('type')
+          .setDescription('Type of bet')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Red (2x)', value: 'red' },
+            { name: 'Black (2x)', value: 'black' },
+            { name: 'Green/0 (14x)', value: 'green' },
+            { name: 'Odd (2x)', value: 'odd' },
+            { name: 'Even (2x)', value: 'even' },
+          ),
+      ),
+    async execute(interaction) {
+      const bet = interaction.options.getInteger('bet', true);
+      const betType = interaction.options.getString('type', true);
+
+      const result = playRoulette(interaction.user.id, bet, betType);
+
+      if (!result.success) {
+        await interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const embed = buildRouletteEmbed(
+        result.spinResult,
+        result.color,
+        betType,
+        bet,
+        result.isWin,
+        result.winnings,
+        result.newBalance,
+      );
+      try {
+        await interaction.reply({ embeds: [embed] });
+      } catch {
+        addBalance(interaction.user.id, bet - result.winnings);
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('coinflip')
+      .setDescription('Flip a coin.')
+      .addIntegerOption((option) =>
+        option.setName('bet').setDescription('Amount to bet').setRequired(true).setMinValue(1),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('choice')
+          .setDescription('Heads or tails')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Heads', value: 'heads' },
+            { name: 'Tails', value: 'tails' },
+          ),
+      ),
+    async execute(interaction) {
+      const bet = interaction.options.getInteger('bet', true);
+      const choice = interaction.options.getString('choice', true);
+
+      const result = playCoinflip(interaction.user.id, bet, choice);
+
+      if (!result.success) {
+        await interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const embed = buildCoinflipEmbed(result.result, choice, bet, result.isWin, result.winnings, result.newBalance);
+      try {
+        await interaction.reply({ embeds: [embed] });
+      } catch {
+        addBalance(interaction.user.id, bet - result.winnings);
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('rps')
+      .setDescription('Play rock, paper, scissors.')
+      .addStringOption((option) =>
+        option
+          .setName('choice')
+          .setDescription('Your choice')
+          .setRequired(true)
+          .addChoices(
+            { name: '🪨 Rock', value: 'rock' },
+            { name: '📄 Paper', value: 'paper' },
+            { name: '✂️ Scissors', value: 'scissors' },
+          ),
+      ),
+    async execute(interaction) {
+      const choice = interaction.options.getString('choice', true);
+      const result = playRPS(choice);
+      const embed = buildRPSEmbed(result.playerChoice, result.botChoice, result.result, interaction.user.username);
+      await interaction.reply({ embeds: [embed] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('8ball')
+      .setDescription('Ask the magic 8-ball a question.')
+      .addStringOption((option) =>
+        option.setName('question').setDescription('Your question').setRequired(true),
+      ),
+    async execute(interaction) {
+      const question = interaction.options.getString('question', true);
+      const answer = magic8Ball();
+      const embed = build8BallEmbed(question, answer);
+      await interaction.reply({ embeds: [embed] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('roll')
+      .setDescription('Roll dice.')
+      .addStringOption((option) =>
+        option.setName('dice').setDescription('Dice notation (e.g., 2d20, default: 1d6)'),
+      ),
+    async execute(interaction) {
+      const notation = interaction.options.getString('dice') || '1d6';
+      const result = rollDice(notation);
+
+      if (!result) {
+        await interaction.reply({ content: 'Invalid format. Use e.g. `1d6`, `2d20`.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const embed = buildDiceEmbed(result);
+      await interaction.reply({ embeds: [embed] });
     },
   },
 ];
@@ -785,4 +1135,5 @@ module.exports = {
   commands,
   buildHelpEmbed,
   buildHelpComponents,
+  HELP_CATEGORIES,
 };

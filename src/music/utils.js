@@ -63,7 +63,7 @@ async function ensurePlayer(interaction, options = {}) {
     userChannelId &&
     player.voiceChannelId !== userChannelId
   ) {
-    throw new CommandError('Musisz byc na tym samym kanale glosowym co bot.');
+    throw new CommandError('You must be in the same voice channel as the bot.');
   } else if (interaction.channelId && player.textChannelId !== interaction.channelId) {
     player.textChannelId = interaction.channelId;
   }

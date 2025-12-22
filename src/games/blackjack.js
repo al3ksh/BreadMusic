@@ -4,12 +4,32 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require('discord.js');
+const { getBalance, addBalance, removeBalance, hasBalance } = require('./economy');
 
 const suits = ['♠', '♥', '♦', '♣'];
 const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 const BUTTON_PREFIX = 'blackjack';
+const GAME_TIMEOUT = 10 * 60 * 1000; 
 
-const games = new Map(); // userId -> game state
+const games = new Map();
+const gameTimers = new Map();
+
+function scheduleGameCleanup(userId) {
+  clearGameTimer(userId);
+  const timer = setTimeout(() => {
+    games.delete(userId);
+    gameTimers.delete(userId);
+  }, GAME_TIMEOUT);
+  gameTimers.set(userId, timer);
+}
+
+function clearGameTimer(userId) {
+  const timer = gameTimers.get(userId);
+  if (timer) {
+    clearTimeout(timer);
+    gameTimers.delete(userId);
+  }
+}
 
 function createDeck() {
   const deck = [];
@@ -56,7 +76,14 @@ function formatHand(cards, revealAll) {
   return cards.map(formatCard).join(' ');
 }
 
-function startGame(userId) {
+function startGame(userId, bet = 0) {
+  if (bet > 0) {
+    if (!hasBalance(userId, bet)) {
+      return { error: "You don't have enough 🍞!" };
+    }
+    removeBalance(userId, bet);
+  }
+
   const deck = createDeck();
   const game = {
     deck,
@@ -64,8 +91,20 @@ function startGame(userId) {
     dealer: [deck.pop(), deck.pop()],
     finished: false,
     result: null,
+    bet,
+    winnings: 0,
   };
+
+  const playerValue = handValue(game.player);
+  if (playerValue === 21) {
+    game.finished = true;
+    game.result = '🎉 Blackjack! You win 2.5x!';
+    game.winnings = Math.floor(bet * 2.5);
+    addBalance(userId, game.winnings);
+  }
+
   games.set(userId, game);
+  scheduleGameCleanup(userId);
   return game;
 }
 
@@ -92,22 +131,34 @@ function stand(userId, options = {}) {
   }
   const playerTotal = handValue(game.player);
   const dealerTotal = handValue(game.dealer);
+
   if (playerTotal > 21) {
-    game.result = 'Player busts. Dealer wins!';
+    game.result = 'You busted - over 21!';
+    game.winnings = 0;
   } else if (dealerTotal > 21) {
-    game.result = 'Dealer busts. You win!';
+    game.result = '🎉 You win! Dealer busted!';
+    game.winnings = game.bet * 2;
   } else if (playerTotal > dealerTotal) {
-    game.result = 'You win!';
+    game.result = '🎉 You win!';
+    game.winnings = game.bet * 2;
   } else if (playerTotal < dealerTotal) {
     game.result = 'Dealer wins!';
+    game.winnings = 0;
   } else {
-    game.result = 'Push.';
+    game.result = 'Push - bet returned!';
+    game.winnings = game.bet;
   }
+
+  if (game.winnings > 0) {
+    addBalance(userId, game.winnings);
+  }
+
   game.finished = true;
   return game;
 }
 
 function endGame(userId) {
+  clearGameTimer(userId);
   games.delete(userId);
 }
 
@@ -130,23 +181,35 @@ function buildEmbedData(game) {
 function buildEmbed(user, game) {
   const data = buildEmbedData(game);
   const embed = new EmbedBuilder()
-    .setTitle('Blackjack')
+    .setTitle('🃏 Blackjack')
     .addFields(
-      { name: 'Dealer', value: `${data.dealerHand}\nTotal: ${data.dealerValue}`, inline: false },
+      { name: 'Dealer', value: `${data.dealerHand}\nValue: ${data.dealerValue}`, inline: false },
       {
-        name: `${user.username}'s hand`,
-        value: `${data.playerHand}\nTotal: ${data.playerValue}`,
+        name: `${user.username}`,
+        value: `${data.playerHand}\nValue: ${data.playerValue}`,
         inline: false,
       },
     )
-    .setColor(game.finished ? '#22c55e' : '#fbbf24')
-    .setFooter({ text: data.finished ? data.result ?? 'Game over.' : 'Hit or Stand?' })
-    .setTimestamp();
+    .setColor(game.finished ? (game.winnings > 0 ? '#22c55e' : '#ef4444') : '#fbbf24');
+
+  if (game.bet > 0) {
+    embed.addFields({ name: 'Bet', value: `${game.bet} 🍞`, inline: true });
+    if (game.finished) {
+      const balanceNow = getBalance(user.id);
+      embed.addFields(
+        { name: game.winnings > 0 ? 'Won' : 'Lost', value: `${game.winnings > 0 ? '+' + game.winnings : '-' + game.bet} 🍞`, inline: true },
+        { name: 'Balance', value: `${balanceNow} 🍞`, inline: true },
+      );
+    }
+  }
+
+  embed.setFooter({ text: data.finished ? data.result ?? 'Game over.' : 'Hit, Stand or Double?' });
+  embed.setTimestamp();
 
   return embed;
 }
 
-function buildComponents(userId, finished = false) {
+function buildComponents(userId, finished = false, canDouble = false) {
   if (finished) return [];
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -158,7 +221,33 @@ function buildComponents(userId, finished = false) {
       .setLabel('Stand')
       .setStyle(ButtonStyle.Secondary),
   );
+
+  if (canDouble) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${BUTTON_PREFIX}:double:${userId}`)
+        .setLabel('Double')
+        .setStyle(ButtonStyle.Success),
+    );
+  }
+
   return [row];
+}
+
+function doubleDown(userId) {
+  const game = getGame(userId);
+  if (!game || game.finished) return null;
+  if (game.player.length !== 2) return null;
+
+  if (!hasBalance(userId, game.bet)) {
+    return { error: "You don't have enough 🍞 to double!" };
+  }
+
+  removeBalance(userId, game.bet);
+  game.bet *= 2;
+  game.player.push(game.deck.pop());
+
+  return stand(userId, { autoStand: true });
 }
 
 module.exports = {
@@ -166,6 +255,7 @@ module.exports = {
   getGame,
   hit,
   stand,
+  doubleDown,
   endGame,
   buildEmbed,
   buildComponents,

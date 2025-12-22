@@ -2,6 +2,15 @@ const crypto = require('crypto');
 
 const cache = new Map();
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of cache) {
+    if (now > entry.expiresAt) {
+      cache.delete(id);
+    }
+  }
+}, 120_000);
+
 function createSelection(tracks, userId, guildId, ttl = 60_000) {
   const id = crypto.randomBytes(6).toString('hex');
   cache.set(id, {

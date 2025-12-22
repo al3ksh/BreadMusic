@@ -33,11 +33,13 @@ const {
   getGame: getBlackjackGame,
   hit: hitBlackjack,
   stand: standBlackjack,
+  doubleDown: doubleBlackjack,
   endGame: endBlackjack,
   buildEmbed: buildBlackjackEmbed,
   buildComponents: buildBlackjackComponents,
   BUTTON_PREFIX: BLACKJACK_BUTTON_PREFIX,
 } = require('./games/blackjack');
+const { hasBalance } = require('./games/economy');
 
 const HELP_BUTTON_PREFIX = 'help:';
 
@@ -50,7 +52,7 @@ const config = loadConfig();
 let isShuttingDown = false;
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMembers],
 });
 
 const activityRotation = [
@@ -245,13 +247,19 @@ client.lavalink.nodeManager.on('disconnect', (node, reason) => {
   
   setTimeout(() => {
     if (isShuttingDown) return;
-    node.connect().catch(() => {});
+    if (node && typeof node.connect === 'function') {
+      node.connect().catch(() => {});
+    }
   }, delay);
 });
 
 client.lavalink.nodeManager.on('connect', (node) => {
   console.log(`Node ${node.id} connected.`);
   nodeReconnectAttempts.set(node.id, 0);
+});
+
+client.lavalink.nodeManager.on('error', (node, error) => {
+  console.error(`Node ${node.id} error:`, error?.message ?? error);
 });
 
 client
@@ -346,6 +354,13 @@ async function handleBlackjackButton(interaction) {
     updatedGame = hitBlackjack(userId);
   } else if (action === 'stand') {
     updatedGame = standBlackjack(userId);
+  } else if (action === 'double') {
+    const result = doubleBlackjack(userId);
+    if (result && result.error) {
+      await interaction.followUp({ content: result.error, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return;
+    }
+    updatedGame = result;
   } else {
     return;
   }
@@ -356,7 +371,8 @@ async function handleBlackjackButton(interaction) {
   }
 
   const embed = buildBlackjackEmbed(interaction.user, updatedGame);
-  const components = buildBlackjackComponents(userId, updatedGame.finished);
+  const canDouble = updatedGame.player && updatedGame.player.length === 2 && !updatedGame.finished && updatedGame.bet > 0 && hasBalance(userId, updatedGame.bet);
+  const components = buildBlackjackComponents(userId, updatedGame.finished, canDouble);
 
   if (updatedGame.finished) {
     endBlackjack(userId);
@@ -380,7 +396,8 @@ async function handleHelpButton(interaction) {
     pageIndex++;
   }
 
-  pageIndex = Math.max(0, Math.min(2, pageIndex));
+  const { HELP_CATEGORIES } = require('./commands');
+  pageIndex = Math.max(0, Math.min(HELP_CATEGORIES.length - 1, pageIndex));
 
   const embed = buildHelpEmbed(pageIndex);
   const components = buildHelpComponents(pageIndex, userId);
