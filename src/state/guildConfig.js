@@ -79,6 +79,7 @@ function formatConfig(config) {
     `persistentQueue: ${config.persistentQueue ? 'yes' : 'no'}`,
     `twentyFourSevenChannelId: ${config.twentyFourSevenChannelId ?? 'none'}`,
     `defaultVolume: ${config.defaultVolume}`,
+    `autoplay: ${config.autoplay ? 'yes' : 'no'}`,
   ].join('\n');
 }
 

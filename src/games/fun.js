@@ -1,8 +1,110 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const RPS_CHOICES = ['rock', 'paper', 'scissors'];
 const RPS_EMOJIS = { rock: '🪨', paper: '📄', scissors: '✂️' };
 const RPS_WINS = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
+const RPS_BUTTON_PREFIX = 'rps';
+const RPS_CHALLENGE_TIMEOUT = 60_000; 
+
+const rpsChallenges = new Map();
+const challengeTimers = new Map();
+
+let onChallengeExpire = null;
+
+function setExpireCallback(callback) {
+  onChallengeExpire = callback;
+}
+
+function createChallenge(challengerId, challengerName, targetId, targetName, bet, challengerChoice) {
+  const challengeId = `${challengerId}-${targetId}-${Date.now()}`;
+  
+  const challenge = {
+    id: challengeId,
+    challengerId,
+    challengerName,
+    targetId,
+    targetName,
+    bet,
+    challengerChoice, 
+    targetChoice: null,
+    status: 'pending', 
+    createdAt: Date.now(),
+    channelId: null, 
+    messageId: null, 
+  };
+  
+  rpsChallenges.set(challengeId, challenge);
+  
+  const timer = setTimeout(() => {
+    const ch = rpsChallenges.get(challengeId);
+    if (ch && ch.status === 'pending') {
+      ch.status = 'expired';
+      if (onChallengeExpire) {
+        onChallengeExpire(ch);
+      }
+      rpsChallenges.delete(challengeId);
+    }
+    challengeTimers.delete(challengeId);
+  }, RPS_CHALLENGE_TIMEOUT);
+  
+  challengeTimers.set(challengeId, timer);
+  
+  return challenge;
+}
+
+function setMessageInfo(challengeId, channelId, messageId) {
+  const challenge = rpsChallenges.get(challengeId);
+  if (challenge) {
+    challenge.channelId = channelId;
+    challenge.messageId = messageId;
+  }
+}
+
+function getChallenge(challengeId) {
+  return rpsChallenges.get(challengeId);
+}
+
+function cancelChallenge(challengeId) {
+  const timer = challengeTimers.get(challengeId);
+  if (timer) {
+    clearTimeout(timer);
+    challengeTimers.delete(challengeId);
+  }
+  rpsChallenges.delete(challengeId);
+}
+
+function setTargetChoice(challengeId, choice) {
+  const challenge = rpsChallenges.get(challengeId);
+  if (!challenge || challenge.status !== 'pending') return null;
+  
+  challenge.targetChoice = choice;
+  challenge.status = 'finished';
+  
+  return challenge;
+}
+
+function determineWinner(challenge) {
+  const { challengerChoice, targetChoice, challengerId, targetId } = challenge;
+  
+  if (challengerChoice === targetChoice) {
+    return { result: 'draw', winnerId: null, loserId: null };
+  }
+  
+  if (RPS_WINS[challengerChoice] === targetChoice) {
+    return { result: 'challenger_wins', winnerId: challengerId, loserId: targetId };
+  }
+  
+  return { result: 'target_wins', winnerId: targetId, loserId: challengerId };
+}
+
+function cleanupChallenge(challengeId) {
+  const timer = challengeTimers.get(challengeId);
+  if (timer) {
+    clearTimeout(timer);
+    challengeTimers.delete(challengeId);
+  }
+  rpsChallenges.delete(challengeId);
+}
 
 const MAGIC_8BALL_RESPONSES = [
   'Yes.',
@@ -78,6 +180,109 @@ function buildRPSEmbed(playerChoice, botChoice, result, username) {
     .setDescription(resultText);
 }
 
+function buildRPSChallengeEmbed(challenge) {
+  const embed = new EmbedBuilder()
+    .setTitle('⚔️ RPS Challenge!')
+    .setColor('#f59e0b')
+    .setDescription(
+      `**${challenge.challengerName}** has challenged **${challenge.targetName}** to a duel!`
+    )
+    .addFields(
+      { name: '💰 Bet', value: challenge.bet > 0 ? `${challenge.bet} 🍞` : 'No bet', inline: true },
+      { name: '⏰ Time', value: '60 seconds to respond', inline: true },
+    )
+    .setFooter({ text: 'Pick your move to accept!' })
+    .setTimestamp();
+  
+  return embed;
+}
+
+function buildRPSChallengeComponents(challengeId, targetId) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:rock`)
+        .setLabel('Rock')
+        .setEmoji('🪨')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:paper`)
+        .setLabel('Paper')
+        .setEmoji('📄')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:scissors`)
+        .setLabel('Scissors')
+        .setEmoji('✂️')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${RPS_BUTTON_PREFIX}:decline:${challengeId}:${targetId}`)
+        .setLabel('Decline')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+function buildRPSChoiceComponents(challengeId, odwolujace) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengeId}:${odwolujace}:rock`)
+        .setLabel('Rock')
+        .setEmoji('🪨')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengeId}:${odwolujace}:paper`)
+        .setLabel('Paper')
+        .setEmoji('📄')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengeId}:${odwolujace}:scissors`)
+        .setLabel('Scissors')
+        .setEmoji('✂️')
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function buildRPSWaitingEmbed(challenge, userId) {
+  const isChallenger = userId === challenge.challengerId;
+  const waiting = isChallenger ? challenge.targetName : challenge.challengerName;
+  
+  return new EmbedBuilder()
+    .setTitle('⏳ Waiting...')
+    .setColor('#6b7280')
+    .setDescription(`Waiting for **${waiting}** to choose...`);
+}
+
+function buildRPSDuelResultEmbed(challenge, outcome) {
+  const { challengerChoice, targetChoice, challengerName, targetName, bet } = challenge;
+  
+  let resultText, color;
+  if (outcome.result === 'draw') {
+    resultText = "🤝 It's a tie! Bets refunded.";
+    color = '#eab308';
+  } else if (outcome.result === 'challenger_wins') {
+    resultText = `🎉 **${challengerName}** wins${bet > 0 ? ` ${bet * 2} 🍞` : ''}!`;
+    color = '#22c55e';
+  } else {
+    resultText = `🎉 **${targetName}** wins${bet > 0 ? ` ${bet * 2} 🍞` : ''}!`;
+    color = '#22c55e';
+  }
+  
+  return new EmbedBuilder()
+    .setTitle('⚔️ RPS Duel - Results!')
+    .setColor(color)
+    .setDescription(resultText)
+    .addFields(
+      { name: challengerName, value: `${RPS_EMOJIS[challengerChoice]} ${challengerChoice}`, inline: true },
+      { name: 'vs', value: '⚔️', inline: true },
+      { name: targetName, value: `${RPS_EMOJIS[targetChoice]} ${targetChoice}`, inline: true },
+    )
+    .setTimestamp();
+}
+
 function build8BallEmbed(question, answer) {
   return new EmbedBuilder()
     .setTitle('🎱 Magic 8 Ball')
@@ -86,6 +291,20 @@ function build8BallEmbed(question, answer) {
       { name: 'Question', value: question },
       { name: 'Answer', value: `*${answer}*` },
     );
+}
+
+function buildRPSExpiredEmbed(challenge) {
+  return new EmbedBuilder()
+    .setTitle('⚔️ RPS Challenge - Expired')
+    .setColor('#6b7280')
+    .setDescription(
+      `The challenge from **${challenge.challengerName}** to **${challenge.targetName}** has expired.`
+    )
+    .addFields(
+      { name: '💰 Bet', value: challenge.bet > 0 ? `${challenge.bet} 🍞` : 'No bet', inline: true },
+    )
+    .setFooter({ text: 'Challenge timed out after 60 seconds' })
+    .setTimestamp();
 }
 
 function buildDiceEmbed(result) {
@@ -111,4 +330,18 @@ module.exports = {
   build8BallEmbed,
   buildDiceEmbed,
   RPS_CHOICES,
+  RPS_BUTTON_PREFIX,
+  RPS_EMOJIS,
+  createChallenge,
+  getChallenge,
+  cancelChallenge,
+  setTargetChoice,
+  setMessageInfo,
+  determineWinner,
+  cleanupChallenge,
+  setExpireCallback,
+  buildRPSChallengeEmbed,
+  buildRPSChallengeComponents,
+  buildRPSDuelResultEmbed,
+  buildRPSExpiredEmbed,
 };

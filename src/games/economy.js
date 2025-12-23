@@ -5,6 +5,9 @@ const economyStore = new FileStore('economy.json', {});
 const HOURLY_MIN = 100;
 const HOURLY_MAX = 200;
 const HOURLY_COOLDOWN = 60 * 60 * 1000;
+const GAMBLING_COOLDOWN = 3000; 
+
+const gamblingCooldowns = new Map();
 
 function getUserData(userId) {
   return economyStore.get(userId, { balance: 0, lastHourly: 0 });
@@ -31,6 +34,19 @@ function removeBalance(userId, amount) {
 
 function hasBalance(userId, amount) {
   return getBalance(userId) >= amount;
+}
+
+function checkGamblingCooldown(userId) {
+  const lastGamble = gamblingCooldowns.get(userId) || 0;
+  const now = Date.now();
+  const remaining = GAMBLING_COOLDOWN - (now - lastGamble);
+  
+  if (remaining > 0) {
+    return { onCooldown: true, remaining };
+  }
+  
+  gamblingCooldowns.set(userId, now);
+  return { onCooldown: false };
 }
 
 function claimHourly(userId) {
@@ -67,5 +83,7 @@ module.exports = {
   claimHourly,
   getLeaderboard,
   getUserData,
+  checkGamblingCooldown,
   HOURLY_COOLDOWN,
+  GAMBLING_COOLDOWN,
 };

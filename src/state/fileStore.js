@@ -1,10 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 
+const DEBOUNCE_DELAY = 1000; 
+
 class FileStore {
   constructor(fileName, defaultData = {}) {
     this.filePath = path.join(process.cwd(), 'data', fileName);
     this.data = defaultData;
+    this.saveTimeout = null;
+    this.isSaving = false;
+    this.pendingSave = false;
 
     this.ensureFile();
     this.load();
@@ -31,7 +36,43 @@ class FileStore {
   }
 
   save() {
-    fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+    }
+    
+    this.saveTimeout = setTimeout(() => {
+      this._performSave();
+    }, DEBOUNCE_DELAY);
+  }
+
+  saveImmediate() {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+    this._performSave();
+  }
+
+  _performSave() {
+    if (this.isSaving) {
+      this.pendingSave = true;
+      return;
+    }
+
+    this.isSaving = true;
+    try {
+      const tempPath = `${this.filePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(this.data, null, 2), 'utf8');
+      fs.renameSync(tempPath, this.filePath);
+    } catch (error) {
+      console.error(`Failed to save ${this.filePath}:`, error.message);
+    } finally {
+      this.isSaving = false;
+      if (this.pendingSave) {
+        this.pendingSave = false;
+        this._performSave();
+      }
+    }
   }
 
   get(key, fallback = undefined) {

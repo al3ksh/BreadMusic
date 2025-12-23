@@ -58,6 +58,10 @@ const {
   build8BallEmbed,
   buildDiceEmbed,
   RPS_CHOICES,
+  createChallenge,
+  setMessageInfo,
+  buildRPSChallengeEmbed,
+  buildRPSChallengeComponents,
 } = require('../games/fun');
 const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
@@ -837,8 +841,8 @@ const commands = [
   {
     data: new SlashCommandBuilder().setName('ping').setDescription('Check latency.'),
     async execute(interaction) {
-      const sent = await interaction.reply({ content: 'Ping...', fetchReply: true });
-      const latency = sent.createdTimestamp - interaction.createdTimestamp;
+      const { resource } = await interaction.reply({ content: 'Ping...', withResponse: true });
+      const latency = resource.message.createdTimestamp - interaction.createdTimestamp;
       await interaction.editReply(`Pong! Websocket: ${interaction.client.ws.ping}ms | RTT: ${latency}ms`);
     },
   },
@@ -1017,8 +1021,11 @@ const commands = [
       const embed = buildSlotsEmbed(result.result, bet, result.winnings, result.isWin, result.newBalance);
       try {
         await interaction.reply({ embeds: [embed] });
-      } catch {
-        addBalance(interaction.user.id, bet - result.winnings);
+      } catch (error) {
+        if (!result.isWin) {
+          addBalance(interaction.user.id, bet);
+        }
+        console.error('Failed to send slots result:', error.message);
       }
     },
   },
@@ -1064,8 +1071,11 @@ const commands = [
       );
       try {
         await interaction.reply({ embeds: [embed] });
-      } catch {
-        addBalance(interaction.user.id, bet - result.winnings);
+      } catch (error) {
+        if (!result.isWin) {
+          addBalance(interaction.user.id, bet);
+        }
+        console.error('Failed to send roulette result:', error.message);
       }
     },
   },
@@ -1100,15 +1110,18 @@ const commands = [
       const embed = buildCoinflipEmbed(result.result, choice, bet, result.isWin, result.winnings, result.newBalance);
       try {
         await interaction.reply({ embeds: [embed] });
-      } catch {
-        addBalance(interaction.user.id, bet - result.winnings);
+      } catch (error) {
+        if (!result.isWin) {
+          addBalance(interaction.user.id, bet);
+        }
+        console.error('Failed to send coinflip result:', error.message);
       }
     },
   },
   {
     data: new SlashCommandBuilder()
       .setName('rps')
-      .setDescription('Play rock, paper, scissors.')
+      .setDescription('Play rock, paper, scissors (vs bot or challenge a user).')
       .addStringOption((option) =>
         option
           .setName('choice')
@@ -1119,12 +1132,77 @@ const commands = [
             { name: '📄 Paper', value: 'paper' },
             { name: '✂️ Scissors', value: 'scissors' },
           ),
+      )
+      .addUserOption((option) =>
+        option
+          .setName('opponent')
+          .setDescription('Challenge another user to a duel'),
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName('bet')
+          .setDescription('Amount to bet (for duels)')
+          .setMinValue(1),
       ),
     async execute(interaction) {
       const choice = interaction.options.getString('choice', true);
-      const result = playRPS(choice);
-      const embed = buildRPSEmbed(result.playerChoice, result.botChoice, result.result, interaction.user.username);
-      await interaction.reply({ embeds: [embed] });
+      const opponent = interaction.options.getUser('opponent');
+      const bet = interaction.options.getInteger('bet') || 0;
+      
+      if (!opponent) {
+        const result = playRPS(choice);
+        const embed = buildRPSEmbed(result.playerChoice, result.botChoice, result.result, interaction.user.username);
+        await interaction.reply({ embeds: [embed] });
+        return;
+      }
+      
+      if (opponent.id === interaction.user.id) {
+        await interaction.reply({ content: "You can't challenge yourself!", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      
+      if (opponent.bot) {
+        await interaction.reply({ content: "You can't challenge a bot! Use `/rps choice:rock` without opponent to play against the bot.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      
+      if (bet > 0) {
+        if (!hasBalance(interaction.user.id, bet)) {
+          await interaction.reply({ 
+            content: `You don't have enough 🍞! Your balance: ${getBalance(interaction.user.id)} 🍞`, 
+            flags: MessageFlags.Ephemeral 
+          });
+          return;
+        }
+        if (!hasBalance(opponent.id, bet)) {
+          await interaction.reply({ 
+            content: `**${opponent.username}** doesn't have enough 🍞 for this bet!`, 
+            flags: MessageFlags.Ephemeral 
+          });
+          return;
+        }
+      }
+      
+      const challenge = createChallenge(
+        interaction.user.id,
+        interaction.user.username,
+        opponent.id,
+        opponent.username,
+        bet,
+        choice
+      );
+      
+      const embed = buildRPSChallengeEmbed(challenge);
+      const components = buildRPSChallengeComponents(challenge.id, opponent.id);
+      
+      const { resource } = await interaction.reply({ 
+        content: `<@${opponent.id}>`, 
+        embeds: [embed], 
+        components,
+        withResponse: true,
+      });
+      
+      setMessageInfo(challenge.id, resource.message.channelId, resource.message.id);
     },
   },
   {

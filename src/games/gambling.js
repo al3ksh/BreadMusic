@@ -1,5 +1,5 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getBalance, addBalance, removeBalance, hasBalance } = require('./economy');
+const { getBalance, addBalance, removeBalance, hasBalance, checkGamblingCooldown } = require('./economy');
 
 const SLOTS_SYMBOLS = ['🍞', '🍒', '🔔', '💎', '7️⃣'];
 const SLOTS_MULTIPLIERS = {
@@ -25,6 +25,11 @@ function spinSlots() {
 }
 
 function playSlots(userId, bet) {
+  const cooldown = checkGamblingCooldown(userId);
+  if (cooldown.onCooldown) {
+    return { success: false, error: `⏳ Wait ${(cooldown.remaining / 1000).toFixed(1)}s before playing again!` };
+  }
+
   if (!hasBalance(userId, bet)) {
     return { success: false, error: 'You don\'t have enough 🍞!' };
   }
@@ -40,7 +45,7 @@ function playSlots(userId, bet) {
     multiplier = SLOTS_MULTIPLIERS[resultKey];
     winnings = bet * multiplier;
     addBalance(userId, winnings);
-  } else if (result[0] === result[1] || result[1] === result[2]) {
+  } else if (result[0] === result[1] || result[1] === result[2] || result[0] === result[2]) {
     multiplier = 1.5;
     winnings = Math.floor(bet * multiplier);
     addBalance(userId, winnings);
@@ -57,6 +62,11 @@ function playSlots(userId, bet) {
 }
 
 function playRoulette(userId, bet, betType, number = null) {
+  const cooldown = checkGamblingCooldown(userId);
+  if (cooldown.onCooldown) {
+    return { success: false, error: `⏳ Wait ${(cooldown.remaining / 1000).toFixed(1)}s before playing again!` };
+  }
+
   if (!hasBalance(userId, bet)) {
     return { success: false, error: 'You don\'t have enough 🍞!' };
   }
@@ -111,6 +121,11 @@ function playRoulette(userId, bet, betType, number = null) {
 }
 
 function playCoinflip(userId, bet, choice) {
+  const cooldown = checkGamblingCooldown(userId);
+  if (cooldown.onCooldown) {
+    return { success: false, error: `⏳ Wait ${(cooldown.remaining / 1000).toFixed(1)}s before playing again!` };
+  }
+
   if (!hasBalance(userId, bet)) {
     return { success: false, error: 'You don\'t have enough 🍞!' };
   }

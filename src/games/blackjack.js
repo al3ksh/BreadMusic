@@ -96,10 +96,17 @@ function startGame(userId, bet = 0) {
   };
 
   const playerValue = handValue(game.player);
+  const dealerValue = handValue(game.dealer);
+  
   if (playerValue === 21) {
     game.finished = true;
-    game.result = '🎉 Blackjack! You win 2.5x!';
-    game.winnings = Math.floor(bet * 2.5);
+    if (dealerValue === 21) {
+      game.result = '🤝 Push! Both have Blackjack - bet returned!';
+      game.winnings = bet;
+    } else {
+      game.result = '🎉 Blackjack! You win 2.5x!';
+      game.winnings = Math.floor(bet * 2.5);
+    }
     addBalance(userId, game.winnings);
   }
 
@@ -238,6 +245,9 @@ function doubleDown(userId) {
   const game = getGame(userId);
   if (!game || game.finished) return null;
   if (game.player.length !== 2) return null;
+  if (game.bet === 0) {
+    return { error: "You can't double down without a bet!" };
+  }
 
   if (!hasBalance(userId, game.bet)) {
     return { error: "You don't have enough 🍞 to double!" };

@@ -39,8 +39,19 @@ const {
   buildComponents: buildBlackjackComponents,
   BUTTON_PREFIX: BLACKJACK_BUTTON_PREFIX,
 } = require('./games/blackjack');
-const { hasBalance } = require('./games/economy');
+const { hasBalance, addBalance, removeBalance, getBalance } = require('./games/economy');
 const { handleAutoplay, clearAutoplayState, addToRecentTracks } = require('./music/autoplay');
+const {
+  RPS_BUTTON_PREFIX,
+  getChallenge,
+  cancelChallenge,
+  setTargetChoice,
+  determineWinner,
+  cleanupChallenge,
+  setExpireCallback,
+  buildRPSDuelResultEmbed,
+  buildRPSExpiredEmbed,
+} = require('./games/fun');
 
 const HELP_BUTTON_PREFIX = 'help:';
 
@@ -135,6 +146,22 @@ client.once(Events.ClientReady, async (readyClient) => {
     username: readyClient.user.username,
   });
 
+  setExpireCallback(async (challenge) => {
+    if (challenge.channelId && challenge.messageId) {
+      try {
+        const channel = await client.channels.fetch(challenge.channelId);
+        if (channel) {
+          const message = await channel.messages.fetch(challenge.messageId);
+          if (message) {
+            const expiredEmbed = buildRPSExpiredEmbed(challenge);
+            await message.edit({ embeds: [expiredEmbed], components: [] });
+          }
+        }
+      } catch (err) {
+      }
+    }
+  });
+
   startActivityRotation();
   await restoreTwentyFourSevenPlayers();
 });
@@ -175,6 +202,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.customId.startsWith(HELP_BUTTON_PREFIX)) {
         await handleHelpButton(interaction);
+        return;
+      }
+
+      if (interaction.customId.startsWith(RPS_BUTTON_PREFIX)) {
+        await handleRPSButton(interaction);
         return;
       }
     }
@@ -406,6 +438,94 @@ async function handleHelpButton(interaction) {
   const components = buildHelpComponents(pageIndex, userId);
 
   await interaction.update({ embeds: [embed], components }).catch(() => {});
+}
+
+async function handleRPSButton(interaction) {
+  const parts = interaction.customId.split(':');
+  const action = parts[1];
+  const challengeId = parts[2];
+  const targetId = parts[3];
+  const choice = parts[4]; 
+  
+  const challenge = getChallenge(challengeId);
+  
+  if (interaction.user.id !== targetId) {
+    await interaction.reply({ content: 'This challenge is not for you!', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+  
+  if (!challenge || challenge.status !== 'pending') {
+    await interaction.update({ 
+      content: 'This challenge has expired or was cancelled.', 
+      embeds: [], 
+      components: [] 
+    }).catch(() => {});
+    return;
+  }
+  
+  if (action === 'decline') {
+    cleanupChallenge(challengeId);
+    await interaction.update({ 
+      content: `❌ **${interaction.user.username}** declined the challenge.`, 
+      embeds: [], 
+      components: [] 
+    }).catch(() => {});
+    return;
+  }
+  
+  if (action === 'play') {
+    if (challenge.bet > 0) {
+      if (!hasBalance(challenge.challengerId, challenge.bet)) {
+        await interaction.update({ 
+          content: `Challenge cancelled - **${challenge.challengerName}** no longer has enough 🍞!`, 
+          embeds: [], 
+          components: [] 
+        }).catch(() => {});
+        cleanupChallenge(challengeId);
+        return;
+      }
+      if (!hasBalance(challenge.targetId, challenge.bet)) {
+        await interaction.update({ 
+          content: `Challenge cancelled - **${challenge.targetName}** doesn't have enough 🍞!`, 
+          embeds: [], 
+          components: [] 
+        }).catch(() => {});
+        cleanupChallenge(challengeId);
+        return;
+      }
+      
+      removeBalance(challenge.challengerId, challenge.bet);
+      removeBalance(challenge.targetId, challenge.bet);
+    }
+    
+    const updatedChallenge = setTargetChoice(challengeId, choice);
+    
+    if (!updatedChallenge) {
+      await interaction.update({ content: 'Error saving choice.', embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+    
+    const outcome = determineWinner(updatedChallenge);
+    
+    if (updatedChallenge.bet > 0) {
+      if (outcome.result === 'draw') {
+        addBalance(updatedChallenge.challengerId, updatedChallenge.bet);
+        addBalance(updatedChallenge.targetId, updatedChallenge.bet);
+      } else {
+        addBalance(outcome.winnerId, updatedChallenge.bet * 2);
+      }
+    }
+    
+    const resultEmbed = buildRPSDuelResultEmbed(updatedChallenge, outcome);
+    
+    await interaction.update({ 
+      embeds: [resultEmbed], 
+      components: [] 
+    }).catch(() => {});
+    
+    cleanupChallenge(challengeId);
+    return;
+  }
 }
 
 async function togglePlayPause(interaction) {
