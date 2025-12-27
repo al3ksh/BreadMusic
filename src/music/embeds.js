@@ -1,5 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { formatDuration, buildProgressBar } = require('../utils/time');
+const { isAutoplayEnabled } = require('./autoplay');
 
 const LABELS = {
   TITLE: '🎶',
@@ -56,9 +57,12 @@ function buildNowPlayingEmbed(player, track) {
   const duration = track.info.duration ?? track.info.length ?? 0;
   const position = player?.position ?? 0;
   const progressBar = buildProgressBar(position, duration, 18);
+  
+  const autoplayOn = player?.guildId && isAutoplayEnabled(player.guildId);
+  const title = autoplayOn ? 'Now Playing [AUTO]' : 'Now Playing';
 
   const embed = new EmbedBuilder()
-    .setTitle('Now Playing')
+    .setTitle(title)
     .setDescription(
       `[${track.info.author ?? 'Unknown'} - ${track.info.title ?? 'Unknown'}](${track.info.uri ?? ''})\n${progressBar}\n${formatDuration(position)} / ${formatDuration(
         duration,

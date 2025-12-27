@@ -68,17 +68,21 @@ const client = new Client({
 });
 
 const activityRotation = [
-  { type: ActivityType.Listening, name: 'your /play requests' },
-  { type: ActivityType.Watching, name: 'Lavalink nodes' },
-  { type: ActivityType.Playing, name: 'beats' },
-  { type: ActivityType.Listening, name: 'listening to your excuses' },
-  { type: ActivityType.Playing, name: 'pretending to be a DJ' },
-  { type: ActivityType.Watching, name: 'the queue that never ends' },
-  { type: ActivityType.Listening, name: 'memes being uploaded' },
-  { type: ActivityType.Playing, name: 'teaching cats to DJ' },
-  { type: ActivityType.Watching, name: 'debugging in production' },
-  { type: ActivityType.Listening, name: 'buffering... forever' },
+  { type: ActivityType.Listening, name: "/play • your requests" },
+  { type: ActivityType.Watching,  name: "/play • soundcheck" },
+  { type: ActivityType.Playing,   name: "/play • beats" },
+
+  { type: ActivityType.Listening, name: "/play • your excuses" },
+  { type: ActivityType.Playing,   name: "/play • pretending to be a DJ" },
+  { type: ActivityType.Watching,  name: "/play • the queue that never ends" },
+
+  { type: ActivityType.Listening, name: "/play • memes being uploaded" },
+  { type: ActivityType.Playing,   name: "/play • teaching cats to DJ" },
+  { type: ActivityType.Watching,  name: "/play • debugging in production" },
+
+  { type: ActivityType.Listening, name: "/play • buffering... forever" },
 ];
+
 let activityIntervalId;
 
 function startActivityRotation() {
@@ -551,15 +555,6 @@ async function skipTrack(interaction) {
   }
   const result = await handleSkipRequest(interaction, player, config, client);
   if (result.skipped) {
-    if (result.needsAutoplay && result.lastTrack) {
-      const autoplayResult = await handleAutoplay(player, result.lastTrack, client);
-      if (!autoplayResult) {
-        await interaction.followUp({ 
-          content: 'Skipped the track. Autoplay couldn\'t find similar tracks.', 
-          flags: MessageFlags.Ephemeral 
-        }).catch(() => {});
-      }
-    }
     await savePlayerState(player).catch(() => {});
   } else {
     await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral }).catch(() => {});

@@ -66,7 +66,7 @@ const {
 const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
 const { deleteInteractionReply } = require('../utils/interactions');
-const { isAutoplayEnabled, toggleAutoplay } = require('../music/autoplay');
+const { isAutoplayEnabled, toggleAutoplay, resetSeed } = require('../music/autoplay');
 
 const BREAD_IMAGE_PATH = path.resolve(__dirname, '..', 'assets', 'images', 'bread.png');
 const MONSTER_BREAD_IMAGE_PATH = path.resolve(
@@ -269,6 +269,15 @@ const commands = [
         tracksToAdd = isPlaylist ? searchResult.tracks : [searchResult.tracks[0]];
       }
 
+      const seedTrack = tracksToAdd[0];
+      if (seedTrack?.info) {
+        resetSeed(player.guildId, {
+          title: seedTrack.info.title,
+          author: seedTrack.info.author,
+          identifier: seedTrack.info.identifier,
+        });
+      }
+      
       const autoplayIndex = player.queue.tracks.findIndex(t => t.isAutoplay);
       if (autoplayIndex !== -1) {
         const tracksArray = isPlaylist ? tracksToAdd : [tracksToAdd[0]];
