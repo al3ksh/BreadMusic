@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  lavalink:
+    build:
+      context: ./lavalink
+      dockerfile: Dockerfile
+    container_name: breadmusic-lavalink
+    restart: always
+    ports:
+      - "2333:2333"
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml
+      - ./lavalink/plugins:/opt/Lavalink/plugins
+    networks:
+      - breadmusic-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2333/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: breadmusic-bot
+    restart: always
+    depends_on:
+      lavalink:
+        condition: service_healthy
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
+      - LAVALINK_HOST=lavalink
+      - LAVALINK_PORT=2333
+      - LAVALINK_PASSWORD=youshallnotpass
+      - LAVALINK_SECURE=false
+      - DEFAULT_SOURCE=${DEFAULT_SOURCE:-ytsearch}
+      - IDLE_TIMEOUT_MS=${IDLE_TIMEOUT_MS:-300000}
+      - NODE_ENV=production
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    networks:
+      - breadmusic-network
+
+networks:
+  breadmusic-network:
+    driver: bridge
