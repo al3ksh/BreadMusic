@@ -1,8 +1,8 @@
 # 🍞 Bread Music Bot
 
-> Note: This bot was fully AI "vibecoded" – commands, logic and docs were generated and refined with an AI assistant.
+> Discord music bot with economy, games, and advanced audio features. Fully AI "vibecoded" – commands, logic and docs were generated and refined with an AI assistant.
 
-## 1. Quick start
+## Quick Start
 
 ### Requirements
 - Node.js 18+
@@ -38,60 +38,164 @@ DEFAULT_SOURCE=ytsearch
 IDLE_TIMEOUT_MS=300000
 ```
 
-### Install & run
+### Install & Run
 ```powershell
 npm install
 npm run register   # register slash commands (one-time)
 npm start
 ```
 
-## 2. Key features
+---
+
+## Features
 
 ### 🎵 Music Playback
-- **Multi-source support**: YouTube, Spotify, SoundCloud, Bandcamp
+- **Multi-source**: YouTube, Spotify, SoundCloud, Bandcamp
 - **Spotify integration**: Play tracks, albums, playlists directly from Spotify links
 - **Now-playing embed** with progress bar, artwork, source link and control buttons
 - **Autocomplete** suggestions while typing in `/play`
 
-### � Autoplay
+### 🔁 Autoplay
 - **Smart autoplay**: Automatically finds and plays similar tracks when queue ends
-- **Last.fm integration**: Uses Last.fm API to discover similar artists
-- **Intelligent filtering**: Excludes remixes, covers, live versions and very short/long tracks
-- **Track history**: Prevents recently played tracks from repeating
-- **Persistent setting**: Autoplay preference saved per guild
+- **YouTube Radio Mix**: Uses YouTube's own recommendation system as primary source
+- **Last.fm fallback**: Discovers similar artists when YouTube Mix unavailable
+- **Intelligent filtering**: Excludes remixes, covers, live versions
+- **Loop detection**: Prevents getting stuck on same tracks
+- **`[AUTO]` indicator**: Shows in now-playing when track was auto-queued
 
-### �📋 Queue Management
-- `/queue` - Paginated queue view with ETA and total duration
-- `/remove`, `/move`, `/skipto` - Precise queue control
-- `/shuffle`, `/loop off|track|queue` - Playback modes
-- `/clearqueue` - Clear upcoming tracks
-- `/back`, `/replay` - Navigation controls
-- `/autoplay` - Toggle smart autoplay
+### 📋 Queue Management
+- Paginated queue view with ETA and total duration
+- Remove, move, skip to specific tracks
+- Shuffle, loop (off/track/queue)
+- Back/replay navigation
+- Queue persistence across restarts (24/7 mode)
 
 ### 🎛️ Audio Filters
-- `/filter preset bassboost|nightcore|soft|vaporwave|karaoke`
-- `/filter list`, `/filter clear`
+9 presets with custom EQ curves:
+
+| Preset | Description |
+|--------|-------------|
+| `bassboost` | Gentle bass boost (+3dB sub-bass) - warm, no distortion |
+| `nightcore` | Speed 1.25x, pitch 1.2x - anime/happy hardcore style |
+| `vaporwave` | Speed 0.85x, pitch 0.8x - slowed, dreamy aesthetic |
+| `soft` | FullSound EQ - warm mids, enhanced vocals |
+| `karaoke` | Center channel cancellation - reduces lead vocals |
+| `8d` | Rotating stereo panning (0.15 Hz) - immersive effect |
+| `vibrato` | Pitch modulation (8 Hz, 100%) - wobble/synth effect |
+| `tremolo` | Volume modulation (4 Hz, 60%) - pulsating effect |
+| `radio` | Lo-fi telephone effect - cuts lows & highs + lowpass |
+
+### 💰 Economy System
+- **Currency**: 🍞 (bread)
+- `/hourly` - Claim reward every hour
+- `/balance` - Check your or someone's balance
+- `/leaderboard` - Server ranking
+
+### 🎰 Gambling Games
+| Game | Description |
+|------|-------------|
+| `/blackjack [bet]` | Classic 21 card game with Hit/Stand/Double |
+| `/slots [bet]` | Slot machine with multipliers (up to 10x) |
+| `/coinflip <heads/tails> [bet]` | 50/50 coin flip |
+| `/rps <choice> [opponent] [bet]` | Rock-Paper-Scissors vs bot or duel another user |
 
 ### ⚙️ Guild Configuration
-- `/config set` - Per-guild settings
 - DJ role requirement for admin commands
-- Vote-skip with configurable threshold
+- Vote-skip with configurable threshold (0-100%)
 - 24/7 mode with queue persistence
 - Custom announce channel
+- Max volume limit
 
-### 🎮 Fun & Games
-- `/blackjack` - Single-player card game with betting
-- `/bread` - Send some fresh bread 🍞
-- `/help` - Paginated help with categories
+---
 
-### 🛡️ Stability
-- Graceful shutdown with queue saving
-- Auto-reconnect to Lavalink nodes (exponential backoff)
-- Auto-leave on inactivity (configurable timeout)
-- Empty channel detection (30s timeout)
-- Mutex locks prevent race conditions on UI updates
+## Commands Reference
 
-## 3. Lavalink Configuration
+### 🎵 Music
+| Command | Description |
+|---------|-------------|
+| `/play <query>` | Play track/playlist (YouTube, Spotify, SoundCloud) |
+| `/skip` | Skip current track (vote-skip if configured) |
+| `/stop` | Stop playback and clear queue |
+| `/pause` | Pause playback |
+| `/resume` | Resume playback |
+| `/seek <time>` | Seek to position (e.g., `1:30`, `90`) |
+| `/back` | Go back to previous track |
+| `/replay` | Replay current track from start |
+| `/nowplaying` | Show current track info |
+
+### 📋 Queue
+| Command | Description |
+|---------|-------------|
+| `/queue` | Show queue with pagination |
+| `/remove <start> [end]` | Remove track(s) from queue |
+| `/move <from> <to>` | Move track in queue |
+| `/skipto <index>` | Skip to specific position |
+| `/shuffle` | Shuffle the queue |
+| `/loop <off\|track\|queue>` | Set repeat mode |
+| `/clearqueue` | Clear upcoming tracks |
+| `/autoplay` | Toggle autoplay (plays similar tracks) |
+
+### 🎛️ Audio
+| Command | Description |
+|---------|-------------|
+| `/volume <0-100>` | Set volume (bounded by maxVolume) |
+| `/filter preset <name>` | Apply audio filter |
+| `/filter list` | Show active filters |
+| `/filter clear` | Reset all filters and EQ |
+
+### ⚙️ Settings
+| Command | Description |
+|---------|-------------|
+| `/config get` | Show current configuration |
+| `/config set` | Configure guild settings |
+| `/config reset` | Restore default settings |
+| `/leave` | Disconnect bot from voice channel |
+
+### 💰 Economy
+| Command | Description |
+|---------|-------------|
+| `/hourly` | Claim hourly reward (50-150 🍞) |
+| `/balance [user]` | Check balance |
+| `/leaderboard` | Server top 10 ranking |
+
+### 🎰 Games
+| Command | Description |
+|---------|-------------|
+| `/blackjack [bet]` | Play blackjack (min bet: 10 🍞) |
+| `/slots [bet]` | Spin the slot machine |
+| `/coinflip <side> [bet]` | Flip a coin |
+| `/rps <choice> [opponent] [bet]` | Rock-Paper-Scissors |
+
+### 🎮 Fun
+| Command | Description |
+|---------|-------------|
+| `/bread` | Send some fresh bread 🍞 |
+| `/help` | Show help menu |
+| `/ping` | Check bot latency |
+
+---
+
+## Permissions
+
+| Command Type | Required Permission |
+|--------------|---------------------|
+| Admin commands (`/stop`, `/volume`, `/filter`, `/remove`, `/move`) | DJ role OR Manage Guild OR Administrator |
+| Playback buttons | Must be in same voice channel as bot |
+| Vote-skip | Anyone in voice channel (configurable threshold) |
+
+---
+
+## Timeouts & Auto-leave
+
+| Scenario | Timeout |
+|----------|---------|
+| Bot alone in channel | 30 seconds |
+| Bot idle (nothing playing) | 5 minutes (configurable) |
+| Configure via | `/config set afk_timeout` |
+
+---
+
+## Lavalink Configuration
 
 ### Minimal `application.yml`
 ```yaml
@@ -128,88 +232,28 @@ plugins:
       albumLoadLimit: 6
 ```
 
-### Required plugins
+### Required Plugins
 Place these in `lavalink/plugins/`:
 - `youtube-plugin-1.x.x.jar` - [GitHub](https://github.com/lavalink-devs/youtube-source)
 - `lavasrc-plugin-4.x.x.jar` - [GitHub](https://github.com/topi314/LavaSrc)
 
-## 4. Commands Reference
+---
 
-### 🎵 Music
-| Command | Description |
-| --- | --- |
-| `/play <query>` | Play a track/playlist (YouTube, Spotify, SoundCloud) |
-| `/skip` | Skip current track (vote-skip if configured) |
-| `/stop` | Stop playback and clear queue |
-| `/pause` | Pause playback |
-| `/resume` | Resume playback |
-| `/seek <time>` | Seek to position (e.g., `1:30`, `90`) |
-| `/back` | Go back to the previous track |
-| `/replay` | Replay current track from start |
-| `/nowplaying` | Show current track info |
-
-### 📋 Queue
-| Command | Description |
-| --- | --- |
-| `/queue` | Show queue with pagination |
-| `/remove <start> [end]` | Remove track(s) from queue |
-| `/move <from> <to>` | Move track in queue |
-| `/skipto <index>` | Skip to specific position |
-| `/shuffle` | Shuffle the queue |
-| `/loop off\|track\|queue` | Set repeat mode |
-| `/clearqueue` | Clear upcoming tracks |
-| `/autoplay` | Toggle autoplay (plays similar tracks) |
-
-### 🎛️ Audio
-| Command | Description |
-| --- | --- |
-| `/volume <0-100>` | Set volume (bounded by maxVolume) |
-| `/filter preset <name>` | Apply audio filter |
-| `/filter list` | Show active filters |
-| `/filter clear` | Reset all filters |
-
-### ⚙️ Settings
-| Command | Description |
-| --- | --- |
-| `/config get` | Show current configuration |
-| `/config set` | Configure guild settings |
-| `/config reset` | Restore default settings |
-| `/leave` | Disconnect bot from voice channel |
-
-### 🎮 Fun
-| Command | Description |
-| --- | --- |
-| `/blackjack [bet]` | Play blackjack card game |
-| `/bread` | Send some fresh bread 🍞 |
-| `/help` | Show help menu |
-| `/ping` | Check bot latency |
-
-## 5. Permissions
-
-- **Admin commands** (`/stop`, `/volume`, `/filter`, `/remove`, `/move`): Require DJ role or Manage Guild/Administrator
-- **Playback buttons**: Only work for users in the same voice channel as the bot
-- **Vote-skip**: Configurable via `/config set vote_skip_percent:<0-100>`
-
-## 6. Timeouts & Auto-leave
-
-| Scenario | Timeout |
-| --- | --- |
-| Bot alone in channel | 30 seconds |
-| Bot idle (nothing playing) | 5 minutes |
-| Configurable via `/config` | `afk_timeout` option |
-
-## 7. Troubleshooting
+## Troubleshooting
 
 | Issue | Solution |
-| --- | --- |
+|-------|----------|
 | `401 Unauthorized` | Check Lavalink password matches in `.env` and `application.yml` |
 | No YouTube results | Verify `youtube-plugin` loaded correctly |
 | Spotify not working | Check `SPOTIFY_CLIENT_ID/SECRET` and restart Lavalink |
 | WebSocket 1006 | Check firewall, host/port, Java version (17/21) |
-| Autoplay not working | Check `LASTFM_API_KEY` in `.env` |
-| `normalize` errors | Requires LavaDSP plugin |
+| Autoplay not working | Check `LASTFM_API_KEY` in `.env` or try different seed track |
+| Filter not clearing | Use `/filter clear` - resets both filters and EQ |
+| Vibrato too weak | It's now set to 8 Hz / 100% depth - should be very noticeable |
 
-## 8. Project Structure
+---
+
+## Project Structure
 
 ```
 src/
@@ -219,33 +263,40 @@ src/
 ├── commands/
 │   └── index.js        # Slash command definitions
 ├── music/
-│   ├── autoplay.js     # Autoplay with Last.fm integration
+│   ├── autoplay.js     # Autoplay with YouTube Mix + Last.fm
 │   ├── embeds.js       # Now-playing embed builder
 │   ├── ui.js           # Button components & mutex locks
 │   ├── idleTracker.js  # Auto-leave logic
 │   ├── skipManager.js  # Vote-skip & skip handling
 │   ├── voteManager.js  # Vote tracking
-│   └── ...
+│   ├── queueFormatter.js # Queue pagination
+│   ├── searchUtils.js  # Track search helpers
+│   └── utils.js        # Music utilities
 ├── state/
 │   ├── guildConfig.js  # Per-guild settings
 │   ├── queueStore.js   # Queue persistence
+│   ├── fileStore.js    # JSON file storage
 │   └── searchCache.js  # Search result caching
 ├── games/
-│   ├── blackjack.js    # Blackjack game
-│   └── economy.js      # Currency system
+│   ├── blackjack.js    # Blackjack game logic
+│   ├── gambling.js     # Slots, coinflip, RPS
+│   ├── economy.js      # Balance, hourly, leaderboard
+│   └── fun.js          # RPS logic
 └── utils/
-    └── ...
+    ├── commandError.js # Error handling
+    ├── interactions.js # Interaction helpers
+    └── time.js         # Time formatting
+
 lavalink/
 ├── application.yml     # Lavalink config
 └── plugins/            # JAR plugins
+
 data/
 ├── configs.json        # Guild configurations
 ├── economy.json        # User balances
-└── queues.json         # Saved queues
+└── queues.json         # Saved queues (24/7 mode)
 ```
 
 ---
 
 Made with 🍞 and AI assistance.
-
-```

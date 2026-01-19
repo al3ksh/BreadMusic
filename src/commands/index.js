@@ -78,19 +78,66 @@ const MONSTER_BREAD_IMAGE_PATH = path.resolve(
 );
 
 const FILTER_PRESET_CHOICES = [
-  { value: 'bassboost', label: 'Bassboost', description: 'Boosted bass EQ curve.' },
-  { value: 'nightcore', label: 'Nightcore', description: 'Faster tempo + higher pitch.' },
-  { value: 'vaporwave', label: 'Vaporwave', description: 'Slower tempo + detuned vibe.' },
-  { value: 'soft', label: 'Soft', description: 'Gentle EQ tuned for vocals.' },
-  { value: 'karaoke', label: 'Karaoke', description: 'Reduces lead vocals.' },
+  { value: 'bassboost', label: 'Bassboost', description: 'Deep, punchy bass boost.' },
+  { value: 'nightcore', label: 'Nightcore', description: 'Faster tempo (1.25x) + higher pitch.' },
+  { value: 'vaporwave', label: 'Vaporwave', description: 'Slower tempo (0.85x) + lower pitch.' },
+  { value: 'soft', label: 'Soft', description: 'Warm EQ with enhanced mids for vocals.' },
+  { value: 'karaoke', label: 'Karaoke', description: 'Reduces center vocals (mono channel).' },
+  { value: '8d', label: '8D Audio', description: 'Rotating stereo panning effect.' },
+  { value: 'vibrato', label: 'Vibrato', description: 'Pitch modulation (retro/synth vibe).' },
+  { value: 'tremolo', label: 'Tremolo', description: 'Volume modulation (pulsating effect).' },
+  { value: 'radio', label: 'Radio', description: 'Lo-fi radio/telephone effect.' },
+];
+
+const BASSBOOST_EQ = [
+  { band: 0, gain: 0.15 },   // 25Hz - deep sub-bass
+  { band: 1, gain: 0.20 },   // 40Hz - sub-bass punch
+  { band: 2, gain: 0.18 },   // 63Hz - bass body
+  { band: 3, gain: 0.12 },   // 100Hz - low bass, warmth
+  { band: 4, gain: 0.06 },   // 160Hz - upper bass
+  { band: 5, gain: 0.0 },    // 250Hz - low mids (neutral)
+  { band: 6, gain: -0.03 },  // 400Hz - slight cut to reduce muddiness
+  { band: 7, gain: -0.03 },  // 630Hz - slight cut for clarity
+  { band: 8, gain: 0.0 },    // 1kHz - mids (neutral)
+  { band: 9, gain: 0.0 },    // 1.6kHz - presence (neutral)
+  { band: 10, gain: 0.03 },  // 2.5kHz - slight boost for definition
+  { band: 11, gain: 0.03 },  // 4kHz - clarity
+  { band: 12, gain: 0.0 },   // 6.3kHz - highs (neutral)
+  { band: 13, gain: 0.0 },   // 10kHz - highs (neutral)
+  { band: 14, gain: 0.0 },   // 16kHz - air (neutral)
+];
+
+const RADIO_EQ = [
+  { band: 0, gain: -0.25 },  // 25Hz - cut
+  { band: 1, gain: -0.20 },  // 40Hz - cut
+  { band: 2, gain: -0.15 },  // 63Hz - cut
+  { band: 3, gain: -0.10 },  // 100Hz - slight cut
+  { band: 4, gain: 0.0 },    // 160Hz - neutral
+  { band: 5, gain: 0.10 },   // 250Hz - boost low-mids
+  { band: 6, gain: 0.15 },   // 400Hz - boost mids
+  { band: 7, gain: 0.20 },   // 630Hz - boost mids (telephone range)
+  { band: 8, gain: 0.15 },   // 1kHz - boost presence
+  { band: 9, gain: 0.10 },   // 1.6kHz - boost
+  { band: 10, gain: 0.0 },   // 2.5kHz - neutral
+  { band: 11, gain: -0.10 }, // 4kHz - cut
+  { band: 12, gain: -0.15 }, // 6.3kHz - cut
+  { band: 13, gain: -0.20 }, // 10kHz - cut
+  { band: 14, gain: -0.25 }, // 16kHz - cut
 ];
 
 const FILTER_PRESETS = {
-  bassboost: async (manager) => manager.setEQPreset('BassboostMedium'),
+  bassboost: async (manager) => manager.setEQ(BASSBOOST_EQ),
   nightcore: async (manager) => manager.toggleNightcore(1.25, 1.2, 1),
   vaporwave: async (manager) => manager.toggleVaporwave(0.85, 0.8, 1),
   soft: async (manager) => manager.setEQPreset('FullSound'),
   karaoke: async (manager) => manager.toggleKaraoke(),
+  '8d': async (manager) => manager.toggleRotation(0.15),
+  vibrato: async (manager) => manager.toggleVibrato(8, 1),
+  tremolo: async (manager) => manager.toggleTremolo(4, 0.6),
+  radio: async (manager) => {
+    await manager.setEQ(RADIO_EQ);
+    await manager.toggleLowPass(15);
+  },
 };
 
 async function queuePersist(player) {
@@ -365,8 +412,9 @@ const commands = [
       assertDJ(interaction, config);
       await player.stopPlaying(true);
       player.queue.tracks.splice(0, player.queue.tracks.length);
+      await player.destroy('Stopped via command', true);
       await queuePersist(player);
-      await interaction.client.musicUI.refresh(player);
+      await interaction.client.musicUI.clear(player.guildId);
       await deleteInteractionReply(interaction);
     },
   },
@@ -456,9 +504,10 @@ const commands = [
         throw new CommandError('Invalid range.');
       }
 
-      const removed = await player.queue.splice(start, end - start + 1);
+      const count = end - start + 1;
+      player.queue.tracks.splice(start, count);
       await queuePersist(player);
-      await interaction.editReply(`Removed ${removed.length} item(s) from the queue.`);
+      await interaction.editReply(`Removed ${count} item(s) from the queue.`);
     },
   },
   {
@@ -488,8 +537,8 @@ const commands = [
         throw new CommandError('Invalid positions.');
       }
 
-      const [track] = await player.queue.splice(from, 1);
-      await player.queue.splice(to, 0, track);
+      const [track] = player.queue.tracks.splice(from, 1);
+      player.queue.tracks.splice(to, 0, track);
       await queuePersist(player);
       await interaction.editReply(`Moved **${track.info.title}** to position ${to + 1}.`);
     },
@@ -691,6 +740,8 @@ const commands = [
 
       if (sub === 'clear') {
         await player.filterManager.resetFilters();
+        await player.filterManager.clearEQ();
+        await player.filterManager.applyPlayerFilters();
         player.filterManager.activePreset = null;
         await interaction.editReply('Filters cleared.');
         return;

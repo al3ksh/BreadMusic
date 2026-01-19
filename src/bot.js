@@ -336,30 +336,6 @@ async function handleQueueButton(interaction) {
     return;
   }
 
-  if (action === 'close') {
-    await interaction.message.delete().catch(async () => {
-      await interaction.update({ content: '\u200b', embeds: [], components: [] }).catch(() => {});
-    });
-    return;
-  }
-
-  if (action === 'clear') {
-    await interaction.deferUpdate();
-    const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
-    assertDJ(interaction, config);
-
-    player.queue.tracks.splice(0, player.queue.tracks.length);
-    await savePlayerState(player).catch(() => {});
-    await client.musicUI.refresh(player);
-
-    const pageData = buildQueueEmbed(player, 0);
-    await interaction.editReply({
-      embeds: [pageData.embed],
-      components: buildQueueComponents(guildId, 0, pageData.totalPages, ownerId ?? interaction.user.id),
-    });
-    return;
-  }
-
   const page = Number(pageString ?? '0');
   const direction = action === 'next' ? 1 : -1;
 

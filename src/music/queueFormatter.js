@@ -87,14 +87,6 @@ function buildQueueComponents(guildId, page, totalPages, userId) {
         .setLabel('Next')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(nextDisabled),
-      new ButtonBuilder()
-        .setCustomId(`${QUEUE_BUTTON_PREFIX}:close:${guildId}:${page}:${userId}`)
-        .setLabel('Close')
-        .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId(`${QUEUE_BUTTON_PREFIX}:clear:${guildId}:${page}:${userId}`)
-        .setLabel('Clear Queue')
-        .setStyle(ButtonStyle.Danger),
     ),
   ];
 }
