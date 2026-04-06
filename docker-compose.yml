@@ -33,6 +33,7 @@ services:
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
       - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
       - LAVALINK_HOST=lavalink
       - LAVALINK_PORT=2333
@@ -40,7 +41,13 @@ services:
       - LAVALINK_SECURE=false
       - DEFAULT_SOURCE=${DEFAULT_SOURCE:-ytsearch}
       - IDLE_TIMEOUT_MS=${IDLE_TIMEOUT_MS:-300000}
+      - WEB_PORT=3001
+      - WEB_HOST=0.0.0.0
+      - WEB_URL=${WEB_URL:-http://localhost:3001}
+      - SESSION_SECRET=${SESSION_SECRET}
       - NODE_ENV=production
+    ports:
+      - "3001:3001"
     volumes:
       - ./data:/app/data
       - ./src:/app/src

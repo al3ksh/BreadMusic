@@ -197,26 +197,59 @@ function buildRPSChallengeEmbed(challenge) {
   return embed;
 }
 
-function buildRPSChallengeComponents(challengeId, targetId) {
+function buildRPSChallengeComponents(challengeOrId, targetId) {
+  if (typeof challengeOrId === 'string') {
+    const challengeId = challengeOrId;
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:rock`)
+          .setLabel('Rock')
+          .setEmoji('🪨')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:paper`)
+          .setLabel('Paper')
+          .setEmoji('📄')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:scissors`)
+          .setLabel('Scissors')
+          .setEmoji('✂️')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`${RPS_BUTTON_PREFIX}:decline:${challengeId}:${targetId}`)
+          .setLabel('Decline')
+          .setEmoji('❌')
+          .setStyle(ButtonStyle.Danger),
+      ),
+    ];
+  }
+
+  const challenge = challengeOrId;
+  const challengeId = challenge.id;
+  const encodedChoice = challenge.challengerChoice;
+  const encodedBet = Math.max(0, challenge.bet || 0);
+
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:rock`)
+        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${encodedChoice}:${encodedBet}:rock`)
         .setLabel('Rock')
         .setEmoji('🪨')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
-        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:paper`)
+        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${encodedChoice}:${encodedBet}:paper`)
         .setLabel('Paper')
         .setEmoji('📄')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
-        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${targetId}:scissors`)
+        .setCustomId(`${RPS_BUTTON_PREFIX}:play:${challengeId}:${encodedChoice}:${encodedBet}:scissors`)
         .setLabel('Scissors')
         .setEmoji('✂️')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
-        .setCustomId(`${RPS_BUTTON_PREFIX}:decline:${challengeId}:${targetId}`)
+        .setCustomId(`${RPS_BUTTON_PREFIX}:decline:${challengeId}:${encodedChoice}:${encodedBet}`)
         .setLabel('Decline')
         .setEmoji('❌')
         .setStyle(ButtonStyle.Danger),
@@ -224,21 +257,21 @@ function buildRPSChallengeComponents(challengeId, targetId) {
   ];
 }
 
-function buildRPSChoiceComponents(challengeId, odwolujace) {
+function buildRPSChoiceComponents(challengerId, targetId, bet = 0) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengeId}:${odwolujace}:rock`)
+        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengerId}:${targetId}:${bet}:rock`)
         .setLabel('Rock')
         .setEmoji('🪨')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengeId}:${odwolujace}:paper`)
+        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengerId}:${targetId}:${bet}:paper`)
         .setLabel('Paper')
         .setEmoji('📄')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengeId}:${odwolujace}:scissors`)
+        .setCustomId(`${RPS_BUTTON_PREFIX}:choice:${challengerId}:${targetId}:${bet}:scissors`)
         .setLabel('Scissors')
         .setEmoji('✂️')
         .setStyle(ButtonStyle.Secondary),
@@ -342,6 +375,7 @@ module.exports = {
   setExpireCallback,
   buildRPSChallengeEmbed,
   buildRPSChallengeComponents,
+  buildRPSChoiceComponents,
   buildRPSDuelResultEmbed,
   buildRPSExpiredEmbed,
 };

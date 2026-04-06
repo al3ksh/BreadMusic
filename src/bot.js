@@ -18,6 +18,7 @@ const { MusicUI, BUTTON_PREFIX, BUTTONS } = require('./music/ui');
 const { handleSkipRequest } = require('./music/skipManager');
 const { buildTrackEmbed } = require('./music/embeds');
 const { savePlayerState, hydratePlayer, resetAllQueues } = require('./state/queueStore');
+const { recordTrackPlay } = require('./state/analyticsStore');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
 const { resetVotes } = require('./music/voteManager');
 const { getConfig, listConfigs, assertDJ } = require('./state/guildConfig');
@@ -43,6 +44,11 @@ const { hasBalance, addBalance, removeBalance, getBalance } = require('./games/e
 const { handleAutoplay, clearAutoplayState, addToRecentTracks } = require('./music/autoplay');
 const {
   RPS_BUTTON_PREFIX,
+  RPS_CHOICES,
+  createChallenge,
+  setMessageInfo,
+  buildRPSChallengeEmbed,
+  buildRPSChallengeComponents,
   getChallenge,
   cancelChallenge,
   setTargetChoice,
@@ -235,6 +241,7 @@ client.lavalink.on('trackStart', async (player, track) => {
   resetVotes(player.guildId);
   clearIdleTimer(player.guildId);
   addToRecentTracks(player.guildId, track);
+  recordTrackPlay(player.guildId, track, { botUserId: client.user?.id });
   await savePlayerState(player).catch((error) =>
     console.error('Failed to save queue:', error),
   );
@@ -287,7 +294,10 @@ client.lavalink.nodeManager.on('disconnect', (node, reason) => {
   setTimeout(() => {
     if (isShuttingDown) return;
     if (node?.connected === false && typeof node?.connect === 'function') {
-      node.connect().catch((err) => console.warn(`Failed to reconnect node ${node.id}:`, err.message));
+      const result = node.connect();
+      if (result && typeof result.catch === 'function') {
+        result.catch((err) => console.warn(`Failed to reconnect node ${node.id}:`, err.message));
+      }
     }
   }, delay);
 });
@@ -301,12 +311,20 @@ client.lavalink.nodeManager.on('error', (node, error) => {
   console.error(`Node ${node.id} error:`, error?.message ?? error);
 });
 
+const { createApiServer } = require('./server');
+
 client
   .login(config.token)
   .catch((error) => {
     console.error('Failed to start Discord client:', error);
     process.exit(1);
   });
+
+const apiApp = createApiServer(client);
+const webPort = parseInt(process.env.WEB_PORT, 10) || 3001;
+apiApp.listen(webPort, process.env.WEB_HOST || '0.0.0.0', () => {
+  console.log(`API server listening on port ${webPort}`);
+});
 
 async function handleMusicButton(interaction) {
   const [, action, guildId] = interaction.customId.split(':');
@@ -423,10 +441,108 @@ async function handleHelpButton(interaction) {
 async function handleRPSButton(interaction) {
   const parts = interaction.customId.split(':');
   const action = parts[1];
-  const challengeId = parts[2];
-  const targetId = parts[3];
-  const choice = parts[4]; 
+
+  if (!action) {
+    await interaction.reply({ content: 'Invalid RPS action.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
   
+  if (action === 'choice') {
+    if (parts.length < 6) {
+      await interaction.update({ content: 'Invalid duel payload.', embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+
+    const challengerId = parts[2];
+    const targetId = parts[3];
+    const bet = Math.max(0, parseInt(parts[4], 10) || 0);
+    const choice = parts[5];
+
+    if (interaction.user.id !== challengerId) {
+      await interaction.reply({ content: 'This hidden choice menu is not for you!', flags: MessageFlags.Ephemeral }).catch(() => {});
+      return;
+    }
+
+    if (!RPS_CHOICES.includes(choice)) {
+      await interaction.update({ content: 'Invalid move selected.', embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+
+    if (targetId === challengerId) {
+      await interaction.update({ content: "You can't challenge yourself!", embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+
+    const opponent = await interaction.client.users.fetch(targetId).catch(() => null);
+    if (!opponent) {
+      await interaction.update({ content: 'Could not find that opponent. Try again.', embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+
+    if (opponent.bot) {
+      await interaction.update({ content: "You can't challenge a bot. Use `/rps solo` instead.", embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+
+    if (bet > 0) {
+      if (!hasBalance(challengerId, bet)) {
+        await interaction.update({ content: `You don't have enough 🍞! Your balance: ${getBalance(challengerId)} 🍞`, embeds: [], components: [] }).catch(() => {});
+        return;
+      }
+      if (!hasBalance(targetId, bet)) {
+        await interaction.update({ content: `**${opponent.username}** doesn't have enough 🍞 for this bet!`, embeds: [], components: [] }).catch(() => {});
+        return;
+      }
+    }
+
+    if (!interaction.channel || typeof interaction.channel.send !== 'function') {
+      await interaction.update({ content: 'Could not send challenge in this channel.', embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+
+    const challenge = createChallenge(
+      challengerId,
+      interaction.user.username,
+      targetId,
+      opponent.username,
+      bet,
+      choice,
+    );
+
+    const embed = buildRPSChallengeEmbed(challenge);
+    const components = buildRPSChallengeComponents(challenge);
+
+    try {
+      const message = await interaction.channel.send({ content: `<@${targetId}>`, embeds: [embed], components });
+      setMessageInfo(challenge.id, message.channelId, message.id);
+      await interaction.update({
+        content: `✅ Challenge sent to <@${targetId}>. Your move is hidden until duel ends.`,
+        embeds: [],
+        components: [],
+      }).catch(() => {});
+    } catch {
+      cancelChallenge(challenge.id);
+      await interaction.update({ content: 'Failed to send challenge message.', embeds: [], components: [] }).catch(() => {});
+    }
+    return;
+  }
+
+  const challengeId = parts[2];
+  const parsedMeta = parseChallengeMeta(challengeId);
+  const targetId = parsedMeta?.targetId || parts[3];
+
+  if (!targetId) {
+    await interaction.reply({ content: 'Invalid RPS interaction payload.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+
+  const hasExtendedPayload = action === 'play' ? parts.length >= 6 : parts.length >= 5;
+  const encodedChallengerChoice = hasExtendedPayload ? parts[3] : null;
+  const encodedBet = hasExtendedPayload ? Math.max(0, parseInt(parts[4], 10) || 0) : 0;
+  const choice = action === 'play'
+    ? (hasExtendedPayload ? parts[5] : parts[4])
+    : null;
+
   const challenge = getChallenge(challengeId);
   
   if (interaction.user.id !== targetId) {
@@ -435,6 +551,78 @@ async function handleRPSButton(interaction) {
   }
   
   if (!challenge || challenge.status !== 'pending') {
+    const canFallbackResolve = Boolean(
+      parsedMeta &&
+      encodedChallengerChoice &&
+      RPS_CHOICES.includes(encodedChallengerChoice) &&
+      Date.now() - parsedMeta.createdAt <= 60_000,
+    );
+
+    if (canFallbackResolve && action === 'decline') {
+      await interaction.update({
+        content: `❌ **${interaction.user.username}** declined the challenge.`,
+        embeds: [],
+        components: [],
+      }).catch(() => {});
+      return;
+    }
+
+    if (canFallbackResolve && action === 'play' && choice && RPS_CHOICES.includes(choice)) {
+      const fallbackChallenge = {
+        id: challengeId,
+        challengerId: parsedMeta.challengerId,
+        challengerName: 'Challenger',
+        targetId: parsedMeta.targetId,
+        targetName: interaction.user.username,
+        bet: encodedBet,
+        challengerChoice: encodedChallengerChoice,
+        targetChoice: choice,
+      };
+
+      const challengerUser = await interaction.client.users.fetch(parsedMeta.challengerId).catch(() => null);
+      if (challengerUser) {
+        fallbackChallenge.challengerName = challengerUser.username;
+      }
+
+      if (fallbackChallenge.bet > 0) {
+        if (!hasBalance(fallbackChallenge.challengerId, fallbackChallenge.bet)) {
+          await interaction.update({
+            content: `Challenge cancelled - **${fallbackChallenge.challengerName}** no longer has enough 🍞!`,
+            embeds: [],
+            components: [],
+          }).catch(() => {});
+          return;
+        }
+
+        if (!hasBalance(fallbackChallenge.targetId, fallbackChallenge.bet)) {
+          await interaction.update({
+            content: `Challenge cancelled - **${fallbackChallenge.targetName}** doesn't have enough 🍞!`,
+            embeds: [],
+            components: [],
+          }).catch(() => {});
+          return;
+        }
+
+        removeBalance(fallbackChallenge.challengerId, fallbackChallenge.bet);
+        removeBalance(fallbackChallenge.targetId, fallbackChallenge.bet);
+      }
+
+      const outcome = determineWinner(fallbackChallenge);
+
+      if (fallbackChallenge.bet > 0) {
+        if (outcome.result === 'draw') {
+          addBalance(fallbackChallenge.challengerId, fallbackChallenge.bet);
+          addBalance(fallbackChallenge.targetId, fallbackChallenge.bet);
+        } else {
+          addBalance(outcome.winnerId, fallbackChallenge.bet * 2);
+        }
+      }
+
+      const resultEmbed = buildRPSDuelResultEmbed(fallbackChallenge, outcome);
+      await interaction.update({ embeds: [resultEmbed], components: [] }).catch(() => {});
+      return;
+    }
+
     await interaction.update({ 
       content: 'This challenge has expired or was cancelled.', 
       embeds: [], 
@@ -454,6 +642,11 @@ async function handleRPSButton(interaction) {
   }
   
   if (action === 'play') {
+    if (!choice || !RPS_CHOICES.includes(choice)) {
+      await interaction.update({ content: 'Invalid move selected.', embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+
     if (challenge.bet > 0) {
       if (!hasBalance(challenge.challengerId, challenge.bet)) {
         await interaction.update({ 
@@ -506,6 +699,21 @@ async function handleRPSButton(interaction) {
     cleanupChallenge(challengeId);
     return;
   }
+}
+
+function parseChallengeMeta(challengeId) {
+  if (!challengeId || typeof challengeId !== 'string') return null;
+  const match = challengeId.match(/^(\d+)-(\d+)-(\d+)$/);
+  if (!match) return null;
+
+  const createdAt = Number(match[3]);
+  if (!Number.isFinite(createdAt)) return null;
+
+  return {
+    challengerId: match[1],
+    targetId: match[2],
+    createdAt,
+  };
 }
 
 async function togglePlayPause(interaction) {
@@ -697,10 +905,7 @@ async function restoreTwentyFourSevenPlayers() {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) continue;
 
-    const textChannelId =
-      guild.systemChannelId ??
-      guild.publicUpdatesChannelId ??
-      guild.channels.cache.find((channel) => channel.isTextBased() && channel.viewable)?.id;
+    const textChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId);
 
     try {
       const player = client.lavalink.createPlayer({
@@ -715,6 +920,25 @@ async function restoreTwentyFourSevenPlayers() {
       console.error(`Failed to restore 24/7 player for ${guildId}:`, error.message);
     }
   }
+}
+
+function resolvePlayerTextChannelId(guild, preferredChannelId = null) {
+  if (!guild) return null;
+
+  if (preferredChannelId) {
+    const preferred = guild.channels.cache.get(preferredChannelId);
+    if (isUsableTextChannel(preferred)) {
+      return preferred.id;
+    }
+  }
+
+  return null;
+}
+
+function isUsableTextChannel(channel) {
+  if (!channel || !channel.isTextBased()) return false;
+  if (typeof channel.isSendable === 'function') return channel.isSendable();
+  return channel.viewable !== false;
 }
 
 async function handleInteractionError(interaction, error) {
@@ -784,6 +1008,6 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') return;
+  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') return;
   gracefulShutdown('uncaughtException');
 });

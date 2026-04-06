@@ -31,6 +31,8 @@ build/
 coverage/
 .cache/
 .tmp/
+.next/
+out/
 
 # Bot data (queues/config backups)
 data/

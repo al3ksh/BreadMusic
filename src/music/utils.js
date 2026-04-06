@@ -31,6 +31,15 @@ async function ensurePlayer(interaction, options = {}) {
   const guildConfig = getConfig(guildId);
   let player = lavalink.getPlayer(guildId);
   const userChannelId = providedChannelId ?? (await resolveVoiceState(interaction));
+  const configuredTextChannel = guildConfig.playerTextChannelId
+    ? interaction.guild?.channels?.cache?.get(guildConfig.playerTextChannelId)
+    : null;
+  const preferredTextChannelId =
+    configuredTextChannel &&
+    configuredTextChannel.isTextBased() &&
+    (typeof configuredTextChannel.isSendable !== 'function' || configuredTextChannel.isSendable())
+      ? configuredTextChannel.id
+      : null;
 
   if (requireSameChannel && !userChannelId) {
     throw new CommandError('You must be in a voice channel to use this command.');
@@ -48,7 +57,7 @@ async function ensurePlayer(interaction, options = {}) {
     player = lavalink.createPlayer({
       guildId,
       voiceChannelId: userChannelId,
-      textChannelId: interaction.channelId,
+      textChannelId: preferredTextChannelId || null,
       selfDeaf: true,
       volume: guildConfig.defaultVolume ?? 60,
     });
@@ -64,8 +73,8 @@ async function ensurePlayer(interaction, options = {}) {
     player.voiceChannelId !== userChannelId
   ) {
     throw new CommandError('You must be in the same voice channel as the bot.');
-  } else if (interaction.channelId && player.textChannelId !== interaction.channelId) {
-    player.textChannelId = interaction.channelId;
+  } else if (player.textChannelId !== preferredTextChannelId) {
+    player.textChannelId = preferredTextChannelId;
   }
 
   return {

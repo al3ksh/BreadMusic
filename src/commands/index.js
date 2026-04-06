@@ -57,11 +57,7 @@ const {
   buildRPSEmbed,
   build8BallEmbed,
   buildDiceEmbed,
-  RPS_CHOICES,
-  createChallenge,
-  setMessageInfo,
-  buildRPSChallengeEmbed,
-  buildRPSChallengeComponents,
+  buildRPSChoiceComponents,
 } = require('../games/fun');
 const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
@@ -144,6 +140,24 @@ async function queuePersist(player) {
   await savePlayerState(player).catch(() => {});
 }
 
+const DASHBOARD_FALLBACK_BASE_URL = 'https://breadmusic.aleksh.xyz';
+
+function getDashboardBaseUrl() {
+  const candidate = process.env.DASHBOARD_URL || DASHBOARD_FALLBACK_BASE_URL;
+  try {
+    return new URL(candidate).origin;
+  } catch {
+    return DASHBOARD_FALLBACK_BASE_URL;
+  }
+}
+
+function buildDashboardUrl(guildId, view = 'settings') {
+  const baseUrl = getDashboardBaseUrl();
+  if (!guildId) return `${baseUrl}/dashboard`;
+  const viewParam = view && view !== 'settings' ? `?view=${encodeURIComponent(view)}` : '';
+  return `${baseUrl}/dashboard/${guildId}${viewParam}`;
+}
+
 const HELP_CATEGORIES = [
   {
     name: 'Music',
@@ -177,7 +191,8 @@ const HELP_CATEGORIES = [
     commands: [
       { name: '/help', value: 'Show this help menu.' },
       { name: '/ping', value: 'Check latency.' },
-      { name: '/config', value: 'Manage guild settings (DJ role, etc).' },
+      { name: '/dashboard', value: 'Open the web dashboard for this server.' },
+      { name: '/config', value: 'Manage guild settings (or use the dashboard).' },
     ],
   },
   {
@@ -208,7 +223,7 @@ const HELP_CATEGORIES = [
 function buildHelpEmbed(pageIndex) {
   const category = HELP_CATEGORIES[pageIndex];
   const embed = new EmbedBuilder()
-    .setTitle(`NeoBeat Buddy - Help (${category.name})`)
+    .setTitle(`Bread - Help (${category.name})`)
     .setDescription(category.description)
     .setColor('#10b981')
     .setFooter({ text: `Page ${pageIndex + 1}/${HELP_CATEGORIES.length}` });
@@ -247,6 +262,28 @@ const commands = [
       const embed = buildHelpEmbed(pageIndex);
       const components = buildHelpComponents(pageIndex, interaction.user.id);
       await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('dashboard')
+      .setDescription('Open dashboard for this server.')
+      .setDMPermission(false),
+    async execute(interaction) {
+      const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
+      const embed = new EmbedBuilder()
+        .setTitle('Dashboard')
+        .setColor('#6366f1')
+        .setDescription(`Manage settings, player and economy here:\n${dashboardUrl}`);
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setStyle(ButtonStyle.Link)
+          .setLabel('Open Dashboard')
+          .setURL(dashboardUrl),
+      );
+
+      await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -759,14 +796,14 @@ const commands = [
   {
     data: new SlashCommandBuilder()
       .setName('config')
-      .setDescription('Manage guild settings.')
+      .setDescription('Manage guild settings (or use dashboard).')
       .addSubcommand((sub) =>
-        sub.setName('get').setDescription('Show current configuration.'),
+        sub.setName('get').setDescription('Show current configuration (dashboard available).'),
       )
       .addSubcommand((sub) =>
         sub
           .setName('set')
-          .setDescription('Set selected options.')
+          .setDescription('Set selected options (dashboard available).')
           .addRoleOption((option) => option.setName('dj_role').setDescription('Rola DJ.'))
           .addIntegerOption((option) =>
             option.setName('max_volume').setDescription('Maximum volume (0-150).'),
@@ -797,16 +834,17 @@ const commands = [
               ),
           ),
       )
-      .addSubcommand((sub) => sub.setName('reset').setDescription('Restore default settings.')),
+      .addSubcommand((sub) => sub.setName('reset').setDescription('Restore default settings (dashboard available).')),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const sub = interaction.options.getSubcommand();
       if (sub === 'get') {
         const config = getConfig(interaction.guildId);
+        const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
         const embed = new EmbedBuilder()
           .setTitle('Current configuration')
           .setColor('#14b8a6')
-          .setDescription(`\`\`\`\n${formatConfig(config)}\n\`\`\``);
+          .setDescription(`Dashboard: ${dashboardUrl}\n\`\`\`\n${formatConfig(config)}\n\`\`\``);
         await interaction.editReply({ embeds: [embed] });
         return;
       }
@@ -818,10 +856,11 @@ const commands = [
       if (sub === 'reset') {
         deleteConfig(interaction.guildId);
         const fresh = getConfig(interaction.guildId);
+        const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
         const embed = new EmbedBuilder()
           .setTitle('Configuration reset')
           .setColor('#f97316')
-          .setDescription(`\`\`\`\n${formatConfig(fresh)}\n\`\`\``);
+          .setDescription(`Dashboard: ${dashboardUrl}\n\`\`\`\n${formatConfig(fresh)}\n\`\`\``);
         await interaction.editReply({ embeds: [embed] });
         return;
       }
@@ -830,7 +869,7 @@ const commands = [
       const djRole = interaction.options.getRole('dj_role');
       if (djRole) updates.djRoleId = djRole.id;
       const maxVolume = interaction.options.getInteger('max_volume');
-      if (maxVolume !== null) updates.maxVolume = Math.max(10, Math.min(200, maxVolume));
+      if (maxVolume !== null) updates.maxVolume = Math.max(10, Math.min(500, maxVolume));
       const voteSkip = interaction.options.getNumber('voteskip_percent');
       if (voteSkip !== null) updates.voteSkipPercent = Math.min(Math.max(voteSkip, 0.1), 1);
       const stay = interaction.options.getBoolean('stay_24_7');
@@ -845,10 +884,11 @@ const commands = [
       if (prefSource) updates.preferredSource = prefSource;
 
       const updated = setConfig(interaction.guildId, updates);
+      const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
       const embed = new EmbedBuilder()
         .setTitle('Configuration updated')
         .setColor('#6366f1')
-        .setDescription(`\`\`\`\n${formatConfig(updated)}\n\`\`\``);
+        .setDescription(`Dashboard: ${dashboardUrl}\n\`\`\`\n${formatConfig(updated)}\n\`\`\``);
       await interaction.editReply({ embeds: [embed] });
     },
   },
@@ -1182,39 +1222,72 @@ const commands = [
     data: new SlashCommandBuilder()
       .setName('rps')
       .setDescription('Play rock, paper, scissors (vs bot or challenge a user).')
-      .addStringOption((option) =>
-        option
-          .setName('choice')
-          .setDescription('Your choice')
-          .setRequired(true)
-          .addChoices(
-            { name: '🪨 Rock', value: 'rock' },
-            { name: '📄 Paper', value: 'paper' },
-            { name: '✂️ Scissors', value: 'scissors' },
+      .addSubcommand((sub) =>
+        sub
+          .setName('solo')
+          .setDescription('Play against the bot.')
+          .addStringOption((option) =>
+            option
+              .setName('choice')
+              .setDescription('Your choice')
+              .setRequired(true)
+              .addChoices(
+                { name: '🪨 Rock', value: 'rock' },
+                { name: '📄 Paper', value: 'paper' },
+                { name: '✂️ Scissors', value: 'scissors' },
+              ),
           ),
       )
-      .addUserOption((option) =>
-        option
-          .setName('opponent')
-          .setDescription('Challenge another user to a duel'),
-      )
-      .addIntegerOption((option) =>
-        option
-          .setName('bet')
-          .setDescription('Amount to bet (for duels)')
-          .setMinValue(1),
+      .addSubcommand((sub) =>
+        sub
+          .setName('duel')
+          .setDescription('Challenge another user (hidden move).')
+          .addUserOption((option) =>
+            option
+              .setName('opponent')
+              .setDescription('User to challenge')
+              .setRequired(true),
+          )
+          .addIntegerOption((option) =>
+            option
+              .setName('bet')
+              .setDescription('Amount to bet (optional)')
+              .setMinValue(1),
+          ),
       ),
     async execute(interaction) {
-      const choice = interaction.options.getString('choice', true);
-      const opponent = interaction.options.getUser('opponent');
-      const bet = interaction.options.getInteger('bet') || 0;
-      
-      if (!opponent) {
+      let mode = 'solo';
+      try {
+        mode = interaction.options.getSubcommand();
+      } catch {
+        // Fallback for stale Discord clients still sending the previous /rps payload format.
+        mode = interaction.options.getUser('opponent') ? 'duel' : 'solo';
+      }
+
+      if (mode === 'solo') {
+        const choice = interaction.options.getString('choice');
+        if (!choice) {
+          await interaction.reply({
+            content: 'Choose your move in `/rps solo` (rock, paper, or scissors).',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
         const result = playRPS(choice);
         const embed = buildRPSEmbed(result.playerChoice, result.botChoice, result.result, interaction.user.username);
         await interaction.reply({ embeds: [embed] });
         return;
       }
+
+      const opponent = interaction.options.getUser('opponent');
+      if (!opponent) {
+        await interaction.reply({
+          content: 'Pick an opponent in `/rps duel`.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const bet = interaction.options.getInteger('bet') || 0;
       
       if (opponent.id === interaction.user.id) {
         await interaction.reply({ content: "You can't challenge yourself!", flags: MessageFlags.Ephemeral });
@@ -1222,7 +1295,7 @@ const commands = [
       }
       
       if (opponent.bot) {
-        await interaction.reply({ content: "You can't challenge a bot! Use `/rps choice:rock` without opponent to play against the bot.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: "You can't challenge a bot! Use `/rps solo` to play against the bot.", flags: MessageFlags.Ephemeral });
         return;
       }
       
@@ -1242,27 +1315,18 @@ const commands = [
           return;
         }
       }
-      
-      const challenge = createChallenge(
-        interaction.user.id,
-        interaction.user.username,
-        opponent.id,
-        opponent.username,
-        bet,
-        choice
-      );
-      
-      const embed = buildRPSChallengeEmbed(challenge);
-      const components = buildRPSChallengeComponents(challenge.id, opponent.id);
-      
-      const { resource } = await interaction.reply({ 
-        content: `<@${opponent.id}>`, 
-        embeds: [embed], 
-        components,
-        withResponse: true,
-      });
-      
-      setMessageInfo(challenge.id, resource.message.channelId, resource.message.id);
+
+      const embed = new EmbedBuilder()
+        .setTitle('⚔️ Prepare RPS duel')
+        .setColor('#f59e0b')
+        .setDescription(`Choose your hidden move against **${opponent.username}**.`)
+        .addFields(
+          { name: '💰 Bet', value: bet > 0 ? `${bet} 🍞` : 'No bet', inline: true },
+          { name: '🔒 Privacy', value: 'Your move is hidden until duel ends.', inline: true },
+        );
+
+      const components = buildRPSChoiceComponents(interaction.user.id, opponent.id, bet);
+      await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
     },
   },
   {

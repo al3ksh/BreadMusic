@@ -4,6 +4,7 @@ const { CommandError } = require('../utils/commandError');
 const DEFAULT_CONFIG = {
   preferredSource: null,
   djRoleId: null,
+  playerTextChannelId: null,
   maxVolume: 100,
   voteSkipPercent: 0.6,
   stayInChannel: false,
@@ -72,6 +73,7 @@ function formatConfig(config) {
   return [
     `preferredSource: ${config.preferredSource ?? 'auto'}`,
     `djRoleId: ${config.djRoleId ?? 'none'}`,
+    `playerTextChannelId: ${config.playerTextChannelId ?? 'auto'}`,
     `maxVolume: ${config.maxVolume}`,
     `voteSkipPercent: ${(config.voteSkipPercent * 100).toFixed(0)}%`,
     `stayInChannel (24/7): ${config.stayInChannel ? 'yes' : 'no'}`,

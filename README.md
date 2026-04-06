@@ -16,6 +16,7 @@ Copy `.env.example` to `.env` and fill in the values:
 ```ini
 DISCORD_TOKEN=bot_token
 DISCORD_CLIENT_ID=application_id
+DISCORD_CLIENT_SECRET=oauth2_client_secret
 # DISCORD_GUILD_ID=optional_test_guild_id
 
 # Lavalink connection
@@ -36,6 +37,15 @@ LASTFM_API_KEY=your_lastfm_api_key
 
 DEFAULT_SOURCE=ytsearch
 IDLE_TIMEOUT_MS=300000
+
+# Web Dashboard
+WEB_PORT=3001
+WEB_HOST=0.0.0.0
+WEB_URL=http://localhost:3000
+SESSION_SECRET=random-secret-change-this
+
+# Optional (used by /dashboard command for external link)
+# DASHBOARD_URL=https://your-domain.example
 ```
 
 ### Install & Run
@@ -43,6 +53,25 @@ IDLE_TIMEOUT_MS=300000
 npm install
 npm run register   # register slash commands (one-time)
 npm start
+```
+
+### Run With Dashboard (development)
+Use three terminals:
+
+```powershell
+# 1) Lavalink
+cd lavalink
+java -jar Lavalink.jar
+```
+
+```powershell
+# 2) Bot + API
+npm run dev:api
+```
+
+```powershell
+# 3) Next.js dashboard
+npm run dev:web
 ```
 
 ---
@@ -96,15 +125,24 @@ npm start
 |------|-------------|
 | `/blackjack [bet]` | Classic 21 card game with Hit/Stand/Double |
 | `/slots [bet]` | Slot machine with multipliers (up to 10x) |
+| `/roulette <red\|black\|green> [bet]` | Roulette with color bets |
 | `/coinflip <heads/tails> [bet]` | 50/50 coin flip |
-| `/rps <choice> [opponent] [bet]` | Rock-Paper-Scissors vs bot or duel another user |
+| `/rps solo <choice>` | Rock-Paper-Scissors vs bot |
+| `/rps duel <opponent> [bet]` | Duel another user with hidden move selection |
 
 ### ⚙️ Guild Configuration
 - DJ role requirement for admin commands
-- Vote-skip with configurable threshold (0-100%)
+- Vote-skip with configurable threshold (`0.0`-`1.0`)
 - 24/7 mode with queue persistence
 - Custom announce channel
 - Max volume limit
+
+### 🌐 Web Dashboard
+- Discord OAuth2 login + protected dashboard routes
+- Tabs for **Settings**, **Status**, **Player**, **Economy**, **Control**
+- Live player state and bot session history
+- Per-guild configuration without typing all options in slash commands
+- `/dashboard` command opens the right guild panel directly
 
 ---
 
@@ -146,6 +184,7 @@ npm start
 ### ⚙️ Settings
 | Command | Description |
 |---------|-------------|
+| `/dashboard` | Open web dashboard for current server |
 | `/config get` | Show current configuration |
 | `/config set` | Configure guild settings |
 | `/config reset` | Restore default settings |
@@ -163,8 +202,12 @@ npm start
 |---------|-------------|
 | `/blackjack [bet]` | Play blackjack (min bet: 10 🍞) |
 | `/slots [bet]` | Spin the slot machine |
+| `/roulette <red\|black\|green> [bet]` | Spin roulette |
 | `/coinflip <side> [bet]` | Flip a coin |
-| `/rps <choice> [opponent] [bet]` | Rock-Paper-Scissors |
+| `/rps solo <choice>` | Play RPS against bot |
+| `/rps duel <opponent> [bet]` | Challenge user with hidden moves |
+| `/8ball <question>` | Ask magic 8-ball |
+| `/roll [dice]` | Roll dice notation (e.g. `2d20`) |
 
 ### 🎮 Fun
 | Command | Description |
@@ -172,6 +215,29 @@ npm start
 | `/bread` | Send some fresh bread 🍞 |
 | `/help` | Show help menu |
 | `/ping` | Check bot latency |
+
+---
+
+## Dashboard & OAuth Setup
+
+For dashboard auth to work, set these environment variables:
+- `DISCORD_CLIENT_SECRET`
+- `WEB_URL`
+- `SESSION_SECRET`
+
+Discord OAuth2 redirect URI must match:
+
+```text
+{WEB_URL}/api/auth/callback
+```
+
+Example for local development:
+
+```text
+http://localhost:3000/api/auth/callback
+```
+
+If you deploy dashboard externally, set `DASHBOARD_URL` so `/dashboard` points to your public domain.
 
 ---
 
@@ -259,6 +325,7 @@ Place these in `lavalink/plugins/`:
 src/
 ├── bot.js              # Main entry, event handlers
 ├── config.js           # Environment configuration
+├── server.js           # Express API + OAuth + dashboard endpoints
 ├── register-commands.js
 ├── commands/
 │   └── index.js        # Slash command definitions
@@ -276,7 +343,8 @@ src/
 │   ├── guildConfig.js  # Per-guild settings
 │   ├── queueStore.js   # Queue persistence
 │   ├── fileStore.js    # JSON file storage
-│   └── searchCache.js  # Search result caching
+│   ├── searchCache.js  # Search result caching
+│   └── analyticsStore.js # Dashboard analytics persistence
 ├── games/
 │   ├── blackjack.js    # Blackjack game logic
 │   ├── gambling.js     # Slots, coinflip, RPS
@@ -295,6 +363,12 @@ data/
 ├── configs.json        # Guild configurations
 ├── economy.json        # User balances
 └── queues.json         # Saved queues (24/7 mode)
+
+web/
+├── app/                # Next.js App Router pages
+├── components/         # Dashboard + landing UI components
+├── lib/                # API client and utilities
+└── public/assets/      # Static dashboard/landing assets
 ```
 
 ---
