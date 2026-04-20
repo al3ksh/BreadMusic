@@ -1,8 +1,12 @@
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:25-jre
 
 WORKDIR /opt/Lavalink
 
-ARG LAVALINK_VERSION=4.0.8
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends wget ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
+
+ARG LAVALINK_VERSION=4.2.2
 RUN wget -q https://github.com/lavalink-devs/Lavalink/releases/download/${LAVALINK_VERSION}/Lavalink.jar -O Lavalink.jar
 
 COPY application.yml .

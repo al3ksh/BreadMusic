@@ -81,10 +81,14 @@ const dashboardActionTimestamps = new Map();
 function createApiServer(client) {
   const app = express();
   const sessionSecret = process.env.SESSION_SECRET;
+  const isProduction = process.env.NODE_ENV === 'production';
   if (!sessionSecret) {
     throw new Error('SESSION_SECRET environment variable is required.');
   }
   const trustedOrigins = buildTrustedOrigins(process.env.WEB_URL);
+
+  // Behind cloudflared/reverse proxy, trust one hop so secure cookies work correctly.
+  app.set('trust proxy', 1);
 
   app.use(express.json({ limit: '50mb' }));
   app.use(cookieParser(sessionSecret));
@@ -93,11 +97,12 @@ function createApiServer(client) {
       secret: sessionSecret,
       resave: false,
       saveUninitialized: false,
+      proxy: true,
       cookie: {
         maxAge: 7 * 24 * 60 * 60 * 1000,
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax',
+        secure: isProduction ? 'auto' : false,
+        sameSite: 'lax',
       },
       name: 'bread.sid',
     }),
