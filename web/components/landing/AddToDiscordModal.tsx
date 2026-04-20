@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, Copy, ExternalLink, X } from 'lucide-react';
 
 interface AddToDiscordModalProps {
@@ -47,8 +48,8 @@ export function AddToDiscordModal({ open, onClose }: AddToDiscordModalProps) {
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] grid place-items-center p-4">
       <button
         type="button"
         aria-label="Close popup"
@@ -112,6 +113,7 @@ export function AddToDiscordModal({ open, onClose }: AddToDiscordModalProps) {
           </a>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
