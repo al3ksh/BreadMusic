@@ -305,6 +305,36 @@ async function getYouTubeRadioMix(node, videoId, client) {
   }
 }
 
+function isYouTubeIdentifier(identifier) {
+  return typeof identifier === 'string' && /^[a-zA-Z0-9_-]{11}$/.test(identifier);
+}
+
+async function resolveYouTubeId(node, track, client) {
+  if (!track?.info) return null;
+  if (isYouTubeIdentifier(track.info.identifier)) return track.info.identifier;
+
+  const query = `${track.info.author} ${track.info.title}`;
+  console.log(`[Autoplay] Resolving YouTube ID for "${query}"`);
+
+  try {
+    const result = await Promise.race([
+      node.search({ query: `ytsearch:${query}` }, client.user),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), SEARCH_TIMEOUT)
+      ),
+    ]);
+
+    if (result?.tracks?.length) {
+      console.log(`[Autoplay] Resolved to YouTube ID: ${result.tracks[0].info.identifier}`);
+      return result.tracks[0].info.identifier;
+    }
+  } catch (error) {
+    console.log(`[Autoplay] YouTube ID resolve failed: ${error.message}`);
+  }
+
+  return null;
+}
+
 async function findNextTrack(player, lastTrack, client) {
   if (!player || !lastTrack?.info) return null;
   
@@ -337,22 +367,30 @@ async function findNextTrack(player, lastTrack, client) {
     console.log(`[Autoplay] Loop detected! Artist "${seedArtist}" played too many times, forcing variety`);
   }
   
-  const radioTracks = await getYouTubeRadioMix(node, seedTrack.info.identifier, client);
-  
-  const shuffledRadio = radioTracks
-    .filter(t => t.info.identifier !== seedTrack.info.identifier && t.info.identifier !== lastTrack.info.identifier)
-    .sort(() => Math.random() - 0.5);
-  
-  for (const track of shuffledRadio) {
-    const trackArtist = extractArtistName(track.info.title, track.info.author);
+  let videoId = seedTrack.info.identifier;
+  if (!isYouTubeIdentifier(videoId)) {
+    console.log(`[Autoplay] Non-YouTube source detected, resolving YouTube ID...`);
+    videoId = await resolveYouTubeId(node, seedTrack, client);
+  }
+
+  if (videoId) {
+    const radioTracks = await getYouTubeRadioMix(node, videoId, client);
     
-    if (isLooping && trackArtist?.toLowerCase() === seedArtist?.toLowerCase()) {
-      continue;
-    }
+    const shuffledRadio = radioTracks
+      .filter(t => t.info.identifier !== videoId && t.info.identifier !== lastTrack.info.identifier)
+      .sort(() => Math.random() - 0.5);
     
-    if (isTrackSuitable(track, guildId, lastTrack, false)) {
-      console.log(`[Autoplay] Selected from Radio Mix: "${track.info.title}" by ${track.info.author}`);
-      return track;
+    for (const track of shuffledRadio) {
+      const trackArtist = extractArtistName(track.info.title, track.info.author);
+      
+      if (isLooping && trackArtist?.toLowerCase() === seedArtist?.toLowerCase()) {
+        continue;
+      }
+      
+      if (isTrackSuitable(track, guildId, lastTrack)) {
+        console.log(`[Autoplay] Selected from Radio Mix: "${track.info.title}" by ${track.info.author}`);
+        return track;
+      }
     }
   }
   
@@ -382,7 +420,7 @@ async function findNextTrack(player, lastTrack, client) {
           continue;
         }
         
-        if (isTrackSuitable(track, guildId, lastTrack, false)) {
+        if (isTrackSuitable(track, guildId, lastTrack)) {
           console.log(`[Autoplay] Selected from search "${query}": "${track.info.title}"`);
           return track;
         }

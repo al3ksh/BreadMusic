@@ -57,7 +57,7 @@ async function ensurePlayer(interaction, options = {}) {
     player = lavalink.createPlayer({
       guildId,
       voiceChannelId: userChannelId,
-      textChannelId: preferredTextChannelId || null,
+      textChannelId: preferredTextChannelId || interaction.channelId || null,
       selfDeaf: true,
       volume: guildConfig.defaultVolume ?? 60,
     });
