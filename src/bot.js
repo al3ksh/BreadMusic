@@ -925,6 +925,10 @@ async function restoreTwentyFourSevenPlayers() {
 function resolvePlayerTextChannelId(guild, preferredChannelId = null) {
   if (!guild) return null;
 
+  if (preferredChannelId === 'disabled') {
+    return null;
+  }
+
   if (preferredChannelId) {
     const preferred = guild.channels.cache.get(preferredChannelId);
     if (isUsableTextChannel(preferred)) {

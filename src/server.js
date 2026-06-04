@@ -85,6 +85,7 @@ const AUDIO_UPLOAD_MIME_PREFIXES = ['audio/'];
 const AUDIO_UPLOAD_MIME_TYPES = new Set(['application/ogg', 'video/webm']);
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+const PLAYER_TEXT_CHANNEL_DISABLED = 'disabled';
 
 function createApiServer(client) {
   const app = express();
@@ -446,7 +447,7 @@ function createApiServer(client) {
       twentyFourSevenChannelName = channel ? channel.name : null;
     }
 
-    if (config.playerTextChannelId && guild) {
+    if (config.playerTextChannelId && config.playerTextChannelId !== PLAYER_TEXT_CHANNEL_DISABLED && guild) {
       const channel = guild.channels.cache.get(config.playerTextChannelId);
       playerTextChannelName = channel ? channel.name : null;
     }
@@ -477,9 +478,9 @@ function createApiServer(client) {
     const previousConfig = getConfig(guildId);
 
     if (typeof body.djRoleId === 'string') updates.djRoleId = body.djRoleId || null;
-    if (typeof body.playerTextChannelId === 'string') {
+    if (Object.prototype.hasOwnProperty.call(body, 'playerTextChannelId')) {
       const channelId = body.playerTextChannelId || null;
-      if (channelId) {
+      if (channelId && channelId !== PLAYER_TEXT_CHANNEL_DISABLED) {
         const channel = guild?.channels?.cache?.get(channelId);
         if (!isUsableTextChannel(channel)) {
           return res.status(400).json({ error: 'Invalid player text channel' });
@@ -500,8 +501,8 @@ function createApiServer(client) {
     const updated = setConfig(guildId, updates);
 
     if (Object.prototype.hasOwnProperty.call(updates, 'playerTextChannelId')) {
-      const preferredTextChannelId = getFallbackTextChannelId(guild, updated.playerTextChannelId);
       const player = client.lavalink?.players?.get(guildId);
+      const preferredTextChannelId = resolvePlayerTextChannelId(guild, updated.playerTextChannelId, player?.textChannelId ?? null);
       if (player && player.textChannelId !== preferredTextChannelId) {
         player.textChannelId = preferredTextChannelId;
       }
@@ -526,74 +527,41 @@ function createApiServer(client) {
   // ---- Guild Status / Player ----
 
   app.get('/api/guilds/:guildId/status', requireAuth, requireGuildAdmin, (req, res) => {
+    res.json(buildPlayerStatusSnapshot(client, req.params.guildId));
+  });
+
+  app.get('/api/guilds/:guildId/player/events', requireAuth, requireGuildAdmin, (req, res) => {
     const guildId = req.params.guildId;
-    const player = client.lavalink?.players?.get(guildId);
-    const guild = client.guilds.cache.get(guildId);
-    const config = getConfig(guildId);
+    const page = parseQueuePage(req.query.page);
 
-    if (!player) {
-      return res.json({
-        connected: false,
-        playing: false,
-        paused: false,
-        voiceChannelId: null,
-        voiceChannelName: null,
-        currentTrack: null,
-        queueLength: 0,
-        repeatMode: 'off',
-        volume: 100,
-        filters: null,
-        autoplay: config.autoplay ?? false,
-        sessionHistory: [],
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+
+    let closed = false;
+    const sendSnapshot = () => {
+      if (closed) return;
+      writeSseEvent(res, 'snapshot', {
+        status: buildPlayerStatusSnapshot(client, guildId),
+        queue: buildQueueSnapshot(client, guildId, page),
+        timestamp: Date.now(),
       });
-    }
+    };
 
-    let voiceChannelName = null;
-    if (player.voiceChannelId && guild) {
-      const channel = guild.channels.cache.get(player.voiceChannelId);
-      voiceChannelName = channel ? channel.name : null;
-    }
+    sendSnapshot();
+    const snapshotInterval = setInterval(sendSnapshot, 1000);
+    const heartbeatInterval = setInterval(() => {
+      if (!closed) res.write(': keep-alive\n\n');
+    }, 15000);
 
-    let currentTrack = null;
-    if (player.queue.current) {
-      const info = player.queue.current.info;
-      currentTrack = {
-        title: info.title || 'Unknown',
-        author: info.author || 'Unknown',
-        uri: info.uri || '',
-        duration: info.duration || 0,
-        position: player.position || 0,
-        artwork: extractArtwork(info),
-      };
-    }
-
-    const sessionHistory = (player.queue.previous || [])
-      .slice(-2)
-      .reverse()
-      .map((track) => {
-        const info = track?.info || {};
-        return {
-          title: info.title || 'Unknown',
-          author: info.author || 'Unknown',
-          uri: info.uri || '',
-          duration: info.duration || 0,
-          artwork: extractArtwork(info),
-        };
-      });
-
-    res.json({
-      connected: true,
-      playing: player.playing,
-      paused: player.paused,
-      voiceChannelId: player.voiceChannelId,
-      voiceChannelName,
-      currentTrack,
-      queueLength: player.queue.tracks.length,
-      repeatMode: player.repeatMode || 'off',
-      volume: player.volume ?? 100,
-      filters: player.filterManager?.activePreset || null,
-      autoplay: config.autoplay ?? false,
-      sessionHistory,
+    req.on('close', () => {
+      closed = true;
+      clearInterval(snapshotInterval);
+      clearInterval(heartbeatInterval);
     });
   });
 
@@ -622,7 +590,7 @@ function createApiServer(client) {
             player = client.lavalink.createPlayer({
               guildId,
               voiceChannelId: botVoiceChannelId,
-              textChannelId: getFallbackTextChannelId(guild, guildConfig.playerTextChannelId),
+              textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player?.textChannelId ?? null),
               selfDeaf: true,
               volume: guildConfig.defaultVolume ?? 60,
             });
@@ -789,42 +757,7 @@ function createApiServer(client) {
   });
 
   app.get('/api/guilds/:guildId/queue', requireAuth, requireGuildAdmin, (req, res) => {
-    const player = client.lavalink?.players?.get(req.params.guildId);
-    if (!player) {
-      return res.json({ current: null, tracks: [], total: 0 });
-    }
-
-    const page = parseInt(req.query.page, 10) || 0;
-    const perPage = 20;
-    const allTracks = player.queue.tracks;
-
-    const current = player.queue.current
-      ? {
-          title: player.queue.current.info.title,
-          author: player.queue.current.info.author,
-          uri: player.queue.current.info.uri,
-          duration: player.queue.current.info.duration,
-          artwork: extractArtwork(player.queue.current.info),
-        }
-      : null;
-
-    const start = page * perPage;
-    const tracks = allTracks.slice(start, start + perPage).map((t) => ({
-      title: t.info.title,
-      author: t.info.author,
-      uri: t.info.uri,
-      duration: t.info.duration,
-      requester: t.requester?.username || t.requester?.id || 'Unknown',
-      artwork: extractArtwork(t.info),
-    }));
-
-    res.json({
-      current,
-      tracks,
-      total: allTracks.length,
-      page,
-      totalPages: Math.ceil(allTracks.length / perPage),
-    });
+    res.json(buildQueueSnapshot(client, req.params.guildId, parseQueuePage(req.query.page)));
   });
 
   // ---- Economy ----
@@ -960,7 +893,7 @@ function createApiServer(client) {
           player = client.lavalink.createPlayer({
             guildId,
             voiceChannelId: botVoiceChannelId,
-            textChannelId: getFallbackTextChannelId(guild, guildConfig.playerTextChannelId),
+            textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player?.textChannelId ?? null),
             selfDeaf: true,
             volume: guildConfig.defaultVolume ?? 60,
           });
@@ -973,8 +906,8 @@ function createApiServer(client) {
       }
 
       if (guild) {
-        const preferredTextChannelId = getFallbackTextChannelId(guild, guildConfig.playerTextChannelId);
-        if (preferredTextChannelId && player.textChannelId !== preferredTextChannelId) {
+        const preferredTextChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player.textChannelId ?? null);
+        if (player.textChannelId !== preferredTextChannelId) {
           player.textChannelId = preferredTextChannelId;
         }
       }
@@ -1333,7 +1266,7 @@ function createApiServer(client) {
         const channel = guild.channels.cache.get(channelId);
         if (!channel || !channel.isVoiceBased()) return res.status(400).json({ error: 'Invalid voice channel' });
 
-        const preferredTextChannelId = getFallbackTextChannelId(guild, guildConfig.playerTextChannelId);
+        const preferredTextChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, null);
         
         let player = client.lavalink.players.get(guild.id);
         if (!player) {
@@ -1573,13 +1506,24 @@ async function cleanupExpiredAudioUploads() {
   }
 }
 
-function getFallbackTextChannelId(guild, preferredChannelId = null) {
+function resolvePlayerTextChannelId(guild, preferredChannelId = null, fallbackChannelId = null) {
   if (!guild) return null;
+
+  if (preferredChannelId === PLAYER_TEXT_CHANNEL_DISABLED) {
+    return null;
+  }
 
   if (preferredChannelId) {
     const preferred = guild.channels.cache.get(preferredChannelId);
     if (isUsableTextChannel(preferred)) {
       return preferred.id;
+    }
+  }
+
+  if (fallbackChannelId) {
+    const fallback = guild.channels.cache.get(fallbackChannelId);
+    if (isUsableTextChannel(fallback)) {
+      return fallback.id;
     }
   }
 
@@ -1590,6 +1534,131 @@ function isUsableTextChannel(channel) {
   if (!channel || !channel.isTextBased()) return false;
   if (typeof channel.isSendable === 'function') return channel.isSendable();
   return channel.viewable !== false;
+}
+
+function buildPlayerStatusSnapshot(client, guildId) {
+  const player = client.lavalink?.players?.get(guildId);
+  const guild = client.guilds.cache.get(guildId);
+  const config = getConfig(guildId);
+
+  if (!player) {
+    return {
+      connected: false,
+      playing: false,
+      paused: false,
+      voiceChannelId: null,
+      voiceChannelName: null,
+      currentTrack: null,
+      queueLength: 0,
+      repeatMode: 'off',
+      volume: 100,
+      filters: null,
+      autoplay: config.autoplay ?? false,
+      sessionHistory: [],
+    };
+  }
+
+  let voiceChannelName = null;
+  if (player.voiceChannelId && guild) {
+    const channel = guild.channels.cache.get(player.voiceChannelId);
+    voiceChannelName = channel ? channel.name : null;
+  }
+
+  let currentTrack = null;
+  if (player.queue.current) {
+    const info = player.queue.current.info || {};
+    currentTrack = {
+      title: info.title || 'Unknown',
+      author: info.author || 'Unknown',
+      uri: info.uri || '',
+      duration: info.duration || 0,
+      position: player.position || 0,
+      artwork: extractArtwork(info),
+    };
+  }
+
+  const sessionHistory = (player.queue.previous || [])
+    .slice(-2)
+    .reverse()
+    .map((track) => {
+      const info = track?.info || {};
+      return {
+        title: info.title || 'Unknown',
+        author: info.author || 'Unknown',
+        uri: info.uri || '',
+        duration: info.duration || 0,
+        artwork: extractArtwork(info),
+      };
+    });
+
+  return {
+    connected: true,
+    playing: player.playing,
+    paused: player.paused,
+    voiceChannelId: player.voiceChannelId,
+    voiceChannelName,
+    currentTrack,
+    queueLength: player.queue.tracks.length,
+    repeatMode: player.repeatMode || 'off',
+    volume: player.volume ?? 100,
+    filters: player.filterManager?.activePreset || null,
+    autoplay: config.autoplay ?? false,
+    sessionHistory,
+  };
+}
+
+function buildQueueSnapshot(client, guildId, page = 0) {
+  const player = client.lavalink?.players?.get(guildId);
+  if (!player) {
+    return { current: null, tracks: [], total: 0, page, totalPages: 0 };
+  }
+
+  const perPage = 20;
+  const allTracks = player.queue.tracks;
+  const start = page * perPage;
+
+  const current = player.queue.current
+    ? formatQueueTrack(player.queue.current, false)
+    : null;
+
+  const tracks = allTracks
+    .slice(start, start + perPage)
+    .map((track) => formatQueueTrack(track, true));
+
+  return {
+    current,
+    tracks,
+    total: allTracks.length,
+    page,
+    totalPages: Math.ceil(allTracks.length / perPage),
+  };
+}
+
+function formatQueueTrack(track, includeRequester) {
+  const info = track?.info || {};
+  const formatted = {
+    title: info.title || 'Unknown',
+    author: info.author || 'Unknown',
+    uri: info.uri || '',
+    duration: info.duration || 0,
+    artwork: extractArtwork(info),
+  };
+
+  if (includeRequester) {
+    formatted.requester = track?.requester?.username || track?.requester?.id || 'Unknown';
+  }
+
+  return formatted;
+}
+
+function parseQueuePage(value) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function writeSseEvent(res, event, data) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 function extractArtwork(info) {

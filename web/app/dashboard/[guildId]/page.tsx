@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { apiFetch, type GuildConfig, type PlayerStatus, type QueueTrack, type GuildHealth, type GuildInsights, type GuildInsightsRange, type FilterPreset, type EconomyLeaderboardEntry, type EconomyMember, formatDuration } from '@/lib/api';
-import { Settings, Activity, Play, Pause, SkipForward, Square, Shuffle, Repeat, Volume2, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, SlidersHorizontal, Trash2, Upload, FileAudio, SkipBack } from 'lucide-react';
+import { Settings, Activity, Play, Pause, SkipForward, Square, Shuffle, Repeat, Volume2, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, SlidersHorizontal, Trash2, Upload, FileAudio, SkipBack, GripVertical } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
 
 type Tab = 'settings' | 'status' | 'player' | 'economy' | 'control';
@@ -205,6 +205,15 @@ function SettingsTab({ guildId }: { guildId: string }) {
   );
   if (!config) return <p className="text-text-secondary">Failed to load config.</p>;
 
+  const playerTextChannelValue = config.playerTextChannelId === null
+    ? '__default'
+    : config.playerTextChannelId === 'disabled'
+      ? '__disabled'
+      : config.playerTextChannelId;
+  const playerTextChannelDescription = config.playerTextChannelId === 'disabled'
+    ? 'Disabled (no player message)'
+    : config.playerTextChannelName || 'Default (use command/player context)';
+
   return (
     <div className="space-y-5 w-full max-w-5xl mx-auto">
 
@@ -351,13 +360,20 @@ function SettingsTab({ guildId }: { guildId: string }) {
             <option value="spsearch">Spotify</option>
           </select>
         </Row>
-        <Row label="Player Text Channel" desc={config.playerTextChannelName || 'Disabled (no player message)'}>
+        <Row label="Player Text Channel" desc={playerTextChannelDescription}>
           <select
-            value={config.playerTextChannelId || ''}
-            onChange={(e) => setConfig({ ...config, playerTextChannelId: e.target.value || null })}
+            value={playerTextChannelValue}
+            onChange={(e) => {
+              const value = e.target.value;
+              setConfig({
+                ...config,
+                playerTextChannelId: value === '__default' ? null : value === '__disabled' ? 'disabled' : value,
+              });
+            }}
             className={selectClass + " w-64 max-w-full"}
           >
-            <option value="">(Disabled - do not send player message)</option>
+            <option value="__default">Default (use command/player channel)</option>
+            <option value="__disabled">Disabled (do not send player message)</option>
             {channels.filter(c => c.type === 0 || c.type === 5).map(c => (
               <option key={c.id} value={c.id}>
                 #{c.name}
@@ -836,21 +852,29 @@ function Music2({ size, className }: { size: number; className?: string }) {
 
 function SegmentedVolume({ value, onChange, onCommit }: { value: number; onChange: (v: number) => void; onCommit: (v: number) => void }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [tooltipLeft, setTooltipLeft] = useState(0);
   const max = 150;
   const segments = 15;
   const isDragging = useRef(false);
 
+  const getClientX = (e: React.MouseEvent | React.TouchEvent) => {
+    if ('touches' in e) {
+      return e.touches[0]?.clientX ?? e.changedTouches[0]?.clientX ?? 0;
+    }
+    return (e as React.MouseEvent).clientX;
+  };
+
   const getHoverIndex = (e: React.MouseEvent | React.TouchEvent, el: HTMLElement) => {
     const rect = el.getBoundingClientRect();
-    const x = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const x = getClientX(e);
     const progress = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
-    // Index from 0 to segments (where 0 is no volume, 1 is first segment, etc.)
+    setTooltipLeft(progress * 100);
     return Math.round(progress * segments);
   };
 
   return (
     <div 
-      className="flex items-end justify-between h-6 w-36 gap-[3px] cursor-pointer group py-1"
+      className="relative flex items-end justify-between h-6 w-36 gap-[3px] cursor-pointer group py-1"
       onMouseLeave={() => { setHoverIdx(null); isDragging.current = false; }}
       onMouseUp={(e) => { 
         isDragging.current = false;
@@ -887,6 +911,14 @@ function SegmentedVolume({ value, onChange, onCommit }: { value: number; onChang
         }
       }}
     >
+      {hoverIdx !== null && (
+        <div
+          className="pointer-events-none absolute -top-7 z-10 rounded bg-bg-primary border border-border px-1.5 py-0.5 text-[11px] font-medium text-text-primary shadow-lg tabular-nums"
+          style={{ left: `${tooltipLeft}%`, transform: 'translateX(-50%)' }}
+        >
+          {hoverIdx * (max / segments)}%
+        </div>
+      )}
       {Array.from({ length: segments }).map((_, i) => {
         const segValue = (i + 1) * (max / segments);
         const isActive = value >= segValue - (max/segments)/2;
@@ -919,69 +951,108 @@ function PlayerTab({ guildId }: { guildId: string }) {
   const [applyingFilter, setApplyingFilter] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [seekPreview, setSeekPreview] = useState<{ value: number; left: number } | null>(null);
 
   // Local state for smooth sliders
   const [localVolume, setLocalVolume] = useState<number | null>(null);
   const [localSeek, setLocalSeek] = useState<number | null>(null);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const lastTrackSeenAtRef = useRef(0);
   const pausedTrackKeyRef = useRef<string | null>(null);
   const pausedTrackPositionRef = useRef<number | null>(null);
 
-  const fetchData = useCallback(() => {
-    apiFetch<PlayerStatus>(`/guilds/${guildId}/status`).then((incomingStatus) => {
-      setStatus((prev) => {
-        let s = incomingStatus;
+  const applyIncomingStatus = useCallback((incomingStatus: PlayerStatus) => {
+    setStatus((prev) => {
+      let s = incomingStatus;
 
-        if (s.currentTrack) {
-          const trackKey = `${s.currentTrack.uri}|${s.currentTrack.title}|${s.currentTrack.author}`;
+      if (s.currentTrack) {
+        const trackKey = `${s.currentTrack.uri}|${s.currentTrack.title}|${s.currentTrack.author}`;
 
-          if (s.paused) {
-            if (pausedTrackKeyRef.current !== trackKey || pausedTrackPositionRef.current === null) {
-              pausedTrackKeyRef.current = trackKey;
-              pausedTrackPositionRef.current = s.currentTrack.position || 0;
-            }
-
-            s = {
-              ...s,
-              currentTrack: {
-                ...s.currentTrack,
-                position: pausedTrackPositionRef.current,
-              },
-            };
-          } else {
+        if (s.paused) {
+          if (pausedTrackKeyRef.current !== trackKey || pausedTrackPositionRef.current === null) {
             pausedTrackKeyRef.current = trackKey;
-            pausedTrackPositionRef.current = null;
+            pausedTrackPositionRef.current = s.currentTrack.position || 0;
           }
 
-          lastTrackSeenAtRef.current = Date.now();
-          return s;
+          s = {
+            ...s,
+            currentTrack: {
+              ...s.currentTrack,
+              position: pausedTrackPositionRef.current,
+            },
+          };
+        } else {
+          pausedTrackKeyRef.current = trackKey;
+          pausedTrackPositionRef.current = null;
         }
 
-        const withinGraceWindow = Date.now() - lastTrackSeenAtRef.current < TRACK_TRANSITION_GRACE_MS;
-        if (s.connected && withinGraceWindow && prev?.currentTrack) {
-          return { ...s, currentTrack: prev.currentTrack };
-        }
-
-        if (!s.connected) {
-          lastTrackSeenAtRef.current = 0;
-        }
-
-        pausedTrackKeyRef.current = null;
-        pausedTrackPositionRef.current = null;
-
+        lastTrackSeenAtRef.current = Date.now();
         return s;
-      });
-    }).catch(() => {});
+      }
+
+      const withinGraceWindow = Date.now() - lastTrackSeenAtRef.current < TRACK_TRANSITION_GRACE_MS;
+      if (s.connected && withinGraceWindow && prev?.currentTrack) {
+        return { ...s, currentTrack: prev.currentTrack };
+      }
+
+      if (!s.connected) {
+        lastTrackSeenAtRef.current = 0;
+      }
+
+      pausedTrackKeyRef.current = null;
+      pausedTrackPositionRef.current = null;
+
+      return s;
+    });
+  }, []);
+
+  const fetchData = useCallback(() => {
+    apiFetch<PlayerStatus>(`/guilds/${guildId}/status`).then(applyIncomingStatus).catch(() => {});
     apiFetch<NonNullable<typeof queue>>(`/guilds/${guildId}/queue?page=${queuePage}`).then(setQueue).catch(() => {});
-  }, [guildId, queuePage]);
+  }, [applyIncomingStatus, guildId, queuePage]);
 
   useEffect(() => {
+    let source: EventSource | null = null;
+    let fallbackInterval: ReturnType<typeof setInterval> | null = null;
+    let usingFallback = false;
+
+    const startFallback = () => {
+      if (usingFallback) return;
+      usingFallback = true;
+      fallbackInterval = setInterval(fetchData, 3000);
+    };
+
     fetchData();
-    const interval = setInterval(fetchData, 3000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+
+    if (typeof window !== 'undefined' && 'EventSource' in window) {
+      source = new EventSource(`/api/guilds/${guildId}/player/events?page=${queuePage}`);
+      source.addEventListener('snapshot', (event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent).data) as {
+            status?: PlayerStatus;
+            queue?: NonNullable<typeof queue>;
+          };
+          if (payload.status) applyIncomingStatus(payload.status);
+          if (payload.queue) setQueue(payload.queue);
+        } catch {
+          // Ignore malformed stream frames and let the next snapshot repair state.
+        }
+      });
+      source.onerror = () => {
+        source?.close();
+        startFallback();
+      };
+    } else {
+      startFallback();
+    }
+
+    return () => {
+      source?.close();
+      if (fallbackInterval) clearInterval(fallbackInterval);
+    };
+  }, [applyIncomingStatus, fetchData, guildId, queuePage]);
 
   useEffect(() => {
     apiFetch<{ presets: FilterPreset[] }>(`/guilds/${guildId}/player/filters`)
@@ -1185,29 +1256,51 @@ function PlayerTab({ guildId }: { guildId: string }) {
     setTimeout(() => setLocalSeek(null), 100);
   };
 
+  const resetDragState = useCallback(() => {
+    setDraggedIdx(null);
+    setDropTargetIdx(null);
+  }, []);
+
   const handleDragStart = (e: React.DragEvent, idx: number) => {
     setDraggedIdx(idx);
+    setDropTargetIdx(idx);
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(idx));
   };
 
   const handleDragOver = (e: React.DragEvent, idx: number) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    setDropTargetIdx(idx);
   };
 
-  const handleDrop = (e: React.DragEvent, targetIdx: number) => {
+  const handleDrop = async (e: React.DragEvent, targetIdx: number) => {
     e.preventDefault();
-    if (draggedIdx === null || draggedIdx === targetIdx) return;
-    
-    // Optimistic UI update
-    const newQueue = [...queue!.tracks];
+    if (!queue || draggedIdx === null || draggedIdx === targetIdx) {
+      resetDragState();
+      return;
+    }
+
+    const previousQueue = queue;
+    const newQueue = [...queue.tracks];
     const item = newQueue.splice(draggedIdx, 1)[0];
     newQueue.splice(targetIdx, 0, item);
-    setQueue({ ...queue!, tracks: newQueue });
-    
-    // API Call
-    playerAction('move', { from: queuePage * 20 + draggedIdx, to: queuePage * 20 + targetIdx });
-    setDraggedIdx(null);
+    setQueue({ ...queue, tracks: newQueue });
+    resetDragState();
+
+    try {
+      await apiFetch(`/guilds/${guildId}/player/move`, {
+        method: 'POST',
+        body: JSON.stringify({ from: queuePage * 20 + draggedIdx, to: queuePage * 20 + targetIdx }),
+      });
+      toast.success('Action applied', 'Queue order updated.');
+      fetchData();
+    } catch (err) {
+      setQueue(previousQueue);
+      const errorText = err instanceof Error ? err.message : 'Could not reorder queue.';
+      toast.error('Player action failed', errorText);
+      fetchData();
+    }
   };
 
   if (!status) return (
@@ -1236,6 +1329,23 @@ function PlayerTab({ guildId }: { guildId: string }) {
   const canUsePlayerControls = Boolean(status.connected);
   const canControlTrack = Boolean(status.connected && status.currentTrack);
 
+  const updateSeekPreview = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
+    if (!currentDuration) {
+      setSeekPreview(null);
+      return;
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clientX = 'touches' in e
+      ? e.touches[0]?.clientX ?? e.changedTouches[0]?.clientX ?? rect.left
+      : e.clientX;
+    const progress = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    setSeekPreview({
+      value: Math.round(progress * currentDuration),
+      left: progress * 100,
+    });
+  };
+
   return (
     <div className="space-y-5 w-full max-w-6xl mx-auto">
       <div className="bg-bg-card rounded-lg border border-border overflow-hidden">
@@ -1255,20 +1365,37 @@ function PlayerTab({ guildId }: { guildId: string }) {
                   <p className="font-medium text-base truncate">{status.currentTrack.title}</p>
                   <p className="text-sm text-text-secondary truncate mt-0.5">{status.currentTrack.author}</p>
                   <div className="mt-4 group/slider">
-                    <input
-                      type="range"
-                      min={0}
-                      max={currentDuration}
-                      value={currentPos}
-                      onChange={(e) => setLocalSeek(Number(e.target.value))}
-                      onMouseUp={(e) => handleSeekCommit(Number((e.target as HTMLInputElement).value))}
-                      onTouchEnd={(e) => handleSeekCommit(Number((e.target as HTMLInputElement).value))}
-                      disabled={!canControlTrack}
-                      className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-border transition-all duration-200 hover:h-2 disabled:cursor-not-allowed disabled:opacity-60
-                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(107,99,255,0.6)] [&::-webkit-slider-thumb]:opacity-0 hover:[&::-webkit-slider-thumb]:opacity-100 [&::-webkit-slider-thumb]:transition-opacity
-                        [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:shadow-[0_0_10px_rgba(107,99,255,0.6)] [&::-moz-range-thumb]:opacity-0 hover:[&::-moz-range-thumb]:opacity-100"
-                      style={{ background: `linear-gradient(to right, #6b63ff ${currentDuration > 0 ? (currentPos / currentDuration) * 100 : 0}%, rgba(255,255,255,0.05) 0)` }}
-                    />
+                    <div className="relative">
+                      {seekPreview && canControlTrack && (
+                        <div
+                          className="pointer-events-none absolute -top-8 z-10 rounded bg-bg-primary border border-border px-1.5 py-0.5 text-[11px] font-medium text-text-primary shadow-lg tabular-nums"
+                          style={{ left: `${seekPreview.left}%`, transform: 'translateX(-50%)' }}
+                        >
+                          {formatDuration(seekPreview.value)}
+                        </div>
+                      )}
+                      <input
+                        type="range"
+                        min={0}
+                        max={currentDuration}
+                        value={currentPos}
+                        onChange={(e) => setLocalSeek(Number(e.target.value))}
+                        onMouseMove={updateSeekPreview}
+                        onMouseLeave={() => setSeekPreview(null)}
+                        onTouchMove={updateSeekPreview}
+                        onTouchEnd={(e) => {
+                          updateSeekPreview(e);
+                          handleSeekCommit(Number((e.target as HTMLInputElement).value));
+                          setSeekPreview(null);
+                        }}
+                        onMouseUp={(e) => handleSeekCommit(Number((e.target as HTMLInputElement).value))}
+                        disabled={!canControlTrack}
+                        className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-border transition-all duration-200 hover:h-2 disabled:cursor-not-allowed disabled:opacity-60
+                          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(107,99,255,0.6)] [&::-webkit-slider-thumb]:opacity-0 hover:[&::-webkit-slider-thumb]:opacity-100 [&::-webkit-slider-thumb]:transition-opacity
+                          [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:shadow-[0_0_10px_rgba(107,99,255,0.6)] [&::-moz-range-thumb]:opacity-0 hover:[&::-moz-range-thumb]:opacity-100"
+                        style={{ background: `linear-gradient(to right, #6b63ff ${currentDuration > 0 ? (currentPos / currentDuration) * 100 : 0}%, rgba(255,255,255,0.05) 0)` }}
+                      />
+                    </div>
                     <div className="flex justify-between text-xs text-text-muted mt-1.5 tabular-nums">
                       <span>{formatDuration(currentPos)}</span>
                       <span>{formatDuration(currentDuration)}</span>
@@ -1535,12 +1662,18 @@ function PlayerTab({ guildId }: { guildId: string }) {
                   key={`${track.uri}-${i}`} 
                   draggable
                   onDragStart={(e) => handleDragStart(e, i)}
+                  onDragEnter={(e) => handleDragOver(e, i)}
                   onDragOver={(e) => handleDragOver(e, i)}
                   onDrop={(e) => handleDrop(e, i)}
-                  className={`group flex items-center gap-3 px-3 py-2 border border-transparent rounded-md hover:bg-bg-hover/50 transition-colors cursor-grab active:cursor-grabbing ${draggedIdx === i ? 'opacity-50' : ''}`}
+                  onDragEnd={resetDragState}
+                  className={`group flex items-center gap-3 px-3 py-2 border rounded-md hover:bg-bg-hover/50 transition-colors cursor-grab active:cursor-grabbing ${
+                    dropTargetIdx === i && draggedIdx !== i
+                      ? 'border-accent/70 bg-accent/10'
+                      : 'border-transparent'
+                  } ${draggedIdx === i ? 'opacity-50' : ''}`}
                 >
                   <div className="flex items-center justify-center w-5 text-text-muted cursor-move opacity-50 hover:opacity-100">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></svg>
+                    <GripVertical size={14} />
                   </div>
                   {track.artwork ? (
                     <img src={track.artwork} alt="" className="w-8 h-8 rounded shrink-0 object-cover" />
