@@ -359,6 +359,9 @@ const commands = [
           title: seedTrack.info.title,
           author: seedTrack.info.author,
           identifier: seedTrack.info.identifier,
+          uri: seedTrack.info.uri,
+          duration: seedTrack.info.duration ?? seedTrack.info.length,
+          sourceName: seedTrack.info.sourceName,
         });
       }
       

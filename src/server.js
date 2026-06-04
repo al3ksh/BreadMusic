@@ -6,7 +6,7 @@ const path = require('path');
 const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
 const { getGuildInsights } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
-const { setAutoplay } = require('./music/autoplay');
+const { setAutoplay, resetSeed, recordAutoplaySkip } = require('./music/autoplay');
 const { applyPreferredSource } = require('./music/searchUtils');
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -802,7 +802,7 @@ function createApiServer(client) {
 
       if (guild) {
         const preferredTextChannelId = getFallbackTextChannelId(guild, guildConfig.playerTextChannelId);
-        if (player.textChannelId !== preferredTextChannelId) {
+        if (preferredTextChannelId && player.textChannelId !== preferredTextChannelId) {
           player.textChannelId = preferredTextChannelId;
         }
       }
@@ -825,6 +825,7 @@ function createApiServer(client) {
 
         case 'skip':
           if (player) {
+            recordAutoplaySkip(guildId, player.queue.current, { position: player.position });
             if (player.queue.tracks.length === 0 && player.queue.current) {
                await player.stopPlaying(false, false);
             } else {
@@ -918,11 +919,13 @@ function createApiServer(client) {
 
           if (encoded) {
             const track = { encoded, info: {}, requester };
-            await player.queue.add(track);
+            await addManualTrackToQueue(player, track);
             if (startedFromIdle) {
               await player.play();
               await client.musicUI?.refresh(player).catch(() => {});
             }
+            const { savePlayerState } = require('./state/queueStore');
+            await savePlayerState(player).catch(() => {});
             return res.json({ success: true });
           }
 
@@ -934,11 +937,23 @@ function createApiServer(client) {
             const result = await searchNode.search({ query: preparedQuery }, requester);
             const track = result?.tracks?.[0];
             if (!track) return res.status(404).json({ error: 'No results found' });
-            await player.queue.add(track);
+            if (track.info) {
+              resetSeed(guildId, {
+                title: track.info.title,
+                author: track.info.author,
+                identifier: track.info.identifier,
+                uri: track.info.uri,
+                duration: track.info.duration ?? track.info.length,
+                sourceName: track.info.sourceName,
+              });
+            }
+            await addManualTrackToQueue(player, track);
             if (startedFromIdle) {
               await player.play();
               await client.musicUI?.refresh(player).catch(() => {});
             }
+            const { savePlayerState } = require('./state/queueStore');
+            await savePlayerState(player).catch(() => {});
             return res.json({ success: true, title: track.info.title });
           }
 
@@ -1157,7 +1172,7 @@ function createApiServer(client) {
           });
         }
 
-        if (player.textChannelId !== preferredTextChannelId) {
+        if (preferredTextChannelId && player.textChannelId !== preferredTextChannelId) {
           player.textChannelId = preferredTextChannelId;
         }
         
@@ -1257,6 +1272,16 @@ async function getGuildMembersSnapshot(guild) {
   } catch {
     return guild.members.cache;
   }
+}
+
+async function addManualTrackToQueue(player, track) {
+  const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
+  if (autoplayIndex !== -1) {
+    player.queue.tracks.splice(autoplayIndex, 0, track);
+    return;
+  }
+
+  await player.queue.add(track);
 }
 
 function getFallbackTextChannelId(guild, preferredChannelId = null) {

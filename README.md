@@ -32,9 +32,6 @@ LAVALINK_SECURE=false
 SPOTIFY_CLIENT_ID=your_spotify_client_id
 SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 
-# Last.fm API (required for autoplay similar artists)
-LASTFM_API_KEY=your_lastfm_api_key
-
 DEFAULT_SOURCE=ytsearch
 IDLE_TIMEOUT_MS=300000
 
@@ -87,7 +84,7 @@ npm run dev:web
 ### 🔁 Autoplay
 - **Smart autoplay**: Automatically finds and plays similar tracks when queue ends
 - **YouTube Radio Mix**: Uses YouTube's own recommendation system as primary source
-- **Last.fm fallback**: Discovers similar artists when YouTube Mix unavailable
+- **Heuristic fallback**: Scores YouTube/Lavalink search candidates when YouTube Mix is weak
 - **Intelligent filtering**: Excludes remixes, covers, live versions
 - **Loop detection**: Prevents getting stuck on same tracks
 - **`[AUTO]` indicator**: Shows in now-playing when track was auto-queued
@@ -313,7 +310,7 @@ Place these in `lavalink/plugins/`:
 | No YouTube results | Verify `youtube-plugin` loaded correctly |
 | Spotify not working | Check `SPOTIFY_CLIENT_ID/SECRET` and restart Lavalink |
 | WebSocket 1006 | Check firewall, host/port, Java version (17/21) |
-| Autoplay not working | Check `LASTFM_API_KEY` in `.env` or try different seed track |
+| Autoplay not working | Check Lavalink/YouTube search and try a different seed track |
 | Filter not clearing | Use `/filter clear` - resets both filters and EQ |
 | Vibrato too weak | It's now set to 8 Hz / 100% depth - should be very noticeable |
 
@@ -330,7 +327,7 @@ src/
 ├── commands/
 │   └── index.js        # Slash command definitions
 ├── music/
-│   ├── autoplay.js     # Autoplay with YouTube Mix + Last.fm
+│   ├── autoplay.js     # Autoplay with YouTube Mix + candidate scoring
 │   ├── embeds.js       # Now-playing embed builder
 │   ├── ui.js           # Button components & mutex locks
 │   ├── idleTracker.js  # Auto-leave logic

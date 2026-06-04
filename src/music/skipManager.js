@@ -1,7 +1,7 @@
 const { registerVote, resetVotes } = require('./voteManager');
 const { hasDJPermissions } = require('../state/guildConfig');
 const { CommandError } = require('./utils');
-const { isAutoplayEnabled, handleAutoplay, addToRecentTracks } = require('./autoplay');
+const { isAutoplayEnabled, handleAutoplay, addToRecentTracks, recordAutoplaySkip } = require('./autoplay');
 
 async function resolveMember(interaction) {
   if (interaction.member) return interaction.member;
@@ -32,6 +32,7 @@ async function handleSkipRequest(interaction, player, config, client) {
   if (!requiresDjRole || hasDJPermissions(member, config)) {
     if (isLastTrack) {
       const currentTrack = player.queue.current;
+      recordAutoplaySkip(player.guildId, currentTrack, { position: player.position });
       await player.stopPlaying(false, false);
       resetVotes(player.guildId);
       
@@ -41,6 +42,7 @@ async function handleSkipRequest(interaction, player, config, client) {
       return { skipped: true, message: 'Skipped the track.', needsAutoplay: false };
     }
     
+    recordAutoplaySkip(player.guildId, player.queue.current, { position: player.position });
     await player.skip();
     resetVotes(player.guildId);
     return { skipped: true, message: 'Skipped the track.', needsAutoplay: false };
@@ -52,6 +54,7 @@ async function handleSkipRequest(interaction, player, config, client) {
   if (votes >= requiredVotes) {
     if (isLastTrack) {
       const currentTrack = player.queue.current;
+      recordAutoplaySkip(player.guildId, currentTrack, { position: player.position });
       await player.stopPlaying(false, false);
       resetVotes(player.guildId);
       
@@ -61,6 +64,7 @@ async function handleSkipRequest(interaction, player, config, client) {
       return { skipped: true, message: 'Vote threshold reached. Skipped the track.', needsAutoplay: false };
     }
     
+    recordAutoplaySkip(player.guildId, player.queue.current, { position: player.position });
     await player.skip();
     resetVotes(player.guildId);
     return { skipped: true, message: 'Vote threshold reached. Skipped the track.', needsAutoplay: false };
