@@ -66,6 +66,7 @@ function hasDJPermissions(member, guildConfig) {
 }
 
 function assertDJ(interaction, guildConfig) {
+  if (!guildConfig?.djRoleId) return;
   if (hasDJPermissions(interaction.member, guildConfig)) return;
   throw new CommandError('This command requires the DJ role or Manage Guild permission.');
 }

@@ -417,7 +417,8 @@ const commands = [
     data: new SlashCommandBuilder().setName('pause').setDescription('Pause playback.'),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       if (player.paused) {
         await interaction.editReply('Playback is already paused.');
         return;
@@ -431,7 +432,8 @@ const commands = [
     data: new SlashCommandBuilder().setName('resume').setDescription('Resume playback.'),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       if (!player.paused) {
         await interaction.editReply('Nothing is paused right now.');
         return;
@@ -486,7 +488,8 @@ const commands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction);
+      const { player, config } = await ensurePlayer(interaction);
+      assertDJ(interaction, config);
       await player.destroy('manual-leave', true);
       await interaction.client.musicUI.clear(interaction.guildId);
       await deleteInteractionReply(interaction);
@@ -592,7 +595,8 @@ const commands = [
       ),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       if (!player.queue.current) {
         throw new CommandError('Nothing is playing.');
       }
@@ -610,7 +614,8 @@ const commands = [
       ),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       const index = interaction.options.getInteger('index', true);
 
       if (index < 1 || index > player.queue.tracks.length) {
@@ -627,7 +632,8 @@ const commands = [
     data: new SlashCommandBuilder().setName('back').setDescription('Go back to the previous track.'),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       const previous = await player.queue.shiftPrevious();
       if (!previous) {
         await interaction.editReply('No previous tracks.');
@@ -643,7 +649,8 @@ const commands = [
     data: new SlashCommandBuilder().setName('replay').setDescription('Replay from start.'),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       if (!player.queue.current) {
         await interaction.editReply('No active track.');
         return;
@@ -657,7 +664,8 @@ const commands = [
     data: new SlashCommandBuilder().setName('shuffle').setDescription('Shuffle the queue.'),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       if (player.queue.tracks.length === 0) {
         await interaction.editReply('No tracks to shuffle.');
         return;
@@ -672,7 +680,8 @@ const commands = [
     data: new SlashCommandBuilder().setName('autoplay').setDescription('Toggle autoplay - automatically plays similar tracks.'),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await ensurePlayer(interaction, { requireSameChannel: true });
+      const { config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       
       const enabled = toggleAutoplay(interaction.guildId);
       
@@ -705,7 +714,8 @@ const commands = [
       ),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      assertDJ(interaction, config);
       const mode = interaction.options.getString('mode', true);
       await player.setRepeatMode(mode);
       await interaction.client.musicUI.refresh(player);

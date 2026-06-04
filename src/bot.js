@@ -21,7 +21,7 @@ const { savePlayerState, hydratePlayer, resetAllQueues } = require('./state/queu
 const { recordTrackPlay } = require('./state/analyticsStore');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
 const { resetVotes } = require('./music/voteManager');
-const { getConfig, listConfigs, assertDJ } = require('./state/guildConfig');
+const { getConfig, listConfigs, assertDJ, hasDJPermissions } = require('./state/guildConfig');
 const { createSelection } = require('./state/searchCache');
 const {
   buildQueueEmbed,
@@ -717,8 +717,9 @@ function parseChallengeMeta(challengeId) {
 }
 
 async function togglePlayPause(interaction) {
+  const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+  assertDJ(interaction, config);
   await interaction.deferUpdate();
-  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
   if (player.paused) await player.resume();
   else await player.pause();
   await savePlayerState(player).catch(() => {});
@@ -726,9 +727,9 @@ async function togglePlayPause(interaction) {
 }
 
 async function skipTrack(interaction) {
-  await interaction.deferUpdate();
   const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
-  if (player.repeatMode === 'track') {
+  await interaction.deferUpdate();
+  if (player.repeatMode === 'track' && canControlPlayer(interaction, config)) {
     const restarted = await restartCurrent(player);
     if (!restarted) {
       await interaction
@@ -746,8 +747,9 @@ async function skipTrack(interaction) {
 }
 
 async function stopPlayback(interaction) {
+  const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+  assertDJ(interaction, config);
   await interaction.deferUpdate();
-  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
   await player.stopPlaying(true);
   player.queue.tracks.splice(0, player.queue.tracks.length);
   await player.destroy('Stopped via UI', true);
@@ -756,8 +758,9 @@ async function stopPlayback(interaction) {
 }
 
 async function playPrevious(interaction) {
+  const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+  assertDJ(interaction, config);
   await interaction.deferUpdate();
-  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
   if (player.repeatMode === 'track') {
     const restarted = await restartCurrent(player);
     if (!restarted) {
@@ -782,8 +785,9 @@ async function playPrevious(interaction) {
 }
 
 async function toggleLoop(interaction) {
+  const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+  assertDJ(interaction, config);
   await interaction.deferUpdate();
-  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
   const order = ['off', 'track', 'queue'];
   const currentIndex = order.indexOf(player.repeatMode ?? 'off');
   const nextMode = order[(currentIndex + 1) % order.length];
@@ -793,8 +797,9 @@ async function toggleLoop(interaction) {
 }
 
 async function shuffleQueue(interaction) {
+  const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+  assertDJ(interaction, config);
   await interaction.deferUpdate();
-  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
   if (player.queue.tracks.length === 0) {
     await interaction.followUp({ content: 'No tracks to shuffle.', flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
@@ -811,6 +816,10 @@ async function restartCurrent(player) {
   await savePlayerState(player).catch(() => {});
   await client.musicUI.refresh(player);
   return true;
+}
+
+function canControlPlayer(interaction, guildConfig) {
+  return !guildConfig?.djRoleId || hasDJPermissions(interaction.member, guildConfig);
 }
 
 async function handleAutocomplete(interaction) {

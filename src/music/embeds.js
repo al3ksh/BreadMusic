@@ -14,15 +14,17 @@ const LABELS = {
 
 function buildTrackEmbed(track, requester, voiceChannelId) {
   const requesterLabel = requester?.tag ?? requester?.username ?? requester?.id ?? 'Unknown user';
+  const trackTitle = formatTrackTitle(track);
+  const trackAuthor = formatTrackAuthor(track);
   const description = track.info.uri
-    ? `[${track.info.title ?? 'Unknown title'}](${track.info.uri})`
-    : `${track.info.title ?? 'Unknown title'}`;
+    ? `[${trackTitle}](${track.info.uri})`
+    : trackTitle;
 
   const embed = new EmbedBuilder()
     .setTitle('➕ Added to queue')
     .setDescription(description)
     .addFields(
-      { name: LABELS.ARTIST, value: track.info.author ?? 'Unknown', inline: true },
+      { name: LABELS.ARTIST, value: trackAuthor, inline: true },
       {
         name: LABELS.DURATION,
         value: formatDuration(track.info.duration ?? track.info.length ?? 0),
@@ -60,23 +62,26 @@ function buildNowPlayingEmbed(player, track) {
   
   const autoplayOn = player?.guildId && isAutoplayEnabled(player.guildId);
   const title = autoplayOn ? 'Now Playing [AUTO]' : 'Now Playing';
+  const trackTitle = formatTrackTitle(track);
+  const trackAuthor = formatTrackAuthor(track);
+  const source = formatTrackSource(track);
 
   const embed = new EmbedBuilder()
     .setTitle(title)
     .setDescription(
-      `[${track.info.author ?? 'Unknown'} - ${track.info.title ?? 'Unknown'}](${track.info.uri ?? ''})\n${progressBar}\n${formatDuration(position)} / ${formatDuration(
+      `${formatTrackLink(track, `${trackAuthor} - ${trackTitle}`)}\n${progressBar}\n${formatDuration(position)} / ${formatDuration(
         duration,
       )}`,
     )
     .setColor('#22d3ee')
     .addFields(
-      { name: LABELS.ARTIST, value: track.info.author ?? 'Unknown', inline: true },
+      { name: LABELS.ARTIST, value: trackAuthor, inline: true },
       { name: LABELS.DURATION, value: formatDuration(duration), inline: true },
       { name: LABELS.VOLUME, value: formatVolume(player?.volume), inline: true },
       { name: LABELS.LOOP, value: formatLoopMode(player?.repeatMode), inline: true },
       {
         name: LABELS.SOURCE,
-        value: track.info.sourceName ?? 'Unknown',
+        value: source,
         inline: true,
       },
       {
@@ -110,6 +115,46 @@ function formatLoopMode(mode) {
 function formatVolume(volume) {
   if (!Number.isFinite(volume)) return '100%';
   return `${volume}%`;
+}
+
+function formatTrackTitle(track) {
+  return track?.info?.title || track?.localUpload?.fileName || 'Unknown title';
+}
+
+function formatTrackAuthor(track) {
+  const author = track?.info?.author;
+  if (isLocalUploadTrack(track) && isUnknownTrackAuthor(author)) {
+    return 'Local upload';
+  }
+  return author || 'Unknown';
+}
+
+function formatTrackSource(track) {
+  if (isLocalUploadTrack(track)) return 'upload';
+  return track?.info?.sourceName ?? 'Unknown';
+}
+
+function formatTrackLink(track, label) {
+  const uri = track?.info?.uri;
+  if (!uri) return label;
+  return `[${label}](${uri})`;
+}
+
+function isLocalUploadTrack(track) {
+  const info = track?.info || {};
+  return Boolean(
+    track?.localUpload ||
+      info.localUpload ||
+      info.isLocalUpload ||
+      info.sourceName === 'localUpload' ||
+      (typeof info.uri === 'string' && info.uri.includes('/api/uploads/')),
+  );
+}
+
+function isUnknownTrackAuthor(author) {
+  if (typeof author !== 'string') return true;
+  const normalized = author.trim().toLowerCase();
+  return !normalized || normalized === 'unknown' || normalized === 'unknown artist';
 }
 
 function resolveArtwork(track) {

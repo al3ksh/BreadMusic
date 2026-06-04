@@ -654,13 +654,16 @@ function createApiServer(client) {
           return res.status(400).json({ error: 'Lavalink could not load this audio file' });
         }
 
+        const uploadTitle = track.info?.title || path.basename(originalName, ext);
+        const uploadAuthor = isUnknownTrackAuthor(track.info?.author) ? 'Local upload' : track.info.author;
         const queuedTrack = {
           ...track,
           info: {
             ...track.info,
-            title: track.info?.title || path.basename(originalName, ext),
-            author: track.info?.author || 'Local upload',
+            title: uploadTitle,
+            author: uploadAuthor,
             uri: track.info?.uri || playbackUrl,
+            sourceName: 'localUpload',
             isLocalUpload: true,
           },
         };
@@ -1195,6 +1198,32 @@ function createApiServer(client) {
     }
   });
 
+  app.get('/api/guilds/:guildId/members', requireAuth, requireGuildAdmin, async (req, res) => {
+    try {
+      const guild = client.guilds.cache.get(req.params.guildId);
+      if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+      const requested = parseInt(req.query.limit, 10);
+      const limit = Number.isFinite(requested) ? Math.max(1, Math.min(500, requested)) : 250;
+      const members = await getGuildMembersSnapshot(guild);
+      const list = [...members.values()]
+        .filter((member) => !member.user.bot)
+        .sort((a, b) => (a.displayName || a.user.username).localeCompare(b.displayName || b.user.username))
+        .slice(0, limit)
+        .map((member) => ({
+          id: member.id,
+          username: member.user.username,
+          displayName: member.displayName || member.user.globalName || member.user.username,
+          avatar: member.displayAvatarURL({ size: 64 }) || null,
+        }));
+
+      res.json({ members: list });
+    } catch (err) {
+      console.error('Members fetch error:', err);
+      res.status(500).json({ error: 'Failed to fetch members' });
+    }
+  });
+
   app.get('/api/guilds/:guildId/control/messages', requireAuth, requireGuildAdmin, async (req, res) => {
     try {
       const channelId = req.query.channelId;
@@ -1216,7 +1245,34 @@ function createApiServer(client) {
           bot: m.author.bot
         },
         timestamp: m.createdTimestamp,
-        attachments: m.attachments.map(a => a.url)
+        attachments: m.attachments.map(a => ({
+          url: a.url,
+          name: a.name || 'attachment',
+          contentType: a.contentType || null,
+          width: a.width || null,
+          height: a.height || null,
+        })),
+        embeds: m.embeds.map((embed) => ({
+          title: embed.title || null,
+          description: embed.description || null,
+          url: embed.url || null,
+          image: embed.image?.url || embed.thumbnail?.url || null,
+          provider: embed.provider?.name || null,
+        })),
+        mentions: {
+          users: m.mentions.users.map((user) => ({
+            id: user.id,
+            label: user.globalName || user.username,
+          })),
+          roles: m.mentions.roles.map((role) => ({
+            id: role.id,
+            label: role.name,
+          })),
+          channels: m.mentions.channels.map((mentionedChannel) => ({
+            id: mentionedChannel.id,
+            label: mentionedChannel.name,
+          })),
+        },
       }));
       res.json(formatted);
     } catch (err) {
@@ -1227,7 +1283,7 @@ function createApiServer(client) {
 
   app.post('/api/guilds/:guildId/control/say', requireAuth, requireGuildAdmin, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
     try {
-      const { channelId, message, attachmentBase64, attachmentName } = req.body;
+      const { channelId, message, attachmentBase64, attachmentName, allowedMentions } = req.body;
       if (!channelId || (!message && !attachmentBase64)) return res.status(400).json({ error: 'Missing channelId or content' });
       
       const guild = client.guilds.cache.get(req.params.guildId);
@@ -1237,7 +1293,10 @@ function createApiServer(client) {
       if (!channel) return res.status(404).json({ error: 'Channel not found' });
       if (!channel.isTextBased()) return res.status(400).json({ error: 'Not a text channel' });
       
-      const payload = { content: message || undefined };
+      const payload = {
+        content: message || undefined,
+        allowedMentions: normalizeAllowedMentions(allowedMentions),
+      };
       if (attachmentBase64) {
         let base64Data = attachmentBase64;
         if (base64Data.includes(',')) base64Data = base64Data.split(',')[1];
@@ -1444,6 +1503,14 @@ function getAudioContentType(ext) {
   }
 }
 
+function normalizeAllowedMentions(input) {
+  const parse = [];
+  if (input?.users) parse.push('users');
+  if (input?.roles) parse.push('roles');
+  if (input?.everyone) parse.push('everyone');
+  return { parse };
+}
+
 function getUploadPlaybackBaseUrl() {
   const configured = process.env.UPLOAD_BASE_URL || process.env.LOCAL_AUDIO_BASE_URL;
   if (configured) return configured.replace(/\/+$/, '');
@@ -1567,9 +1634,10 @@ function buildPlayerStatusSnapshot(client, guildId) {
   let currentTrack = null;
   if (player.queue.current) {
     const info = player.queue.current.info || {};
+    const isLocalUpload = isLocalUploadInfo(info, player.queue.current);
     currentTrack = {
       title: info.title || 'Unknown',
-      author: info.author || 'Unknown',
+      author: isLocalUpload && isUnknownTrackAuthor(info.author) ? 'Local upload' : info.author || 'Unknown',
       uri: info.uri || '',
       duration: info.duration || 0,
       position: player.position || 0,
@@ -1618,12 +1686,12 @@ function buildQueueSnapshot(client, guildId, page = 0) {
   const start = page * perPage;
 
   const current = player.queue.current
-    ? formatQueueTrack(player.queue.current, false)
+    ? formatQueueTrack(player.queue.current)
     : null;
 
   const tracks = allTracks
     .slice(start, start + perPage)
-    .map((track) => formatQueueTrack(track, true));
+    .map((track) => formatQueueTrack(track));
 
   return {
     current,
@@ -1634,21 +1702,39 @@ function buildQueueSnapshot(client, guildId, page = 0) {
   };
 }
 
-function formatQueueTrack(track, includeRequester) {
+function formatQueueTrack(track) {
   const info = track?.info || {};
+  const isLocalUpload = isLocalUploadInfo(info, track);
   const formatted = {
-    title: info.title || 'Unknown',
-    author: info.author || 'Unknown',
+    title: info.title || track?.localUpload?.fileName || 'Unknown',
+    author: isLocalUpload && isUnknownTrackAuthor(info.author) ? 'Local upload' : info.author || 'Unknown',
     uri: info.uri || '',
     duration: info.duration || 0,
+    requester: formatRequester(track?.requester),
     artwork: extractArtwork(info),
   };
 
-  if (includeRequester) {
-    formatted.requester = track?.requester?.username || track?.requester?.id || 'Unknown';
-  }
-
   return formatted;
+}
+
+function formatRequester(requester) {
+  return requester?.global_name || requester?.globalName || requester?.username || requester?.tag || requester?.id || 'Unknown';
+}
+
+function isLocalUploadInfo(info = {}, track = null) {
+  return Boolean(
+    track?.localUpload ||
+      info.localUpload ||
+      info.isLocalUpload ||
+      info.sourceName === 'localUpload' ||
+      (typeof info.uri === 'string' && info.uri.includes('/api/uploads/')),
+  );
+}
+
+function isUnknownTrackAuthor(author) {
+  if (typeof author !== 'string') return true;
+  const normalized = author.trim().toLowerCase();
+  return !normalized || normalized === 'unknown' || normalized === 'unknown artist';
 }
 
 function parseQueuePage(value) {

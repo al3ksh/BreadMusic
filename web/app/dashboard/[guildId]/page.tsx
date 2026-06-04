@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { apiFetch, type GuildConfig, type PlayerStatus, type QueueTrack, type GuildHealth, type GuildInsights, type GuildInsightsRange, type FilterPreset, type EconomyLeaderboardEntry, type EconomyMember, formatDuration } from '@/lib/api';
-import { Settings, Activity, Play, Pause, SkipForward, Square, Shuffle, Repeat, Volume2, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, SlidersHorizontal, Trash2, Upload, FileAudio, SkipBack, GripVertical } from 'lucide-react';
+import { Settings, Activity, Play, Pause, SkipForward, Square, Shuffle, Repeat, Volume2, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, SlidersHorizontal, Trash2, Upload, FileAudio, SkipBack, GripVertical, Bold, Italic, Code2, AtSign, Hash } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
 
 type Tab = 'settings' | 'status' | 'player' | 'economy' | 'control';
@@ -1646,7 +1646,10 @@ function PlayerTab({ guildId }: { guildId: string }) {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{queue.current.title}</p>
-                  <p className="text-xs text-text-muted truncate">{queue.current.author}</p>
+                  <p className="text-xs text-text-muted truncate">
+                    {queue.current.author}
+                    {queue.current.requester ? ` • Requested by ${queue.current.requester}` : ''}
+                  </p>
                 </div>
                 <span className="text-xs text-text-muted tabular-nums">{formatDuration(queue.current.duration)}</span>
               </div>
@@ -1682,7 +1685,10 @@ function PlayerTab({ guildId }: { guildId: string }) {
                   )}
                   <div className="flex-1 min-w-0 ml-1">
                     <p className="text-sm truncate select-none">{track.title}</p>
-                    <p className="text-xs text-text-muted truncate select-none">{track.author}</p>
+                    <p className="text-xs text-text-muted truncate select-none">
+                      {track.author}
+                      {track.requester ? ` • Requested by ${track.requester}` : ''}
+                    </p>
                   </div>
                   <span className="text-xs text-text-muted tabular-nums">{formatDuration(track.duration)}</span>
                   
@@ -1909,6 +1915,13 @@ interface DiscordChannel {
   type: number;
 }
 
+interface DiscordMember {
+  id: string;
+  username: string;
+  displayName: string;
+  avatar: string | null;
+}
+
 interface ChatMessage {
   id: string;
   content: string;
@@ -1918,27 +1931,61 @@ interface ChatMessage {
     bot: boolean;
   };
   timestamp: number;
-  attachments: string[];
+  attachments?: {
+    url: string;
+    name: string;
+    contentType: string | null;
+    width: number | null;
+    height: number | null;
+  }[];
+  embeds?: {
+    title: string | null;
+    description: string | null;
+    url: string | null;
+    image: string | null;
+    provider: string | null;
+  }[];
+  mentions?: {
+    users?: { id: string; label: string }[];
+    roles?: { id: string; label: string }[];
+    channels?: { id: string; label: string }[];
+  };
 }
 
 function ControlTab({ guildId }: { guildId: string }) {
   const toast = useToast();
   const [channels, setChannels] = useState<DiscordChannel[]>([]);
+  const [roles, setRoles] = useState<DiscordRole[]>([]);
+  const [members, setMembers] = useState<DiscordMember[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState(false);
   const [messageText, setMessageText] = useState('');
+  const [memberMentionQuery, setMemberMentionQuery] = useState('');
+  const [roleMentionQuery, setRoleMentionQuery] = useState('');
   const [attachment, setAttachment] = useState<{ name: string, base64: string } | null>(null);
   const [selectedTextId, setSelectedTextId] = useState('');
   const [selectedVoiceId, setSelectedVoiceId] = useState('');
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
-    apiFetch<DiscordChannel[]>(`/guilds/${guildId}/channels`)
-      .then(res => {
-        setChannels(res);
-        if (res.length > 0) {
-          const text = res.find(c => c.type === 0 || c.type === 5);
-          const voice = res.find(c => c.type === 2 || c.type === 13);
+    Promise.allSettled([
+      apiFetch<DiscordChannel[]>(`/guilds/${guildId}/channels`),
+      apiFetch<DiscordRole[]>(`/guilds/${guildId}/roles`),
+      apiFetch<{ members: DiscordMember[] }>(`/guilds/${guildId}/members?limit=500`),
+    ])
+      .then(([channelsRes, rolesRes, membersRes]) => {
+        const channelList = channelsRes.status === 'fulfilled' ? channelsRes.value : [];
+        setChannels(channelList);
+        if (rolesRes.status === 'fulfilled') {
+          setRoles((rolesRes.value || []).filter((role) => role.name !== '@everyone'));
+        }
+        if (membersRes.status === 'fulfilled') {
+          setMembers(membersRes.value.members || []);
+        }
+        if (channelList.length > 0) {
+          const text = channelList.find(c => c.type === 0 || c.type === 5);
+          const voice = channelList.find(c => c.type === 2 || c.type === 13);
           if (text) setSelectedTextId(text.id);
           if (voice) setSelectedVoiceId(voice.id);
         }
@@ -1981,6 +2028,22 @@ function ControlTab({ guildId }: { guildId: string }) {
     e.target.value = '';
   };
 
+  const insertMessageSnippet = (before: string, after = '') => {
+    const input = messageInputRef.current;
+    const start = input?.selectionStart ?? messageText.length;
+    const end = input?.selectionEnd ?? messageText.length;
+    const selected = messageText.slice(start, end);
+    const next = `${messageText.slice(0, start)}${before}${selected}${after}${messageText.slice(end)}`;
+    setMessageText(next);
+    requestAnimationFrame(() => {
+      input?.focus();
+      const cursor = selected
+        ? start + before.length + selected.length + after.length
+        : start + before.length;
+      input?.setSelectionRange(cursor, cursor);
+    });
+  };
+
   const sendAction = async (action: 'say' | 'summon' | 'leave') => {
     setActioning(true);
     try {
@@ -1992,7 +2055,8 @@ function ControlTab({ guildId }: { guildId: string }) {
             channelId: selectedTextId, 
             message: messageText,
             attachmentBase64: attachment?.base64,
-            attachmentName: attachment?.name
+            attachmentName: attachment?.name,
+            allowedMentions: { users: true, roles: true, everyone: true },
           })
         });
         setMessageText('');
@@ -2030,6 +2094,52 @@ function ControlTab({ guildId }: { guildId: string }) {
 
   const textChannels = channels.filter(c => c.type === 0 || c.type === 5);
   const voiceChannels = channels.filter(c => c.type === 2 || c.type === 13);
+  const memberMentionResults = memberMentionQuery.trim()
+    ? members
+        .filter((member) => `${member.displayName} ${member.username}`.toLowerCase().includes(memberMentionQuery.trim().toLowerCase()))
+        .slice(0, 6)
+    : [];
+  const roleMentionResults = roleMentionQuery.trim()
+    ? roles
+        .filter((role) => role.name.toLowerCase().includes(roleMentionQuery.trim().toLowerCase()))
+        .slice(0, 6)
+    : [];
+
+  const renderMessageContent = (message: ChatMessage) => {
+    if (!message.content) return null;
+    const mentionLabels = new Map<string, string>();
+    const mentions = message.mentions || {};
+    (mentions.users || []).forEach((user) => mentionLabels.set(`<@${user.id}>`, `@${user.label}`));
+    (mentions.users || []).forEach((user) => mentionLabels.set(`<@!${user.id}>`, `@${user.label}`));
+    (mentions.roles || []).forEach((role) => mentionLabels.set(`<@&${role.id}>`, `@${role.label}`));
+    (mentions.channels || []).forEach((channel) => mentionLabels.set(`<#${channel.id}>`, `#${channel.label}`));
+
+    const pattern = /(<@!?\d+>|<@&\d+>|<#\d+>|https?:\/\/[^\s<]+)/g;
+    return message.content.split(pattern).map((part, index) => {
+      if (!part) return null;
+      const mentionLabel = mentionLabels.get(part);
+      if (mentionLabel) {
+        return (
+          <span key={index} className="inline-flex items-center rounded bg-accent/15 px-1 py-0.5 font-medium text-accent">
+            {mentionLabel}
+          </span>
+        );
+      }
+      if (/^https?:\/\//i.test(part)) {
+        return (
+          <a key={index} href={part} target="_blank" rel="noreferrer" className="text-accent hover:underline break-all">
+            {part}
+          </a>
+        );
+      }
+      return part;
+    });
+  };
+
+  const isImageAttachment = (attachment: NonNullable<ChatMessage['attachments']>[number]) =>
+    attachment.contentType?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(attachment.url);
+  const isVideoAttachment = (attachment: NonNullable<ChatMessage['attachments']>[number]) =>
+    attachment.contentType?.startsWith('video/') || /\.(mp4|webm|mov)$/i.test(attachment.url);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-6xl mx-auto lg:items-stretch">
@@ -2048,7 +2158,146 @@ function ControlTab({ guildId }: { guildId: string }) {
           </div>
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">Message Content</label>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet('**', '**')}
+                title="Bold"
+                className="p-2 rounded-md border border-border bg-bg-input text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                <Bold size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet('*', '*')}
+                title="Italic"
+                className="p-2 rounded-md border border-border bg-bg-input text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                <Italic size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet('`', '`')}
+                title="Inline code"
+                className="p-2 rounded-md border border-border bg-bg-input text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                <Code2 size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet('```\n', '\n```')}
+                title="Code block"
+                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                ```
+              </button>
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet('||', '||')}
+                title="Spoiler"
+                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                ||
+              </button>
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet('> ')}
+                title="Quote"
+                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                &gt;
+              </button>
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet(`<#${selectedTextId}>`)}
+                title="Mention selected channel"
+                className="p-2 rounded-md border border-border bg-bg-input text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                <Hash size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet('@everyone')}
+                title="Mention everyone"
+                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                @everyone
+              </button>
+              <button
+                type="button"
+                onClick={() => insertMessageSnippet('@here')}
+                title="Mention online members"
+                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+              >
+                @here
+              </button>
+            </div>
+            <div className="mb-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="relative">
+                <div className="relative">
+                  <AtSign size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                  <input
+                    value={memberMentionQuery}
+                    onChange={(e) => setMemberMentionQuery(e.target.value)}
+                    placeholder="Search user to mention"
+                    className="w-full rounded-md border border-border bg-bg-input text-text-primary pl-8 pr-3 py-2 text-xs outline-none focus:border-accent transition-colors placeholder:text-text-muted"
+                  />
+                </div>
+                {memberMentionResults.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-bg-card shadow-xl overflow-hidden">
+                    {memberMentionResults.map((member) => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() => {
+                          insertMessageSnippet(`<@${member.id}>`);
+                          setMemberMentionQuery('');
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 text-left text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
+                      >
+                        {member.avatar ? (
+                          <img src={member.avatar} alt="" className="w-5 h-5 rounded-full object-cover" />
+                        ) : (
+                          <span className="w-5 h-5 rounded-full bg-bg-hover flex items-center justify-center text-[10px]">{member.displayName.charAt(0).toUpperCase()}</span>
+                        )}
+                        <span className="truncate">{member.displayName}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="relative">
+                <div className="relative">
+                  <AtSign size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                  <input
+                    value={roleMentionQuery}
+                    onChange={(e) => setRoleMentionQuery(e.target.value)}
+                    placeholder="Search role to mention"
+                    className="w-full rounded-md border border-border bg-bg-input text-text-primary pl-8 pr-3 py-2 text-xs outline-none focus:border-accent transition-colors placeholder:text-text-muted"
+                  />
+                </div>
+                {roleMentionResults.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-bg-card shadow-xl overflow-hidden">
+                    {roleMentionResults.map((role) => (
+                      <button
+                        key={role.id}
+                        type="button"
+                        onClick={() => {
+                          insertMessageSnippet(`<@&${role.id}>`);
+                          setRoleMentionQuery('');
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 text-left text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
+                      >
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: role.color || '#6b7280' }} />
+                        <span className="truncate">{role.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             <textarea
+              ref={messageInputRef}
               rows={3}
               value={messageText}
               onChange={e => setMessageText(e.target.value)}
@@ -2134,10 +2383,44 @@ function ControlTab({ guildId }: { guildId: string }) {
                      {m.author.bot && <span className="px-1.5 py-0.5 rounded uppercase text-[10px] font-bold bg-accent/20 text-accent">BOT</span>}
                      <span className="text-xs text-text-muted shrink-0">{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
-                  <p className="text-[14px] leading-relaxed text-text-secondary whitespace-pre-wrap break-words">{m.content}</p>
-                  {m.attachments.length > 0 && (
+                  <p className="text-[14px] leading-relaxed text-text-secondary whitespace-pre-wrap break-words">{renderMessageContent(m)}</p>
+                  {(m.attachments || []).length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {m.attachments.map((a, j) => <img key={j} src={a} className="max-h-48 max-w-full rounded-md object-contain border border-border bg-bg-body" />)}
+                      {(m.attachments || []).map((a, j) => (
+                        isImageAttachment(a) ? (
+                          <img key={j} src={a.url} alt={a.name} className="max-h-48 max-w-full rounded-md object-contain border border-border bg-bg-body" />
+                        ) : isVideoAttachment(a) ? (
+                          <video key={j} src={a.url} controls className="max-h-48 max-w-full rounded-md border border-border bg-bg-body" />
+                        ) : (
+                          <a key={j} href={a.url} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline break-all">
+                            {a.name}
+                          </a>
+                        )
+                      ))}
+                    </div>
+                  )}
+                  {(m.embeds || []).length > 0 && (
+                    <div className="space-y-2 mt-2">
+                      {(m.embeds || []).map((embed, j) => (
+                        <a
+                          key={j}
+                          href={embed.url || embed.image || undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block max-w-sm rounded-md border border-border bg-bg-secondary/40 overflow-hidden hover:border-accent/40 transition-colors"
+                        >
+                          {embed.image && (
+                            <img src={embed.image} alt="" className="max-h-56 w-full object-cover bg-bg-body" />
+                          )}
+                          {(embed.title || embed.description || embed.provider) && (
+                            <div className="p-2.5">
+                              {embed.provider && <p className="text-[10px] uppercase tracking-wide text-text-muted mb-1">{embed.provider}</p>}
+                              {embed.title && <p className="text-sm font-medium text-text-primary line-clamp-2">{embed.title}</p>}
+                              {embed.description && <p className="text-xs text-text-secondary mt-1 line-clamp-3">{embed.description}</p>}
+                            </div>
+                          )}
+                        </a>
+                      ))}
                     </div>
                   )}
                </div>
