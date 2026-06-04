@@ -2,6 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
 const { getGuildInsights } = require('./state/analyticsStore');
@@ -77,6 +78,13 @@ const FILTER_PRESETS = {
 
 const DASHBOARD_ACTION_INTERVAL_MS = 500;
 const dashboardActionTimestamps = new Map();
+const AUDIO_UPLOAD_MAX_BYTES = 256 * 1024 * 1024;
+const AUDIO_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
+const AUDIO_UPLOAD_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus', '.webm']);
+const AUDIO_UPLOAD_MIME_PREFIXES = ['audio/'];
+const AUDIO_UPLOAD_MIME_TYPES = new Set(['application/ogg', 'video/webm']);
+const DATA_DIR = path.resolve(process.cwd(), 'data');
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 
 function createApiServer(client) {
   const app = express();
@@ -107,6 +115,41 @@ function createApiServer(client) {
       name: 'bread.sid',
     }),
   );
+
+  app.get('/api/uploads/:guildId/:fileId/:fileName', async (req, res) => {
+    const { guildId, fileId, fileName } = req.params;
+    if (!isSafeId(guildId) || !isSafeId(fileId)) {
+      return res.status(400).json({ error: 'Invalid upload path' });
+    }
+
+    const ext = path.extname(fileName || '').toLowerCase();
+    if (!AUDIO_UPLOAD_EXTENSIONS.has(ext)) {
+      return res.status(404).json({ error: 'Upload not found' });
+    }
+
+    const filePath = path.join(UPLOAD_DIR, guildId, `${fileId}${ext}`);
+    if (!isPathInside(filePath, UPLOAD_DIR)) {
+      return res.status(400).json({ error: 'Invalid upload path' });
+    }
+
+    try {
+      await fs.promises.access(filePath, fs.constants.R_OK);
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      res.setHeader('Content-Type', getAudioContentType(ext));
+      res.sendFile(filePath);
+    } catch {
+      res.status(404).json({ error: 'Upload not found' });
+    }
+  });
+
+  cleanupExpiredAudioUploads().catch((error) => {
+    console.warn('Audio upload cleanup failed:', error.message);
+  });
+  setInterval(() => {
+    cleanupExpiredAudioUploads().catch((error) => {
+      console.warn('Audio upload cleanup failed:', error.message);
+    });
+  }, 60 * 60 * 1000);
 
   function requireAuth(req, res, next) {
     if (!req.session?.user) {
@@ -558,6 +601,135 @@ function createApiServer(client) {
     res.json({ presets: FILTER_PRESET_CHOICES });
   });
 
+  app.post(
+    '/api/guilds/:guildId/player/upload',
+    requireAuth,
+    requireGuildAdmin,
+    requireTrustedOrigin,
+    requireDashboardActionRateLimit,
+    express.raw({ type: '*/*', limit: AUDIO_UPLOAD_MAX_BYTES }),
+    async (req, res) => {
+      const guildId = req.params.guildId;
+      const guild = client.guilds.cache.get(guildId);
+      let player = client.lavalink?.players?.get(guildId);
+
+      try {
+        const guildConfig = getConfig(guildId);
+
+        if (!player && guild) {
+          const botVoiceChannelId = guild.members.me?.voice?.channelId;
+          if (botVoiceChannelId) {
+            player = client.lavalink.createPlayer({
+              guildId,
+              voiceChannelId: botVoiceChannelId,
+              textChannelId: getFallbackTextChannelId(guild, guildConfig.playerTextChannelId),
+              selfDeaf: true,
+              volume: guildConfig.defaultVolume ?? 60,
+            });
+            await player.connect();
+          }
+        }
+
+        if (!player) {
+          return res.status(404).json({ error: 'No active player in this guild' });
+        }
+
+        if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+          return res.status(400).json({ error: 'Upload body is empty' });
+        }
+
+        const originalName = sanitizeUploadName(req.get('x-file-name') || 'upload');
+        const ext = path.extname(originalName).toLowerCase();
+        const mimeType = String(req.get('content-type') || '').split(';')[0].toLowerCase();
+
+        if (!isAllowedAudioUpload(ext, mimeType)) {
+          return res.status(400).json({ error: 'Unsupported audio file type' });
+        }
+
+        const uploadId = crypto.createHash('sha256').update(req.body).digest('hex');
+        const guildUploadDir = path.join(UPLOAD_DIR, guildId);
+        await fs.promises.mkdir(guildUploadDir, { recursive: true });
+
+        const filePath = path.join(guildUploadDir, `${uploadId}${ext}`);
+        if (!isPathInside(filePath, UPLOAD_DIR)) {
+          return res.status(400).json({ error: 'Invalid upload path' });
+        }
+
+        const alreadyStored = await fileExists(filePath);
+        if (alreadyStored) {
+          await touchFile(filePath);
+        } else {
+          await fs.promises.writeFile(filePath, req.body, { flag: 'wx' });
+        }
+
+        const publicName = encodeURIComponent(originalName);
+        const playbackUrl = `${getUploadPlaybackBaseUrl()}/api/uploads/${encodeURIComponent(guildId)}/${uploadId}/${publicName}`;
+        const requester = getDashboardRequester(req, client);
+        const node = getUsableNode(client);
+        if (!node) {
+          if (!alreadyStored) await safeDeleteFile(filePath);
+          return res.status(503).json({ error: 'No Lavalink node available' });
+        }
+
+        let result;
+        try {
+          result = await node.search({ query: playbackUrl }, requester);
+        } catch (error) {
+          if (!alreadyStored) await safeDeleteFile(filePath);
+          console.error('Lavalink upload load failed:', error);
+          return res.status(502).json({ error: `Lavalink could not load upload URL: ${error.message}` });
+        }
+
+        const track = result?.tracks?.[0];
+        if (!track) {
+          if (!alreadyStored) await safeDeleteFile(filePath);
+          return res.status(400).json({ error: 'Lavalink could not load this audio file' });
+        }
+
+        const queuedTrack = {
+          ...track,
+          info: {
+            ...track.info,
+            title: track.info?.title || path.basename(originalName, ext),
+            author: track.info?.author || 'Local upload',
+            uri: track.info?.uri || playbackUrl,
+            isLocalUpload: true,
+          },
+        };
+        queuedTrack.localUpload = {
+          guildId,
+          uploadId,
+          fileName: originalName,
+          filePath,
+          expiresAt: Date.now() + AUDIO_UPLOAD_TTL_MS,
+          cached: alreadyStored,
+        };
+
+        const startedFromIdle = !player.playing && !player.paused;
+        await addManualTrackToQueue(player, queuedTrack);
+
+        if (startedFromIdle) {
+          await player.play();
+          await client.musicUI?.refresh(player).catch(() => {});
+        }
+
+        const { savePlayerState } = require('./state/queueStore');
+        await savePlayerState(player).catch(() => {});
+
+        res.json({
+          success: true,
+          title: queuedTrack.info.title,
+          author: queuedTrack.info.author,
+          size: req.body.length,
+          cached: alreadyStored,
+        });
+      } catch (err) {
+        console.error('Player upload error:', err);
+        res.status(500).json({ error: `Upload failed: ${err.message}` });
+      }
+    },
+  );
+
   app.get('/api/guilds/:guildId/health', requireAuth, requireGuildAdmin, (req, res) => {
     const guildId = req.params.guildId;
     const guild = client.guilds.cache.get(guildId);
@@ -825,7 +997,8 @@ function createApiServer(client) {
 
         case 'skip':
           if (player) {
-            recordAutoplaySkip(guildId, player.queue.current, { position: player.position });
+            const currentTrack = player.queue.current;
+            recordAutoplaySkip(guildId, currentTrack, { position: player.position });
             if (player.queue.tracks.length === 0 && player.queue.current) {
                await player.stopPlaying(false, false);
             } else {
@@ -1258,6 +1431,9 @@ function createApiServer(client) {
   // ---- Error Handler ----
 
   app.use((err, _req, res, _next) => {
+    if (err?.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'Audio upload is too large' });
+    }
     console.error('API error:', err);
     res.status(500).json({ error: 'Internal server error' });
   });
@@ -1282,6 +1458,119 @@ async function addManualTrackToQueue(player, track) {
   }
 
   await player.queue.add(track);
+}
+
+function sanitizeUploadName(fileName) {
+  const normalized = path.basename(String(fileName || 'upload.mp3'))
+    .replace(/[^\w.\- ()[\]]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const fallback = 'upload.mp3';
+  if (!normalized || normalized === '.' || normalized === '..') return fallback;
+
+  const ext = path.extname(normalized);
+  const base = path.basename(normalized, ext).slice(0, Math.max(1, 120 - ext.length));
+  return `${base || 'upload'}${ext}`;
+}
+
+function isAllowedAudioUpload(ext, mimeType) {
+  if (!AUDIO_UPLOAD_EXTENSIONS.has(ext)) return false;
+  if (!mimeType || mimeType === 'application/octet-stream') return true;
+  if (AUDIO_UPLOAD_MIME_TYPES.has(mimeType)) return true;
+  return AUDIO_UPLOAD_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix));
+}
+
+function isSafeId(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9_-]+$/.test(value);
+}
+
+function isPathInside(filePath, parentPath) {
+  const relative = path.relative(parentPath, filePath);
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function getAudioContentType(ext) {
+  switch (ext) {
+    case '.mp3':
+      return 'audio/mpeg';
+    case '.flac':
+      return 'audio/flac';
+    case '.wav':
+      return 'audio/wav';
+    case '.ogg':
+    case '.opus':
+      return 'audio/ogg';
+    case '.m4a':
+    case '.aac':
+      return 'audio/aac';
+    case '.webm':
+      return 'audio/webm';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function getUploadPlaybackBaseUrl() {
+  const configured = process.env.UPLOAD_BASE_URL || process.env.LOCAL_AUDIO_BASE_URL;
+  if (configured) return configured.replace(/\/+$/, '');
+
+  const port = process.env.WEB_PORT || 3001;
+  const lavalinkHost = String(process.env.LAVALINK_HOST || '').toLowerCase();
+  if (lavalinkHost === 'lavalink') {
+    return `http://bot:${port}`;
+  }
+
+  return `http://127.0.0.1:${port}`;
+}
+
+async function safeDeleteFile(filePath) {
+  try {
+    await fs.promises.unlink(filePath);
+  } catch {}
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.promises.access(filePath, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function touchFile(filePath) {
+  const now = new Date();
+  try {
+    await fs.promises.utimes(filePath, now, now);
+  } catch {}
+}
+
+async function cleanupExpiredAudioUploads() {
+  let guildDirs = [];
+  try {
+    guildDirs = await fs.promises.readdir(UPLOAD_DIR, { withFileTypes: true });
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return;
+  }
+
+  const cutoff = Date.now() - AUDIO_UPLOAD_TTL_MS;
+  for (const guildDir of guildDirs) {
+    if (!guildDir.isDirectory() || !isSafeId(guildDir.name)) continue;
+
+    const guildPath = path.join(UPLOAD_DIR, guildDir.name);
+    const files = await fs.promises.readdir(guildPath, { withFileTypes: true }).catch(() => []);
+    for (const file of files) {
+      if (!file.isFile()) continue;
+
+      const filePath = path.join(guildPath, file.name);
+      const stats = await fs.promises.stat(filePath).catch(() => null);
+      if (stats && stats.mtimeMs < cutoff) {
+        await safeDeleteFile(filePath);
+      }
+    }
+  }
 }
 
 function getFallbackTextChannelId(guild, preferredChannelId = null) {

@@ -370,6 +370,19 @@ function snapshotTrackInfo(trackOrInfo) {
   };
 }
 
+function isLocalUploadTrack(trackOrInfo) {
+  const info = trackOrInfo?.info ?? trackOrInfo;
+  if (!info) return false;
+
+  return Boolean(
+    trackOrInfo?.localUpload ||
+    info.localUpload ||
+    info.isLocalUpload ||
+    info.sourceName === 'localUpload' ||
+    (typeof info.uri === 'string' && info.uri.includes('/api/uploads/')),
+  );
+}
+
 function isArtistOverplayed(guildId, artistName) {
   if (!artistName) return false;
 
@@ -728,6 +741,8 @@ async function findNextTrack(player, lastTrack, client) {
         console.log(`[Autoplay] Accepted autoplay seed promoted: "${acceptedSeed.title}"`);
       }
     }
+  } else if (isLocalUploadTrack(lastTrack)) {
+    console.log(`[Autoplay] Local upload finished; keeping previous autoplay seed instead of using "${lastTrack.info.title}"`);
   } else {
     const manualSeed = snapshotTrackInfo(lastTrack);
     if (manualSeed) {
@@ -739,7 +754,13 @@ async function findNextTrack(player, lastTrack, client) {
     recentTracks.delete(guildId);
   }
 
-  const activeSeed = currentAutoplaySeed.get(guildId) || preferredSeed.get(guildId) || snapshotTrackInfo(lastTrack);
+  const activeSeed = currentAutoplaySeed.get(guildId) || preferredSeed.get(guildId) || (
+    isLocalUploadTrack(lastTrack) ? null : snapshotTrackInfo(lastTrack)
+  );
+  if (!activeSeed) {
+    console.log('[Autoplay] No previous seed available after local upload; not queueing autoplay');
+    return null;
+  }
   const seedTrack = activeSeed ? { info: activeSeed } : lastTrack;
   if (activeSeed && activeSeed.title !== lastTrack.info.title) {
     console.log(`[Autoplay] Using active seed: "${activeSeed.title}" instead of "${lastTrack.info.title}"`);

@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { apiFetch, type GuildConfig, type PlayerStatus, type QueueTrack, type GuildHealth, type GuildInsights, type GuildInsightsRange, type FilterPreset, type EconomyLeaderboardEntry, type EconomyMember, formatDuration } from '@/lib/api';
-import { Settings, Activity, Play, Pause, SkipForward, Square, Shuffle, Repeat, Volume2, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { Settings, Activity, Play, Pause, SkipForward, Square, Shuffle, Repeat, Volume2, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, SlidersHorizontal, Trash2, Upload, FileAudio, SkipBack } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
 
 type Tab = 'settings' | 'status' | 'player' | 'economy' | 'control';
@@ -85,7 +85,7 @@ export default function GuildPage() {
 }
 
 function Spinner() {
-  return <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />;
+  return <span className="inline-block h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" />;
 }
 
 function Skeleton({ className }: { className?: string }) {
@@ -96,6 +96,18 @@ const inputClass = "w-48 rounded-md border border-border bg-bg-input text-text-p
 const rangeClass = "w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent";
 const selectClass = "rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors font-[inherit]";
 const TRACK_TRANSITION_GRACE_MS = 3500;
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
 
 function Section({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
@@ -822,8 +834,6 @@ function Music2({ size, className }: { size: number; className?: string }) {
   );
 }
 
-import { SkipBack } from 'lucide-react';
-
 function SegmentedVolume({ value, onChange, onCommit }: { value: number; onChange: (v: number) => void; onCommit: (v: number) => void }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const max = 150;
@@ -907,11 +917,14 @@ function PlayerTab({ guildId }: { guildId: string }) {
   const [filterPresets, setFilterPresets] = useState<FilterPreset[]>([]);
   const [selectedFilter, setSelectedFilter] = useState('');
   const [applyingFilter, setApplyingFilter] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   // Local state for smooth sliders
   const [localVolume, setLocalVolume] = useState<number | null>(null);
   const [localSeek, setLocalSeek] = useState<number | null>(null);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const lastTrackSeenAtRef = useRef(0);
   const pausedTrackKeyRef = useRef<string | null>(null);
   const pausedTrackPositionRef = useRef<number | null>(null);
@@ -1082,6 +1095,61 @@ function PlayerTab({ guildId }: { guildId: string }) {
 
     await handleSearch(query);
   }, [handleSearch, playerAction, searchQuery]);
+
+  const handleUploadFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (!file) return;
+
+    const allowedExtensions = /\.(mp3|flac|wav|ogg|m4a|aac|opus|webm)$/i;
+    if (!allowedExtensions.test(file.name)) {
+      toast.error('Upload failed', 'Unsupported audio file type.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 256 * 1024 * 1024) {
+      toast.error('Upload failed', 'Maximum audio upload size is 256MB.');
+      e.target.value = '';
+      return;
+    }
+
+    setUploadFile(file);
+  }, [toast]);
+
+  const handleUploadSubmit = useCallback(async () => {
+    if (!uploadFile) {
+      uploadInputRef.current?.click();
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const res = await fetch(`/api/guilds/${guildId}/player/upload`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': uploadFile.type || 'application/octet-stream',
+          'X-File-Name': uploadFile.name,
+        },
+        body: uploadFile,
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || `Upload failed: ${res.status}`);
+      }
+
+      toast.success('Upload queued', payload.title || uploadFile.name);
+      setUploadFile(null);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+      fetchData();
+    } catch (err) {
+      const text = err instanceof Error ? err.message : 'Could not upload audio file.';
+      toast.error('Upload failed', text);
+    } finally {
+      setUploading(false);
+    }
+  }, [fetchData, guildId, toast, uploadFile]);
 
   const handleApplyFilter = useCallback(async () => {
     if (!selectedFilter) return;
@@ -1334,6 +1402,45 @@ function PlayerTab({ guildId }: { guildId: string }) {
               </button>
             </div>
             <p className="text-xs text-text-muted mt-2">Link starts playback immediately. Text query shows quick search results.</p>
+
+            <div className="mt-4 rounded-md border border-border bg-bg-secondary/40 p-3">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept=".mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.webm,audio/*"
+                  className="hidden"
+                  onChange={handleUploadFileChange}
+                />
+                <button
+                  onClick={() => uploadInputRef.current?.click()}
+                  disabled={uploading}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-bg-input border border-border text-text-secondary hover:text-text-primary hover:border-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
+                >
+                  <FileAudio size={15} />
+                  Choose Audio
+                </button>
+                <div className="flex-1 min-w-0">
+                  {uploadFile ? (
+                    <>
+                      <p className="text-sm text-text-primary truncate">{uploadFile.name}</p>
+                      <p className="text-xs text-text-muted">{formatFileSize(uploadFile.size)}</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-text-muted truncate">No audio file selected</p>
+                  )}
+                </div>
+                <button
+                  onClick={handleUploadSubmit}
+                  disabled={uploading}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
+                >
+                  {uploading ? <Spinner /> : <Upload size={15} />}
+                  {uploading ? 'Uploading...' : 'Queue Upload'}
+                </button>
+              </div>
+            </div>
+
             {searchResults.length > 0 && (
               <div className="mt-3 rounded-md overflow-hidden border border-border">
                 {searchResults.map((track, i) => (
