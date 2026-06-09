@@ -37,7 +37,7 @@ export function LandingNav() {
 
         <div className="flex items-center gap-3">
           <a
-            href="/api/auth/discord"
+            href="/dashboard"
             className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-text-secondary hover:text-text-primary transition-colors"
           >
             Dashboard

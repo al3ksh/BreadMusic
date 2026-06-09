@@ -5,6 +5,7 @@ const skippedAutoplayTracks = new Map();
 const preferredSeed = new Map();
 const currentAutoplaySeed = new Map();
 const autoplayInProgress = new Set();
+const autoplayPrefetch = new Map();
 
 const MAX_RECENT_TRACKS = 40;
 const MAX_SKIPPED_TRACKS = 40;
@@ -23,6 +24,8 @@ const QUICK_SKIP_MAX_MS = 75_000;
 const QUICK_SKIP_MAX_RATIO = 0.35;
 const ACCEPTED_PLAY_MIN_MS = 90_000;
 const ACCEPTED_PLAY_MIN_RATIO = 0.65;
+const PREFETCH_LEAD_MS = 20_000;
+const MIN_PREFETCH_DELAY_MS = 5_000;
 
 const HARD_REJECT_TERMS = [
   'karaoke',
@@ -89,6 +92,7 @@ function isAutoplayEnabled(guildId) {
 function setAutoplay(guildId, enabled) {
   setConfig(guildId, { autoplay: enabled });
   if (!enabled) {
+    clearAutoplayPrefetch(guildId);
     recentTracks.delete(guildId);
     skippedAutoplayTracks.delete(guildId);
     preferredSeed.delete(guildId);
@@ -119,6 +123,8 @@ function addToRecentTracks(guildId, track) {
 
 function recordAutoplaySkip(guildId, track, playback = {}) {
   if (!guildId || !track?.isAutoplay) return;
+
+  clearAutoplayPrefetch(guildId);
 
   const feedback = classifyAutoplaySkip(track, playback);
   if (!feedback?.normalized) return;
@@ -348,6 +354,23 @@ function getSkippedEntries(guildId) {
   const skipped = pruneSkippedEntries(skippedAutoplayTracks.get(guildId) ?? []);
   skippedAutoplayTracks.set(guildId, skipped);
   return skipped;
+}
+
+function getTrackCacheKey(track) {
+  const info = track?.info;
+  if (!info) return null;
+  return [
+    info.identifier || '',
+    info.uri || '',
+    normalizeComparable(info.author || ''),
+    normalizeComparable(info.title || ''),
+  ].join('|');
+}
+
+function clearAutoplayPrefetch(guildId) {
+  const existing = autoplayPrefetch.get(guildId);
+  if (existing?.timeout) clearTimeout(existing.timeout);
+  autoplayPrefetch.delete(guildId);
 }
 
 function wasRecentlySkipped(guildId, track) {
@@ -820,6 +843,61 @@ async function findNextTrack(player, lastTrack, client) {
   return selected?.track ?? null;
 }
 
+function scheduleAutoplayPrefetch(player, track, client) {
+  const guildId = player?.guildId;
+  const trackKey = getTrackCacheKey(track);
+  if (!guildId || !trackKey || !track?.info) return;
+
+  clearAutoplayPrefetch(guildId);
+
+  if (!isAutoplayEnabled(guildId)) return;
+  if (player.queue.tracks.length > 0) return;
+
+  const duration = Number(track.info.duration ?? track.info.length);
+  if (!Number.isFinite(duration) || duration <= 0) return;
+
+  const delay = Math.max(duration - PREFETCH_LEAD_MS, MIN_PREFETCH_DELAY_MS);
+
+  const timeout = setTimeout(() => {
+    const currentKey = getTrackCacheKey(player.queue.current);
+    if (!isAutoplayEnabled(guildId) || player.queue.tracks.length > 0 || currentKey !== trackKey) {
+      clearAutoplayPrefetch(guildId);
+      return;
+    }
+
+    const promise = findNextTrack(player, track, client)
+      .then((nextTrack) => {
+        const current = autoplayPrefetch.get(guildId);
+        if (current && current.trackKey === trackKey) {
+          current.track = nextTrack || null;
+        }
+        return nextTrack || null;
+      })
+      .catch((error) => {
+        console.log(`[Autoplay] Prefetch failed: ${error.message}`);
+        return null;
+      });
+
+    autoplayPrefetch.set(guildId, { trackKey, promise, timeout: null, track: null });
+  }, delay);
+
+  autoplayPrefetch.set(guildId, { trackKey, promise: null, timeout, track: null });
+}
+
+async function consumePrefetchedTrack(guildId, lastTrack) {
+  const cached = autoplayPrefetch.get(guildId);
+  if (!cached || cached.trackKey !== getTrackCacheKey(lastTrack)) return null;
+
+  autoplayPrefetch.delete(guildId);
+  if (cached.timeout) {
+    clearTimeout(cached.timeout);
+    return null;
+  }
+  if (cached.track) return cached.track;
+  if (cached.promise) return cached.promise;
+  return null;
+}
+
 async function handleAutoplay(player, lastTrack, client) {
   const guildId = player.guildId;
 
@@ -835,7 +913,7 @@ async function handleAutoplay(player, lastTrack, client) {
   autoplayInProgress.add(guildId);
 
   try {
-    const nextTrack = await findNextTrack(player, lastTrack, client);
+    const nextTrack = await consumePrefetchedTrack(guildId, lastTrack) || await findNextTrack(player, lastTrack, client);
     if (!nextTrack) return false;
 
     nextTrack.isAutoplay = true;
@@ -855,6 +933,7 @@ async function handleAutoplay(player, lastTrack, client) {
 }
 
 function clearAutoplayState(guildId) {
+  clearAutoplayPrefetch(guildId);
   recentTracks.delete(guildId);
   skippedAutoplayTracks.delete(guildId);
   preferredSeed.delete(guildId);
@@ -863,6 +942,7 @@ function clearAutoplayState(guildId) {
 
 function resetSeed(guildId, trackInfo = null) {
   console.log(`[Autoplay] Seed reset for guild ${guildId} - manual track added`);
+  clearAutoplayPrefetch(guildId);
   recentTracks.delete(guildId);
   skippedAutoplayTracks.delete(guildId);
   currentAutoplaySeed.delete(guildId);
@@ -890,6 +970,8 @@ module.exports = {
   setAutoplay,
   toggleAutoplay,
   handleAutoplay,
+  scheduleAutoplayPrefetch,
+  clearAutoplayPrefetch,
   clearAutoplayState,
   addToRecentTracks,
   recordAutoplaySkip,

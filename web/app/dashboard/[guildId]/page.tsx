@@ -1972,16 +1972,12 @@ function ControlTab({ guildId }: { guildId: string }) {
     Promise.allSettled([
       apiFetch<DiscordChannel[]>(`/guilds/${guildId}/channels`),
       apiFetch<DiscordRole[]>(`/guilds/${guildId}/roles`),
-      apiFetch<{ members: DiscordMember[] }>(`/guilds/${guildId}/members?limit=500`),
     ])
-      .then(([channelsRes, rolesRes, membersRes]) => {
+      .then(([channelsRes, rolesRes]) => {
         const channelList = channelsRes.status === 'fulfilled' ? channelsRes.value : [];
         setChannels(channelList);
         if (rolesRes.status === 'fulfilled') {
           setRoles((rolesRes.value || []).filter((role) => role.name !== '@everyone'));
-        }
-        if (membersRes.status === 'fulfilled') {
-          setMembers(membersRes.value.members || []);
         }
         if (channelList.length > 0) {
           const text = channelList.find(c => c.type === 0 || c.type === 5);
@@ -1995,6 +1991,30 @@ function ControlTab({ guildId }: { guildId: string }) {
   }, [guildId]);
 
   useEffect(() => {
+    const query = memberMentionQuery.trim();
+    if (query.length < 2) {
+      setMembers([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timeout = setTimeout(() => {
+      apiFetch<{ members: DiscordMember[] }>(`/guilds/${guildId}/members?q=${encodeURIComponent(query)}&limit=8`)
+        .then((res) => {
+          if (!cancelled) setMembers(res.members || []);
+        })
+        .catch(() => {
+          if (!cancelled) setMembers([]);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [guildId, memberMentionQuery]);
+
+  useEffect(() => {
     if (!selectedTextId) return;
     const fetchMsgs = () => {
       apiFetch<ChatMessage[]>(`/guilds/${guildId}/control/messages?channelId=${selectedTextId}`)
@@ -2002,7 +2022,7 @@ function ControlTab({ guildId }: { guildId: string }) {
         .catch(() => {});
     };
     fetchMsgs();
-    const interval = setInterval(fetchMsgs, 3000);
+    const interval = setInterval(fetchMsgs, 8000);
     return () => clearInterval(interval);
   }, [guildId, selectedTextId]);
 
@@ -2096,7 +2116,6 @@ function ControlTab({ guildId }: { guildId: string }) {
   const voiceChannels = channels.filter(c => c.type === 2 || c.type === 13);
   const memberMentionResults = memberMentionQuery.trim()
     ? members
-        .filter((member) => `${member.displayName} ${member.username}`.toLowerCase().includes(memberMentionQuery.trim().toLowerCase()))
         .slice(0, 6)
     : [];
   const roleMentionResults = roleMentionQuery.trim()
@@ -2143,9 +2162,9 @@ function ControlTab({ guildId }: { guildId: string }) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-6xl mx-auto lg:items-stretch">
-      <div className="space-y-6 lg:h-[650px] lg:flex lg:flex-col lg:gap-6 lg:space-y-0">
-        <Section title="Send Message" className="lg:flex-1">
-          <div className="space-y-4">
+      <div className="space-y-6">
+        <Section title="Send Message">
+          <div className="flex min-h-0 flex-col gap-4">
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">Destination Channel</label>
             <select
@@ -2298,31 +2317,34 @@ function ControlTab({ guildId }: { guildId: string }) {
             </div>
             <textarea
               ref={messageInputRef}
-              rows={3}
+              rows={4}
               value={messageText}
               onChange={e => setMessageText(e.target.value)}
               placeholder="Type a message for the bot to send..."
-              className="w-full rounded-md border border-border bg-bg-input text-text-primary px-4 py-3 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit] resize-y"
+              className="max-h-48 min-h-28 w-full rounded-md border border-border bg-bg-input text-text-primary px-4 py-3 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit] resize-y"
             />
           </div>
 
           {attachment && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-accent/10 border border-accent/20 rounded-md text-sm text-text-primary">
-              <span className="truncate flex-1 max-w-sm font-medium"><span className="text-accent">Attachment:</span> {attachment.name}</span>
+            <div className="flex min-w-0 items-center gap-2 px-3 py-2 bg-accent/10 border border-accent/20 rounded-md text-sm text-text-primary">
+              <span className="min-w-0 truncate flex-1 font-medium"><span className="text-accent">Attachment:</span> {attachment.name}</span>
               <button 
                 onClick={() => setAttachment(null)} 
-                className="hover:text-danger transition-colors cursor-pointer"
+                className="shrink-0 hover:text-danger transition-colors cursor-pointer"
+                type="button"
+                title="Remove attachment"
               >
                 <X size={16} />
               </button>
             </div>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3 pt-1">
             <button
+              type="button"
               onClick={() => sendAction('say')}
               disabled={actioning || (!messageText.trim() && !attachment)}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all disabled:opacity-50 cursor-pointer shadow-lg shadow-accent/20"
+              className="inline-flex min-w-0 items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all disabled:opacity-50 cursor-pointer shadow-lg shadow-accent/20"
             >
               <MessageSquare size={16} />
               {actioning ? 'Sending...' : 'Send as Bot'}

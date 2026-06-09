@@ -67,7 +67,7 @@ export function Hero() {
             Add to Discord
           </button>
           <a
-            href="/api/auth/discord"
+            href="/dashboard"
             className="group w-full sm:w-60 h-14 inline-flex items-center justify-center gap-2.5 px-6 rounded-xl bg-bg-card border border-border text-text-primary font-semibold text-base whitespace-nowrap hover:bg-bg-hover hover:border-accent/30 transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0"
           >
             Open Dashboard

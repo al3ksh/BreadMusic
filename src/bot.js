@@ -41,7 +41,7 @@ const {
   BUTTON_PREFIX: BLACKJACK_BUTTON_PREFIX,
 } = require('./games/blackjack');
 const { hasBalance, addBalance, removeBalance, getBalance } = require('./games/economy');
-const { handleAutoplay, clearAutoplayState, addToRecentTracks } = require('./music/autoplay');
+const { handleAutoplay, scheduleAutoplayPrefetch, clearAutoplayState, addToRecentTracks } = require('./music/autoplay');
 const {
   RPS_BUTTON_PREFIX,
   RPS_CHOICES,
@@ -70,7 +70,12 @@ const config = loadConfig();
 let isShuttingDown = false;
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMembers],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+  ],
 });
 
 const activityRotation = [
@@ -241,6 +246,7 @@ client.lavalink.on('trackStart', async (player, track) => {
   resetVotes(player.guildId);
   clearIdleTimer(player.guildId);
   addToRecentTracks(player.guildId, track);
+  scheduleAutoplayPrefetch(player, track, client);
   recordTrackPlay(player.guildId, track, { botUserId: client.user?.id });
   await savePlayerState(player).catch((error) =>
     console.error('Failed to save queue:', error),
@@ -740,6 +746,9 @@ async function skipTrack(interaction) {
   }
   const result = await handleSkipRequest(interaction, player, config, client);
   if (result.skipped) {
+    if (result.needsAutoplay && result.lastTrack) {
+      await handleAutoplay(player, result.lastTrack, client);
+    }
     await savePlayerState(player).catch(() => {});
   } else {
     await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral }).catch(() => {});

@@ -9,6 +9,7 @@ const { getGuildInsights } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
 const { setAutoplay, resetSeed, recordAutoplaySkip } = require('./music/autoplay');
 const { applyPreferredSource } = require('./music/searchUtils');
+const { createFileSessionStore } = require('./state/sessionStore');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const SCOPES = ['identify', 'guilds'].join(' ');
@@ -86,6 +87,9 @@ const AUDIO_UPLOAD_MIME_TYPES = new Set(['application/ogg', 'video/webm']);
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const PLAYER_TEXT_CHANNEL_DISABLED = 'disabled';
+const CONTROL_MESSAGE_LIMIT = 50;
+const CONTROL_MESSAGE_CACHE_TTL_MS = 60_000;
+const controlMessageCache = new Map();
 
 function createApiServer(client) {
   const app = express();
@@ -103,6 +107,7 @@ function createApiServer(client) {
   app.use(cookieParser(sessionSecret));
   app.use(
     session({
+      store: createFileSessionStore(session),
       secret: sessionSecret,
       resave: false,
       saveUninitialized: false,
@@ -116,6 +121,7 @@ function createApiServer(client) {
       name: 'bread.sid',
     }),
   );
+  attachControlMessageCacheListeners(client);
 
   app.get('/api/uploads/:guildId/:fileId/:fileName', async (req, res) => {
     const { guildId, fileId, fileName } = req.params;
@@ -1204,8 +1210,25 @@ function createApiServer(client) {
       if (!guild) return res.status(404).json({ error: 'Guild not found' });
 
       const requested = parseInt(req.query.limit, 10);
-      const limit = Number.isFinite(requested) ? Math.max(1, Math.min(500, requested)) : 250;
-      const members = await getGuildMembersSnapshot(guild);
+      const limit = Number.isFinite(requested) ? Math.max(1, Math.min(25, requested)) : 8;
+      const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+      if (query.length < 2) {
+        return res.json({ members: [] });
+      }
+
+      let members;
+      try {
+        members = await guild.members.search({ query, limit, cache: true });
+      } catch {
+        const normalizedQuery = query.toLowerCase();
+        const snapshot = await getGuildMembersSnapshot(guild);
+        members = snapshot.filter((member) => {
+          const displayName = member.displayName || member.user.globalName || member.user.username || '';
+          const username = member.user.username || '';
+          return `${displayName} ${username}`.toLowerCase().includes(normalizedQuery);
+        });
+      }
+
       const list = [...members.values()]
         .filter((member) => !member.user.bot)
         .sort((a, b) => (a.displayName || a.user.username).localeCompare(b.displayName || b.user.username))
@@ -1235,46 +1258,8 @@ function createApiServer(client) {
       const channel = guild.channels.cache.get(channelId);
       if (!channel || !channel.isTextBased()) return res.status(404).json({ error: 'Channel not found' });
       
-      const messages = await channel.messages.fetch({ limit: 50 });
-      const formatted = messages.map(m => ({
-        id: m.id,
-        content: m.content,
-        author: {
-          username: m.author.username,
-          avatar: m.author.displayAvatarURL() || null,
-          bot: m.author.bot
-        },
-        timestamp: m.createdTimestamp,
-        attachments: m.attachments.map(a => ({
-          url: a.url,
-          name: a.name || 'attachment',
-          contentType: a.contentType || null,
-          width: a.width || null,
-          height: a.height || null,
-        })),
-        embeds: m.embeds.map((embed) => ({
-          title: embed.title || null,
-          description: embed.description || null,
-          url: embed.url || null,
-          image: embed.image?.url || embed.thumbnail?.url || null,
-          provider: embed.provider?.name || null,
-        })),
-        mentions: {
-          users: m.mentions.users.map((user) => ({
-            id: user.id,
-            label: user.globalName || user.username,
-          })),
-          roles: m.mentions.roles.map((role) => ({
-            id: role.id,
-            label: role.name,
-          })),
-          channels: m.mentions.channels.map((mentionedChannel) => ({
-            id: mentionedChannel.id,
-            label: mentionedChannel.name,
-          })),
-        },
-      }));
-      res.json(formatted);
+      const messages = await getCachedControlMessages(channel);
+      res.json(messages);
     } catch (err) {
       console.error('Messages fetch error:', err);
       res.status(500).json({ error: 'Failed to fetch messages' });
@@ -1307,6 +1292,7 @@ function createApiServer(client) {
       }
       
       await channel.send(payload);
+      markControlMessagesStale(guild.id, channel.id);
       res.json({ success: true });
     } catch (err) {
       console.error('Control say error:', err);
@@ -1422,7 +1408,10 @@ function createApiServer(client) {
 
   // ---- Error Handler ----
 
-  app.use((err, _req, res, _next) => {
+  app.use((err, _req, res, next) => {
+    if (res.headersSent) {
+      return next(err);
+    }
     if (err?.type === 'entity.too.large') {
       return res.status(413).json({ error: 'Audio upload is too large' });
     }
@@ -1431,6 +1420,115 @@ function createApiServer(client) {
   });
 
   return app;
+}
+
+function attachControlMessageCacheListeners(client) {
+  if (client.__breadControlMessageCacheListenersAttached) return;
+  client.__breadControlMessageCacheListenersAttached = true;
+
+  client.on('messageCreate', (message) => {
+    if (message.guildId && message.channelId) markControlMessagesStale(message.guildId, message.channelId);
+  });
+
+  client.on('messageUpdate', (_oldMessage, message) => {
+    if (message.guildId && message.channelId) markControlMessagesStale(message.guildId, message.channelId);
+  });
+
+  client.on('messageDelete', (message) => {
+    if (message.guildId && message.channelId) removeCachedControlMessage(message.guildId, message.channelId, message.id);
+  });
+
+  client.on('messageDeleteBulk', (messages) => {
+    for (const message of messages.values()) {
+      if (message.guildId && message.channelId) removeCachedControlMessage(message.guildId, message.channelId, message.id);
+    }
+  });
+}
+
+function controlMessageCacheKey(guildId, channelId) {
+  return `${guildId}:${channelId}`;
+}
+
+function markControlMessagesStale(guildId, channelId) {
+  const key = controlMessageCacheKey(guildId, channelId);
+  const cached = controlMessageCache.get(key);
+  if (cached) cached.stale = true;
+}
+
+function removeCachedControlMessage(guildId, channelId, messageId) {
+  const key = controlMessageCacheKey(guildId, channelId);
+  const cached = controlMessageCache.get(key);
+  if (!cached) return;
+  cached.messages = cached.messages.filter((message) => message.id !== messageId);
+}
+
+async function getCachedControlMessages(channel) {
+  const key = controlMessageCacheKey(channel.guildId, channel.id);
+  const cached = controlMessageCache.get(key);
+  const now = Date.now();
+
+  if (cached && !cached.stale && now - cached.fetchedAt < CONTROL_MESSAGE_CACHE_TTL_MS) {
+    return cached.messages;
+  }
+
+  const messages = await channel.messages.fetch({ limit: CONTROL_MESSAGE_LIMIT });
+  const formatted = messages.map(formatControlMessage);
+  controlMessageCache.set(key, {
+    fetchedAt: now,
+    stale: false,
+    messages: formatted,
+  });
+  pruneControlMessageCache();
+  return formatted;
+}
+
+function formatControlMessage(message) {
+  return {
+    id: message.id,
+    content: message.content,
+    author: {
+      username: message.author.username,
+      avatar: message.author.displayAvatarURL() || null,
+      bot: message.author.bot,
+    },
+    timestamp: message.createdTimestamp,
+    attachments: message.attachments.map((attachment) => ({
+      url: attachment.url,
+      name: attachment.name || 'attachment',
+      contentType: attachment.contentType || null,
+      width: attachment.width || null,
+      height: attachment.height || null,
+    })),
+    embeds: message.embeds.map((embed) => ({
+      title: embed.title || null,
+      description: embed.description || null,
+      url: embed.url || null,
+      image: embed.image?.url || embed.thumbnail?.url || null,
+      provider: embed.provider?.name || null,
+    })),
+    mentions: {
+      users: message.mentions.users.map((user) => ({
+        id: user.id,
+        label: user.globalName || user.username,
+      })),
+      roles: message.mentions.roles.map((role) => ({
+        id: role.id,
+        label: role.name,
+      })),
+      channels: message.mentions.channels.map((mentionedChannel) => ({
+        id: mentionedChannel.id,
+        label: mentionedChannel.name,
+      })),
+    },
+  };
+}
+
+function pruneControlMessageCache() {
+  if (controlMessageCache.size <= 200) return;
+  const cutoff = Date.now() - 10 * CONTROL_MESSAGE_CACHE_TTL_MS;
+  for (const [key, cached] of controlMessageCache.entries()) {
+    if (cached.fetchedAt < cutoff) controlMessageCache.delete(key);
+  }
 }
 
 async function getGuildMembersSnapshot(guild) {

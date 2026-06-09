@@ -47,7 +47,7 @@ export function Footer() {
           >
             Add to Discord
           </button>
-          <a href="/api/auth/discord" className="hover:text-text-secondary transition-colors">
+          <a href="/dashboard" className="hover:text-text-secondary transition-colors">
             Dashboard
           </a>
         </div>
