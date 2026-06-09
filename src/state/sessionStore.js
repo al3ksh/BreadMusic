@@ -12,6 +12,7 @@ function createFileSessionStore(session, options = {}) {
   class FileSessionStore extends Store {
     constructor() {
       super();
+      this.writeQueues = new Map();
       fs.mkdirSync(directory, { recursive: true });
       this._pruneExpired().catch((error) => {
         console.warn('Failed to prune expired sessions:', error.message);
@@ -44,15 +45,10 @@ function createFileSessionStore(session, options = {}) {
         session: sess,
       };
       const filePath = this._filePath(sid);
-      const tempPath = `${filePath}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
 
-      fs.promises.writeFile(tempPath, JSON.stringify(record), 'utf8')
-        .then(() => fs.promises.rename(tempPath, filePath))
+      this._enqueueWrite(sid, () => fs.promises.writeFile(filePath, JSON.stringify(record), 'utf8'))
         .then(() => callback(null))
-        .catch((error) => {
-          fs.promises.unlink(tempPath).catch(() => {});
-          callback(error);
-        });
+        .catch((error) => callback(error));
     }
 
     destroy(sid, callback = () => {}) {
@@ -86,6 +82,20 @@ function createFileSessionStore(session, options = {}) {
     _filePath(sid) {
       const hash = crypto.createHash('sha256').update(String(sid)).digest('hex');
       return path.join(directory, `${hash}.json`);
+    }
+
+    _enqueueWrite(sid, operation) {
+      const previous = this.writeQueues.get(sid) || Promise.resolve();
+      const next = previous
+        .catch(() => {})
+        .then(operation)
+        .finally(() => {
+          if (this.writeQueues.get(sid) === next) {
+            this.writeQueues.delete(sid);
+          }
+        });
+      this.writeQueues.set(sid, next);
+      return next;
     }
 
     async _pruneExpired() {

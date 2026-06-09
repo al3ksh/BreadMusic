@@ -8,13 +8,55 @@ function packTrack(track) {
   return {
     encoded: track.encoded,
     info: track.info,
+    requester: packRequester(track.requester),
+    localUpload: packLocalUpload(track.localUpload),
+    isAutoplay: Boolean(track.isAutoplay),
   };
 }
 
-async function decodeTrack(node, encoded, requester) {
+function packRequester(requester) {
+  if (!requester || typeof requester !== 'object') return null;
+  return {
+    id: requester.id || null,
+    username: requester.username || requester.global_name || requester.globalName || requester.tag || null,
+    globalName: requester.globalName || requester.global_name || null,
+    global_name: requester.global_name || requester.globalName || null,
+    tag: requester.tag || null,
+    avatar: requester.avatar || null,
+    bot: Boolean(requester.bot),
+  };
+}
+
+function packLocalUpload(localUpload) {
+  if (!localUpload || typeof localUpload !== 'object') return null;
+  return {
+    guildId: localUpload.guildId || null,
+    uploadId: localUpload.uploadId || null,
+    fileName: localUpload.fileName || null,
+    filePath: localUpload.filePath || null,
+    expiresAt: localUpload.expiresAt || null,
+    cached: Boolean(localUpload.cached),
+  };
+}
+
+async function decodeTrack(node, entry, fallbackRequester) {
+  const encoded = typeof entry === 'string' ? entry : entry?.encoded;
   if (!encoded) return null;
   try {
-    return await node.decode.singleTrack(encoded, requester);
+    const requester = entry?.requester || fallbackRequester;
+    const decoded = await node.decode.singleTrack(encoded, requester);
+    if (!decoded) return null;
+
+    if (entry?.info) {
+      decoded.info = {
+        ...decoded.info,
+        ...entry.info,
+      };
+    }
+    if (entry?.requester) decoded.requester = entry.requester;
+    if (entry?.localUpload) decoded.localUpload = entry.localUpload;
+    if (entry?.isAutoplay) decoded.isAutoplay = true;
+    return decoded;
   } catch {
     return null;
   }
@@ -23,7 +65,7 @@ async function decodeTrack(node, encoded, requester) {
 async function decodeTracks(node, entries, requester) {
   const tracks = [];
   for (const entry of entries ?? []) {
-    const decoded = await decodeTrack(node, entry?.encoded ?? entry, requester);
+    const decoded = await decodeTrack(node, entry, requester);
     if (decoded) tracks.push(decoded);
   }
   return tracks;
@@ -59,7 +101,7 @@ async function hydratePlayer(player, client) {
   const requester = client.user ?? { id: '0', username: 'Bot' };
   const decodedQueue = await decodeTracks(player.node, payload.tracks, requester);
   const decodedPrevious = await decodeTracks(player.node, payload.previous, requester);
-  const current = await decodeTrack(player.node, payload.current?.encoded, requester);
+  const current = await decodeTrack(player.node, payload.current, requester);
 
   if (decodedQueue.length) {
     await player.queue.add(decodedQueue);
@@ -83,13 +125,8 @@ function clearStoredQueue(guildId) {
   queueStore.delete(guildId);
 }
 
-function resetAllQueues() {
-  queueStore.clearAll();
-}
-
 module.exports = {
   savePlayerState,
   hydratePlayer,
   clearStoredQueue,
-  resetAllQueues,
 };

@@ -55,7 +55,7 @@ export default function DashboardLayout({
     <div className="min-h-screen bg-bg-primary">
       <Sidebar user={user} onLogout={logout} />
       <main className="md:ml-[260px] min-h-screen">
-        <div className="p-5 md:p-8">
+        <div className="px-4 pb-5 pt-16 md:p-8">
           {children}
         </div>
       </main>

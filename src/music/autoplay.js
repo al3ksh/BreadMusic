@@ -26,6 +26,21 @@ const ACCEPTED_PLAY_MIN_MS = 90_000;
 const ACCEPTED_PLAY_MIN_RATIO = 0.65;
 const PREFETCH_LEAD_MS = 20_000;
 const MIN_PREFETCH_DELAY_MS = 5_000;
+const AUTOPLAY_LOG_LEVELS = {
+  silent: 0,
+  warn: 1,
+  info: 2,
+  debug: 3,
+};
+const AUTOPLAY_LOG_LEVEL = AUTOPLAY_LOG_LEVELS[String(process.env.AUTOPLAY_LOG_LEVEL || 'warn').toLowerCase()]
+  ?? AUTOPLAY_LOG_LEVELS.warn;
+
+function logAutoplay(level, message) {
+  const threshold = AUTOPLAY_LOG_LEVELS[level] ?? AUTOPLAY_LOG_LEVELS.info;
+  if (AUTOPLAY_LOG_LEVEL < threshold) return;
+  const writer = level === 'warn' ? console.warn : console.log;
+  writer(`[Autoplay] ${message}`);
+}
 
 const HARD_REJECT_TERMS = [
   'karaoke',
@@ -131,9 +146,7 @@ function recordAutoplaySkip(guildId, track, playback = {}) {
 
   const { normalized } = feedback;
   if (!feedback.record) {
-    console.log(
-      `[Autoplay] Skip ignored for feedback after accepted listen: "${normalized.title}" (${formatPlaybackFeedback(feedback)})`,
-    );
+    logAutoplay('debug', `Skip ignored for feedback after accepted listen: "${normalized.title}" (${formatPlaybackFeedback(feedback)})`);
     return false;
   }
 
@@ -152,9 +165,7 @@ function recordAutoplaySkip(guildId, track, playback = {}) {
   }
 
   skippedAutoplayTracks.set(guildId, next);
-  console.log(
-    `[Autoplay] ${feedback.strength} negative feedback saved for "${normalized.title}" by ${normalized.artist || 'unknown'} (${formatPlaybackFeedback(feedback)})`,
-  );
+  logAutoplay('info', `${feedback.strength} negative feedback saved for "${normalized.title}" by ${normalized.artist || 'unknown'} (${formatPlaybackFeedback(feedback)})`);
   return true;
 }
 
@@ -495,7 +506,7 @@ async function searchTracks(node, query, client) {
     const result = await searchWithTimeout(node, `ytsearch:${query}`, client.user);
     return result?.tracks?.slice(0, MAX_SEARCH_TRACKS_PER_QUERY) ?? [];
   } catch (error) {
-    console.log(`[Autoplay] Search failed for "${query}": ${error.message}`);
+    logAutoplay('debug', `Search failed for "${query}": ${error.message}`);
     return [];
   }
 }
@@ -505,14 +516,14 @@ async function getYouTubeRadioMix(node, videoId, client) {
 
   try {
     const radioUrl = `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`;
-    console.log(`[Autoplay] Fetching YouTube Radio Mix for ${videoId}`);
+    logAutoplay('debug', `Fetching YouTube Radio Mix for ${videoId}`);
 
     const result = await searchWithTimeout(node, radioUrl, client.user);
     const tracks = result?.tracks ?? [];
-    console.log(`[Autoplay] YouTube Radio Mix returned ${tracks.length} tracks`);
+    logAutoplay('debug', `YouTube Radio Mix returned ${tracks.length} tracks`);
     return tracks;
   } catch (error) {
-    console.log(`[Autoplay] YouTube Radio Mix failed: ${error.message}`);
+    logAutoplay('debug', `YouTube Radio Mix failed: ${error.message}`);
     return [];
   }
 }
@@ -529,17 +540,17 @@ async function resolveYouTubeId(node, track, client) {
   const query = `${normalized.artist || normalized.author} ${normalized.cleanTitle || normalized.title}`.trim();
   if (!query) return null;
 
-  console.log(`[Autoplay] Resolving YouTube ID for "${query}"`);
+  logAutoplay('debug', `Resolving YouTube ID for "${query}"`);
 
   try {
     const result = await searchWithTimeout(node, `ytsearch:${query}`, client.user);
     const identifier = result?.tracks?.[0]?.info?.identifier;
     if (isYouTubeIdentifier(identifier)) {
-      console.log(`[Autoplay] Resolved to YouTube ID: ${identifier}`);
+      logAutoplay('debug', `Resolved to YouTube ID: ${identifier}`);
       return identifier;
     }
   } catch (error) {
-    console.log(`[Autoplay] YouTube ID resolve failed: ${error.message}`);
+    logAutoplay('debug', `YouTube ID resolve failed: ${error.message}`);
   }
 
   return null;
@@ -740,10 +751,11 @@ function logCandidateSummary(scoredCandidates, selected) {
     .map((candidate) => `${candidate.score}:${candidate.normalized.artist || '?'} - ${candidate.normalized.title}`)
     .join(' | ');
 
-  if (top) console.log(`[Autoplay] Top candidates: ${top}`);
+  if (top) logAutoplay('debug', `Top candidates: ${top}`);
   if (selected) {
-    console.log(
-      `[Autoplay] Selected (${selected.score}) from ${selected.source}: "${selected.normalized.title}" by ${selected.normalized.artist || selected.normalized.author || 'unknown'} (${selected.reason})`,
+    logAutoplay(
+      'info',
+      `Selected (${selected.score}) from ${selected.source}: "${selected.normalized.title}" by ${selected.normalized.artist || selected.normalized.author || 'unknown'} (${selected.reason})`,
     );
   }
 }
@@ -756,23 +768,23 @@ async function findNextTrack(player, lastTrack, client) {
 
   if (lastTrack.isAutoplay) {
     if (wasRecentlySkipped(guildId, lastTrack)) {
-      console.log(`[Autoplay] Skipped autoplay track will not become the next seed: "${lastTrack.info.title}"`);
+      logAutoplay('info', `Skipped autoplay track will not become the next seed: "${lastTrack.info.title}"`);
     } else {
       const acceptedSeed = snapshotTrackInfo(lastTrack);
       if (acceptedSeed) {
         currentAutoplaySeed.set(guildId, acceptedSeed);
-        console.log(`[Autoplay] Accepted autoplay seed promoted: "${acceptedSeed.title}"`);
+        logAutoplay('debug', `Accepted autoplay seed promoted: "${acceptedSeed.title}"`);
       }
     }
   } else if (isLocalUploadTrack(lastTrack)) {
-    console.log(`[Autoplay] Local upload finished; keeping previous autoplay seed instead of using "${lastTrack.info.title}"`);
+    logAutoplay('debug', `Local upload finished; keeping previous autoplay seed instead of using "${lastTrack.info.title}"`);
   } else {
     const manualSeed = snapshotTrackInfo(lastTrack);
     if (manualSeed) {
       preferredSeed.set(guildId, manualSeed);
       currentAutoplaySeed.delete(guildId);
       skippedAutoplayTracks.delete(guildId);
-      console.log(`[Autoplay] New manual seed detected: "${manualSeed.title}"`);
+      logAutoplay('debug', `New manual seed detected: "${manualSeed.title}"`);
     }
     recentTracks.delete(guildId);
   }
@@ -781,24 +793,24 @@ async function findNextTrack(player, lastTrack, client) {
     isLocalUploadTrack(lastTrack) ? null : snapshotTrackInfo(lastTrack)
   );
   if (!activeSeed) {
-    console.log('[Autoplay] No previous seed available after local upload; not queueing autoplay');
+    logAutoplay('debug', 'No previous seed available after local upload; not queueing autoplay');
     return null;
   }
   const seedTrack = activeSeed ? { info: activeSeed } : lastTrack;
   if (activeSeed && activeSeed.title !== lastTrack.info.title) {
-    console.log(`[Autoplay] Using active seed: "${activeSeed.title}" instead of "${lastTrack.info.title}"`);
+    logAutoplay('debug', `Using active seed: "${activeSeed.title}" instead of "${lastTrack.info.title}"`);
   }
 
   addToRecentTracks(guildId, lastTrack);
 
   if (!node?.connected) {
-    console.log('[Autoplay] Node not connected');
+    logAutoplay('warn', 'Node not connected');
     return null;
   }
 
   const context = buildContext(guildId, seedTrack, lastTrack);
   if (!context.seedArtist && !context.seedTitle) {
-    console.log('[Autoplay] Could not build seed context');
+    logAutoplay('debug', 'Could not build seed context');
     return null;
   }
 
@@ -806,7 +818,7 @@ async function findNextTrack(player, lastTrack, client) {
   let videoId = context.seed?.identifier || context.last?.identifier;
 
   if (!isYouTubeIdentifier(videoId)) {
-    console.log('[Autoplay] Non-YouTube seed detected, resolving YouTube ID...');
+    logAutoplay('debug', 'Non-YouTube seed detected, resolving YouTube ID...');
     videoId = await resolveYouTubeId(node, seedTrack, client);
   }
 
@@ -816,7 +828,7 @@ async function findNextTrack(player, lastTrack, client) {
   }
 
   const queries = buildSearchQueries(context);
-  console.log(`[Autoplay] Search queries: ${queries.join(' | ') || 'none'}`);
+  logAutoplay('debug', `Search queries: ${queries.join(' | ') || 'none'}`);
 
   for (const query of queries) {
     const tracks = await searchTracks(node, query, client);
@@ -824,7 +836,7 @@ async function findNextTrack(player, lastTrack, client) {
   }
 
   if (!candidates.size) {
-    console.log('[Autoplay] No candidates found');
+    logAutoplay('debug', 'No candidates found');
     return null;
   }
 
@@ -837,7 +849,7 @@ async function findNextTrack(player, lastTrack, client) {
   logCandidateSummary(scoredCandidates, selected);
 
   if (!selected) {
-    console.log('[Autoplay] No candidate reached minimum score');
+    logAutoplay('debug', 'No candidate reached minimum score');
   }
 
   return selected?.track ?? null;
@@ -874,7 +886,7 @@ function scheduleAutoplayPrefetch(player, track, client) {
         return nextTrack || null;
       })
       .catch((error) => {
-        console.log(`[Autoplay] Prefetch failed: ${error.message}`);
+        logAutoplay('warn', `Prefetch failed: ${error.message}`);
         return null;
       });
 
@@ -906,7 +918,7 @@ async function handleAutoplay(player, lastTrack, client) {
   if (player.queue.current && player.playing) return false;
 
   if (autoplayInProgress.has(guildId)) {
-    console.log(`[Autoplay] Already in progress for guild ${guildId}, skipping`);
+    logAutoplay('debug', `Already in progress for guild ${guildId}, skipping`);
     return false;
   }
 
@@ -925,7 +937,7 @@ async function handleAutoplay(player, lastTrack, client) {
 
     return true;
   } catch (error) {
-    console.log(`[Autoplay] Failed: ${error.message}`);
+    logAutoplay('warn', `Failed: ${error.message}`);
     return false;
   } finally {
     autoplayInProgress.delete(guildId);
@@ -941,7 +953,7 @@ function clearAutoplayState(guildId) {
 }
 
 function resetSeed(guildId, trackInfo = null) {
-  console.log(`[Autoplay] Seed reset for guild ${guildId} - manual track added`);
+  logAutoplay('debug', `Seed reset for guild ${guildId} - manual track added`);
   clearAutoplayPrefetch(guildId);
   recentTracks.delete(guildId);
   skippedAutoplayTracks.delete(guildId);
@@ -950,7 +962,7 @@ function resetSeed(guildId, trackInfo = null) {
     const seedInfo = snapshotTrackInfo(trackInfo);
     if (!seedInfo) return;
     preferredSeed.set(guildId, seedInfo);
-    console.log(`[Autoplay] Preferred seed set: "${seedInfo.title}" by ${seedInfo.author}`);
+    logAutoplay('debug', `Preferred seed set: "${seedInfo.title}" by ${seedInfo.author}`);
   }
 }
 

@@ -17,7 +17,7 @@ const {
 const { MusicUI, BUTTON_PREFIX, BUTTONS } = require('./music/ui');
 const { handleSkipRequest } = require('./music/skipManager');
 const { buildTrackEmbed } = require('./music/embeds');
-const { savePlayerState, hydratePlayer, resetAllQueues } = require('./state/queueStore');
+const { savePlayerState, hydratePlayer } = require('./state/queueStore');
 const { recordTrackPlay } = require('./state/analyticsStore');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
 const { resetVotes } = require('./music/voteManager');
@@ -155,7 +155,6 @@ client.on('raw', (data) => client.lavalink.sendRawData(data));
 
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
-  resetAllQueues();
   client.lavalink.init({
     id: readyClient.user.id,
     username: readyClient.user.username,

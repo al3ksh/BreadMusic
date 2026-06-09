@@ -24,30 +24,31 @@ export function LandingNav() {
           : 'bg-transparent'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
         <button
           onClick={() => router.push('/')}
-          className="flex items-center gap-2.5 hover:opacity-80 transition-opacity cursor-pointer"
+          className="flex min-w-0 items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
         >
-          <div className="w-10 h-10 rounded-xl relative overflow-hidden flex items-center justify-center shrink-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl relative overflow-hidden flex items-center justify-center shrink-0">
             <img src="/assets/breadicon.png?v=3" alt="" className="w-full h-full object-cover" />
           </div>
-          <span className="font-bold text-lg text-text-primary">{botName}</span>
+          <span className="truncate font-bold text-base sm:text-lg text-text-primary">{botName}</span>
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <a
             href="/dashboard"
-            className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-text-secondary hover:text-text-primary transition-colors"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary sm:border-0 sm:px-4 sm:text-sm"
           >
             Dashboard
           </a>
           <button
             type="button"
             onClick={() => setShowInviteModal(true)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all shadow-lg shadow-accent/20"
+            className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white shadow-lg shadow-accent/20 transition-all hover:bg-accent-hover sm:px-5 sm:py-2.5 sm:text-sm"
           >
-            Add to Discord
+            <span className="sm:hidden">Add</span>
+            <span className="hidden sm:inline">Add to Discord</span>
           </button>
         </div>
 

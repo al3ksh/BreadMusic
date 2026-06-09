@@ -21,12 +21,12 @@ export default function GuildPage() {
   return (
     <div className="animate-fade-up">
       {/* Page header */}
-      <div className="bg-bg-secondary border-b border-border px-6 py-5 -m-5 md:-m-8 mb-6 md:mb-8 md:px-8">
+      <div className="bg-bg-secondary border-b border-border -mx-4 -mt-16 mb-5 px-4 py-4 pl-16 md:-m-8 md:mb-8 md:px-8 md:py-5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Settings size={22} className="text-text-secondary" />
+          <div className="flex min-w-0 items-center gap-3">
+            <Settings size={22} className="hidden shrink-0 text-text-secondary sm:block" />
             <div>
-              <h2 className="text-[22px] font-medium">
+              <h2 className="truncate text-[18px] font-medium sm:text-[22px]">
                 {invalidView && 'View Not Found'}
                 {activeTab === 'settings' && 'Server Settings'}
                 {activeTab === 'status' && 'Server Status'}
@@ -34,7 +34,7 @@ export default function GuildPage() {
                 {activeTab === 'economy' && 'Economy'}
                 {activeTab === 'control' && 'Remote Control'}
               </h2>
-              <p className="text-text-secondary text-[13px] mt-1">
+              <p className="mt-1 truncate text-[12px] text-text-secondary sm:text-[13px]">
                 {invalidView
                   ? `The view "${invalidView}" does not exist in dashboard.`
                   : 'Manage bot configuration and playback'}
@@ -93,7 +93,7 @@ function Skeleton({ className }: { className?: string }) {
 }
 
 const inputClass = "w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]";
-const rangeClass = "w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent";
+const rangeClass = "w-full min-w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent";
 const selectClass = "rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors font-[inherit]";
 const TRACK_TRANSITION_GRACE_MS = 3500;
 
@@ -112,22 +112,22 @@ function formatFileSize(bytes: number) {
 function Section({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={`bg-bg-card rounded-lg border border-border overflow-hidden ${className || ''}`}>
-      <div className="bg-bg-secondary px-5 py-3.5 border-b border-border">
+      <div className="bg-bg-secondary px-4 py-3 border-b border-border sm:px-5 sm:py-3.5">
         <h3 className="text-[15px] font-medium flex items-center gap-2">{title}</h3>
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-4 sm:p-5">{children}</div>
     </div>
   );
 }
 
 function Row({ label, desc, children }: { label: string; desc?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3 border-b border-border/50 last:border-0">
+    <div className="flex flex-col items-stretch justify-between gap-3 py-3 border-b border-border/50 last:border-0 sm:flex-row sm:items-center sm:gap-4">
       <div className="min-w-0">
         <p className="text-sm font-medium text-text-primary">{label}</p>
         {desc && <p className="text-xs text-text-secondary mt-0.5">{desc}</p>}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="w-full sm:w-auto sm:shrink-0">{children}</div>
     </div>
   );
 }
@@ -222,7 +222,7 @@ function SettingsTab({ guildId }: { guildId: string }) {
           <select
             value={config.djRoleId || ''}
             onChange={(e) => setConfig({ ...config, djRoleId: e.target.value || null })}
-            className={selectClass + " w-64 max-w-full"}
+            className={selectClass + " w-full sm:w-64"}
           >
             <option value="">(None - All members can DJ)</option>
             {roles.filter(r => r.name !== '@everyone').map(r => (
@@ -352,7 +352,7 @@ function SettingsTab({ guildId }: { guildId: string }) {
           <select
             value={config.preferredSource || ''}
             onChange={(e) => setConfig({ ...config, preferredSource: e.target.value || null })}
-            className={selectClass}
+            className={selectClass + " w-full sm:w-48"}
           >
             <option value="">Auto</option>
             <option value="ytsearch">YouTube</option>
@@ -370,7 +370,7 @@ function SettingsTab({ guildId }: { guildId: string }) {
                 playerTextChannelId: value === '__default' ? null : value === '__disabled' ? 'disabled' : value,
               });
             }}
-            className={selectClass + " w-64 max-w-full"}
+            className={selectClass + " w-full sm:w-64"}
           >
             <option value="__default">Default (use command/player channel)</option>
             <option value="__disabled">Disabled (do not send player message)</option>
@@ -385,7 +385,7 @@ function SettingsTab({ guildId }: { guildId: string }) {
           <select
             value={config.twentyFourSevenChannelId || ''}
             onChange={(e) => setConfig({ ...config, twentyFourSevenChannelId: e.target.value || null })}
-            className={selectClass + " w-64 max-w-full"}
+            className={selectClass + " w-full sm:w-64"}
           >
             <option value="">(None - Disabled)</option>
             {channels.filter(c => c.type === 2 || c.type === 13).map(c => (
@@ -397,18 +397,18 @@ function SettingsTab({ guildId }: { guildId: string }) {
         </Row>
       </Section>
 
-      <div className="flex items-center gap-4 pt-4 border-t border-border/50">
+      <div className="flex flex-col gap-3 pt-4 border-t border-border/50 sm:flex-row sm:items-center sm:gap-4">
         <button
           onClick={() => save(config as any)}
           disabled={saving}
-          className="px-6 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all shadow-lg shadow-accent/20 disabled:opacity-50 cursor-pointer"
+          className="w-full px-6 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all shadow-lg shadow-accent/20 disabled:opacity-50 cursor-pointer sm:w-auto"
         >
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
         <button
           onClick={reset}
           disabled={saving}
-          className="px-6 py-2.5 rounded-lg bg-danger/10 text-danger text-sm font-medium hover:bg-danger/20 transition-colors disabled:opacity-50 cursor-pointer"
+          className="w-full px-6 py-2.5 rounded-lg bg-danger/10 text-danger text-sm font-medium hover:bg-danger/20 transition-colors disabled:opacity-50 cursor-pointer sm:w-auto"
         >
           Reset
         </button>
@@ -1966,6 +1966,7 @@ function ControlTab({ guildId }: { guildId: string }) {
   const [attachment, setAttachment] = useState<{ name: string, base64: string } | null>(null);
   const [selectedTextId, setSelectedTextId] = useState('');
   const [selectedVoiceId, setSelectedVoiceId] = useState('');
+  const [mentionConfirmOpen, setMentionConfirmOpen] = useState(false);
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -2064,11 +2065,15 @@ function ControlTab({ guildId }: { guildId: string }) {
     });
   };
 
-  const sendAction = async (action: 'say' | 'summon' | 'leave') => {
+  const sendAction = async (action: 'say' | 'summon' | 'leave', options: { skipMentionConfirm?: boolean } = {}) => {
     setActioning(true);
     try {
       if (action === 'say') {
         if (!selectedTextId || (!messageText.trim() && !attachment)) return;
+        if (!options.skipMentionConfirm && /(^|\s)@(everyone|here)(\s|$)/i.test(messageText)) {
+          setMentionConfirmOpen(true);
+          return;
+        }
         await apiFetch(`/guilds/${guildId}/control/say`, {
           method: 'POST',
           body: JSON.stringify({ 
@@ -2081,6 +2086,7 @@ function ControlTab({ guildId }: { guildId: string }) {
         });
         setMessageText('');
         setAttachment(null);
+        setMentionConfirmOpen(false);
         toast.success('Message sent', 'Bot message was sent to the selected channel.');
       } else {
         await apiFetch(`/guilds/${guildId}/control/action`, {
@@ -2161,23 +2167,23 @@ function ControlTab({ guildId }: { guildId: string }) {
     attachment.contentType?.startsWith('video/') || /\.(mp4|webm|mov)$/i.test(attachment.url);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-6xl mx-auto lg:items-stretch">
-      <div className="space-y-6">
+    <div className="grid grid-cols-1 gap-4 w-full max-w-6xl mx-auto lg:grid-cols-2 lg:items-stretch lg:gap-6">
+      <div className="space-y-4 lg:space-y-6">
         <Section title="Send Message">
-          <div className="flex min-h-0 flex-col gap-4">
+          <div className="flex min-h-0 flex-col gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">Destination Channel</label>
             <select
               value={selectedTextId}
               onChange={(e) => setSelectedTextId(e.target.value)}
-              className={selectClass + " w-full max-w-sm"}
+              className={selectClass + " w-full"}
             >
               {textChannels.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
             </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">Message Content</label>
-            <div className="mb-2 flex flex-wrap items-center gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={() => insertMessageSnippet('**', '**')}
@@ -2206,7 +2212,7 @@ function ControlTab({ guildId }: { guildId: string }) {
                 type="button"
                 onClick={() => insertMessageSnippet('```\n', '\n```')}
                 title="Code block"
-                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+                className="px-2 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer sm:px-2.5"
               >
                 ```
               </button>
@@ -2214,7 +2220,7 @@ function ControlTab({ guildId }: { guildId: string }) {
                 type="button"
                 onClick={() => insertMessageSnippet('||', '||')}
                 title="Spoiler"
-                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+                className="px-2 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer sm:px-2.5"
               >
                 ||
               </button>
@@ -2222,7 +2228,7 @@ function ControlTab({ guildId }: { guildId: string }) {
                 type="button"
                 onClick={() => insertMessageSnippet('> ')}
                 title="Quote"
-                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+                className="px-2 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer sm:px-2.5"
               >
                 &gt;
               </button>
@@ -2238,7 +2244,7 @@ function ControlTab({ guildId }: { guildId: string }) {
                 type="button"
                 onClick={() => insertMessageSnippet('@everyone')}
                 title="Mention everyone"
-                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+                className="px-2 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer sm:px-2.5"
               >
                 @everyone
               </button>
@@ -2246,7 +2252,7 @@ function ControlTab({ guildId }: { guildId: string }) {
                 type="button"
                 onClick={() => insertMessageSnippet('@here')}
                 title="Mention online members"
-                className="px-2.5 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer"
+                className="px-2 py-2 rounded-md border border-border bg-bg-input text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors cursor-pointer sm:px-2.5"
               >
                 @here
               </button>
@@ -2321,7 +2327,7 @@ function ControlTab({ guildId }: { guildId: string }) {
               value={messageText}
               onChange={e => setMessageText(e.target.value)}
               placeholder="Type a message for the bot to send..."
-              className="max-h-48 min-h-28 w-full rounded-md border border-border bg-bg-input text-text-primary px-4 py-3 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit] resize-y"
+              className="max-h-44 min-h-24 w-full rounded-md border border-border bg-bg-input text-text-primary px-4 py-3 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit] resize-y sm:max-h-48 sm:min-h-28"
             />
           </div>
 
@@ -2339,12 +2345,12 @@ function ControlTab({ guildId }: { guildId: string }) {
             </div>
           )}
 
-          <div className="flex flex-wrap gap-3 pt-1">
+          <div className="grid grid-cols-[1fr_auto] gap-3 pt-1">
             <button
               type="button"
               onClick={() => sendAction('say')}
               disabled={actioning || (!messageText.trim() && !attachment)}
-              className="inline-flex min-w-0 items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all disabled:opacity-50 cursor-pointer shadow-lg shadow-accent/20"
+              className="inline-flex min-w-0 items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all disabled:opacity-50 cursor-pointer shadow-lg shadow-accent/20 sm:px-5"
             >
               <MessageSquare size={16} />
               {actioning ? 'Sending...' : 'Send as Bot'}
@@ -2357,6 +2363,42 @@ function ControlTab({ guildId }: { guildId: string }) {
         </div>
       </Section>
 
+      {mentionConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-border bg-bg-card shadow-2xl">
+            <div className="border-b border-border bg-bg-secondary px-5 py-4">
+              <h3 className="text-base font-semibold text-text-primary">Send server-wide mention?</h3>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <p className="text-sm leading-relaxed text-text-secondary">
+                This message contains <span className="font-semibold text-accent">@everyone</span> or <span className="font-semibold text-accent">@here</span>.
+                It may notify many people in the selected channel.
+              </p>
+              <div className="rounded-md border border-border bg-bg-input px-3 py-2 text-xs text-text-muted">
+                #{textChannels.find((channel) => channel.id === selectedTextId)?.name || 'selected channel'}
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-3 border-t border-border px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setMentionConfirmOpen(false)}
+                className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => sendAction('say', { skipMentionConfirm: true })}
+                disabled={actioning}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition-colors hover:bg-accent-hover disabled:opacity-50"
+              >
+                {actioning ? 'Sending...' : 'Send anyway'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Section title="Voice Connection">
         <div className="space-y-4">
           <div>
@@ -2364,16 +2406,16 @@ function ControlTab({ guildId }: { guildId: string }) {
             <select
               value={selectedVoiceId}
               onChange={(e) => setSelectedVoiceId(e.target.value)}
-              className={selectClass + " w-full max-w-sm"}
+              className={selectClass + " w-full"}
             >
               {voiceChannels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
-          <div className="flex gap-3">
+          <div className="grid grid-cols-2 gap-3">
              <button
               onClick={() => sendAction('summon')}
               disabled={actioning || !selectedVoiceId}
-              className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all shadow-lg shadow-accent/20 disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all shadow-lg shadow-accent/20 disabled:opacity-50 cursor-pointer sm:px-6"
             >
               <Mic size={16} />
               Summon Bot
@@ -2381,7 +2423,7 @@ function ControlTab({ guildId }: { guildId: string }) {
             <button
               onClick={() => sendAction('leave')}
               disabled={actioning}
-              className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-danger/10 text-danger text-sm font-medium hover:bg-danger/20 transition-colors disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-danger/10 text-danger text-sm font-medium hover:bg-danger/20 transition-colors disabled:opacity-50 cursor-pointer sm:px-6"
             >
               Disconnect
             </button>
@@ -2390,7 +2432,7 @@ function ControlTab({ guildId }: { guildId: string }) {
       </Section>
     </div>
 
-      <div className="min-h-[420px] lg:h-[650px] flex flex-col bg-bg-card rounded-lg border border-border shadow-sm overflow-hidden">
+      <div className="h-[420px] lg:h-[650px] flex flex-col bg-bg-card rounded-lg border border-border shadow-sm overflow-hidden">
         <div className="p-4 border-b border-border font-medium flex items-center gap-2">
            <MessageSquare size={16} className="text-accent" /> Live Chat
         </div>
@@ -2401,7 +2443,7 @@ function ControlTab({ guildId }: { guildId: string }) {
                <img src={m.author.avatar || '/assets/breadicon.png'} className="w-9 h-9 rounded-full object-cover shrink-0 bg-black" />
                <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
-                  <span className={`text-[14px] font-semibold truncate ${m.author.bot ? 'text-accent' : 'text-text-primary'}`}>{m.author.bot ? 'Bread' : m.author.username}</span>
+                  <span className={`text-[14px] font-semibold truncate ${m.author.bot ? 'text-accent' : 'text-text-primary'}`}>{m.author.username}</span>
                      {m.author.bot && <span className="px-1.5 py-0.5 rounded uppercase text-[10px] font-bold bg-accent/20 text-accent">BOT</span>}
                      <span className="text-xs text-text-muted shrink-0">{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>

@@ -64,8 +64,11 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
       {/* Mobile menu button */}
       <button
         onClick={() => setMobileOpen(!mobileOpen)}
-        className="fixed top-3.5 left-3.5 z-[201] flex md:hidden items-center justify-center w-10 h-10 rounded-lg bg-bg-secondary border border-border text-text-primary cursor-pointer shadow-lg"
+        className={`fixed top-3.5 z-[201] flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-bg-secondary text-text-primary shadow-lg transition-[left] duration-300 cursor-pointer md:hidden ${
+          mobileOpen ? 'left-4' : 'left-3.5'
+        }`}
         style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
+        aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
       >
         {mobileOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
@@ -73,14 +76,14 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-[199] md:hidden"
+          className="fixed inset-0 bg-black/75 backdrop-blur-[2px] z-[199] md:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 h-screen h-dvh z-[200] w-[260px] bg-bg-secondary border-r border-border flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] md:translate-x-0 ${
+        className={`fixed top-0 left-0 h-screen h-dvh z-[200] w-[min(320px,calc(100vw-56px))] bg-bg-secondary border-r border-border flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] md:w-[260px] md:translate-x-0 ${
           mobileOpen ? 'translate-x-0 shadow-[4px_0_20px_rgba(0,0,0,0.5)]' : '-translate-x-full'
         }`}
       >
@@ -88,7 +91,7 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
         <div className="px-5 py-5 border-b border-border md:px-5">
           <button
             onClick={() => router.push('/dashboard')}
-            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity md:pl-0 pl-8"
+            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity md:pl-0 pl-12"
           >
             <div className="relative w-8 h-8 rounded-lg shadow-md overflow-hidden shrink-0">
               <img src="/assets/breadicon.png?v=3" alt="" className="w-full h-full object-cover" />
