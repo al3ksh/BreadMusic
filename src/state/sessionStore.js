@@ -20,9 +20,9 @@ function createFileSessionStore(session, options = {}) {
     }
 
     get(sid, callback) {
-      fs.promises.readFile(this._filePath(sid), 'utf8')
-        .then((raw) => {
-          const record = JSON.parse(raw);
+      this._waitForWrite(sid)
+        .then(() => this._readRecord(sid))
+        .then((record) => {
           if (!record || record.expiresAt <= Date.now()) {
             this.destroy(sid, () => {});
             callback(null, null);
@@ -44,15 +44,14 @@ function createFileSessionStore(session, options = {}) {
         expiresAt: this._expiresAt(sess),
         session: sess,
       };
-      const filePath = this._filePath(sid);
 
-      this._enqueueWrite(sid, () => fs.promises.writeFile(filePath, JSON.stringify(record), 'utf8'))
+      this._enqueueWrite(sid, () => this._writeRecord(sid, record))
         .then(() => callback(null))
         .catch((error) => callback(error));
     }
 
     destroy(sid, callback = () => {}) {
-      fs.promises.unlink(this._filePath(sid))
+      this._enqueueWrite(sid, () => fs.promises.unlink(this._filePath(sid)))
         .then(() => callback(null))
         .catch((error) => {
           if (error.code === 'ENOENT') {
@@ -82,6 +81,41 @@ function createFileSessionStore(session, options = {}) {
     _filePath(sid) {
       const hash = crypto.createHash('sha256').update(String(sid)).digest('hex');
       return path.join(directory, `${hash}.json`);
+    }
+
+    async _readRecord(sid) {
+      const filePath = this._filePath(sid);
+      try {
+        const raw = await fs.promises.readFile(filePath, 'utf8');
+        if (!raw.trim()) {
+          await fs.promises.unlink(filePath).catch(() => {});
+          return null;
+        }
+        return JSON.parse(raw);
+      } catch (error) {
+        if (error.code === 'ENOENT') return null;
+        if (error instanceof SyntaxError) {
+          await fs.promises.unlink(filePath).catch(() => {});
+          return null;
+        }
+        throw error;
+      }
+    }
+
+    async _writeRecord(sid, record) {
+      const filePath = this._filePath(sid);
+      const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+      try {
+        await fs.promises.writeFile(tmpPath, JSON.stringify(record), 'utf8');
+        await renameWithRetry(tmpPath, filePath);
+      } catch (error) {
+        await fs.promises.unlink(tmpPath).catch(() => {});
+        throw error;
+      }
+    }
+
+    _waitForWrite(sid) {
+      return this.writeQueues.get(sid) || Promise.resolve();
     }
 
     _enqueueWrite(sid, operation) {
@@ -118,6 +152,23 @@ function createFileSessionStore(session, options = {}) {
   }
 
   return new FileSessionStore();
+}
+
+async function renameWithRetry(source, destination, attempts = 5) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fs.promises.rename(source, destination);
+      return;
+    } catch (error) {
+      const retryable = error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY';
+      if (!retryable || attempt === attempts - 1) throw error;
+      await delay(25 * (attempt + 1));
+    }
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 module.exports = {
