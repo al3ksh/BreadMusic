@@ -31,7 +31,7 @@ COPY web/package*.json ./
 RUN npm ci --omit=dev
 COPY --from=web-builder /app/web/.next ./.next
 COPY --from=web-builder /app/web/public ./public
-COPY --from=web-builder /app/web/next.config.ts ./next.config.ts
+COPY --from=web-builder /app/web/next.config.mjs ./next.config.mjs
 
 EXPOSE 3000
 CMD ["npm", "start"]
