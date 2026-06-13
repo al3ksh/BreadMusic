@@ -61,6 +61,7 @@ export interface GuildConfig {
   twentyFourSevenChannelName: string | null;
   defaultVolume: number;
   autoplay: boolean;
+  voiceChannelStatus: boolean;
 }
 
 export interface PlayerStatus {

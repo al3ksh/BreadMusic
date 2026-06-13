@@ -14,6 +14,8 @@ services:
       - ./lavalink/plugins:/opt/Lavalink/plugins
     environment:
       - LAVALINK_PASSWORD=${LAVALINK_PASSWORD:-youshallnotpass}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
     networks:
       - breadmusic-network
     healthcheck:
@@ -47,6 +49,7 @@ services:
       - WEB_HOST=0.0.0.0
       - WEB_URL=${WEB_URL:-http://localhost:3001}
       - SESSION_SECRET=${SESSION_SECRET}
+      - AUTOPLAY_LOG_LEVEL=${AUTOPLAY_LOG_LEVEL:-warn}
       - NODE_ENV=production
     ports:
       - "3001:3001"

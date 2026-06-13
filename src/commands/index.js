@@ -63,6 +63,8 @@ const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
 const { deleteInteractionReply } = require('../utils/interactions');
 const { isAutoplayEnabled, toggleAutoplay, resetSeed } = require('../music/autoplay');
+const { classifyPlaybackError, describeSearchFailure } = require('../music/playbackErrors');
+const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('../music/voiceStatus');
 
 const BREAD_IMAGE_PATH = path.resolve(__dirname, '..', 'assets', 'images', 'bread.png');
 const MONSTER_BREAD_IMAGE_PATH = path.resolve(
@@ -342,10 +344,25 @@ const commands = [
         tracksToAdd = [resolvedTrack];
       } else {
         const prefixedQuery = applyPreferredSource(rawQuery, config, defaultSource);
-        const searchResult = await player.search(prefixedQuery, interaction.user);
-        if (!searchResult || !searchResult.tracks.length) {
+        let searchResult;
+        try {
+          searchResult = await player.search(prefixedQuery, interaction.user);
+        } catch (error) {
+          const failure = classifyPlaybackError(error);
           await interaction.deleteReply().catch(() => {});
-          await interaction.followUp({ content: 'No results found for that query.', flags: MessageFlags.Ephemeral });
+          await interaction.followUp({
+            content: `**${failure.title}**\n${failure.description}`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+        if (!searchResult || !searchResult.tracks.length) {
+          const failure = describeSearchFailure(searchResult);
+          await interaction.deleteReply().catch(() => {});
+          await interaction.followUp({
+            content: `**${failure.title}**\n${failure.description}`,
+            flags: MessageFlags.Ephemeral,
+          });
           return;
         }
         isPlaylist = Boolean(searchResult.playlist);
@@ -836,6 +853,9 @@ const commands = [
           .addBooleanOption((option) =>
             option.setName('persistent_queue').setDescription('Persist queue?'),
           )
+          .addBooleanOption((option) =>
+            option.setName('voice_status').setDescription('Show the current track as voice channel status?'),
+          )
           .addStringOption((option) =>
             option
               .setName('preferred_source')
@@ -869,6 +889,10 @@ const commands = [
       if (sub === 'reset') {
         deleteConfig(interaction.guildId);
         const fresh = getConfig(interaction.guildId);
+        const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
+        if (fresh.voiceChannelStatus && player?.queue.current) {
+          await setVoiceTrackStatus(interaction.client, player, player.queue.current);
+        }
         const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
         const embed = new EmbedBuilder()
           .setTitle('Configuration reset')
@@ -893,10 +917,18 @@ const commands = [
       if (afk !== null) updates.afkTimeout = Math.max(1, afk) * 60 * 1000;
       const persistent = interaction.options.getBoolean('persistent_queue');
       if (persistent !== null) updates.persistentQueue = persistent;
+      const voiceStatus = interaction.options.getBoolean('voice_status');
+      if (voiceStatus !== null) updates.voiceChannelStatus = voiceStatus;
       const prefSource = interaction.options.getString('preferred_source');
       if (prefSource) updates.preferredSource = prefSource;
 
       const updated = setConfig(interaction.guildId, updates);
+      const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
+      if (voiceStatus === false && player) {
+        await clearVoiceTrackStatus(interaction.client, player);
+      } else if (voiceStatus === true && player?.queue.current) {
+        await setVoiceTrackStatus(interaction.client, player, player.queue.current);
+      }
       const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
       const embed = new EmbedBuilder()
         .setTitle('Configuration updated')

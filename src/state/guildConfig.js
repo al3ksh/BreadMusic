@@ -14,6 +14,7 @@ const DEFAULT_CONFIG = {
   twentyFourSevenChannelId: null,
   defaultVolume: 100,
   autoplay: false,
+  voiceChannelStatus: true,
 };
 
 const OLD_DEFAULT_AFK_TIMEOUT = 5 * 60 * 1000;
@@ -84,6 +85,7 @@ function formatConfig(config) {
     `twentyFourSevenChannelId: ${config.twentyFourSevenChannelId ?? 'none'}`,
     `defaultVolume: ${config.defaultVolume}`,
     `autoplay: ${config.autoplay ? 'yes' : 'no'}`,
+    `voiceChannelStatus: ${config.voiceChannelStatus ? 'yes' : 'no'}`,
   ].join('\n');
 }
 

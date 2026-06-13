@@ -323,6 +323,9 @@ function SettingsTab({ guildId }: { guildId: string }) {
         <Row label="Persistent Queue" desc="Save queue between bot restarts">
           <ToggleSwitch checked={config.persistentQueue} onChange={(v) => setConfig({ ...config, persistentQueue: v })} />
         </Row>
+        <Row label="Voice Channel Status" desc="Show the current track below the voice channel name">
+          <ToggleSwitch checked={config.voiceChannelStatus} onChange={(v) => setConfig({ ...config, voiceChannelStatus: v })} />
+        </Row>
         <Row label="AFK Timeout">
           <div className="flex items-center gap-2">
             <input

@@ -9,7 +9,7 @@ RUN apt-get update \
 ARG LAVALINK_VERSION=4.2.2
 RUN wget -q https://github.com/lavalink-devs/Lavalink/releases/download/${LAVALINK_VERSION}/Lavalink.jar -O Lavalink.jar
 
-COPY application.yml .
+COPY application.example.yml application.yml
 
 RUN mkdir -p plugins
 COPY plugins/ ./plugins/

@@ -43,6 +43,10 @@ const {
 const { hasBalance, addBalance, removeBalance, getBalance } = require('./games/economy');
 const { handleAutoplay, scheduleAutoplayPrefetch, clearAutoplayState, addToRecentTracks } = require('./music/autoplay');
 const {
+  clearVoiceTrackStatus,
+  setVoiceTrackStatus,
+} = require('./music/voiceStatus');
+const {
   RPS_BUTTON_PREFIX,
   RPS_CHOICES,
   createChallenge,
@@ -232,6 +236,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   const guildId = newState.guild?.id ?? oldState.guild?.id;
   if (!guildId) return;
+  if (
+    oldState.id === client.user?.id &&
+    oldState.channelId &&
+    oldState.channelId !== newState.channelId
+  ) {
+    clearVoiceTrackStatus(client, oldState.channelId).catch(() => {});
+  }
   const player = client.lavalink.getPlayer(guildId);
   if (!player || !player.voiceChannelId) return;
 
@@ -250,23 +261,32 @@ client.lavalink.on('trackStart', async (player, track) => {
   await savePlayerState(player).catch((error) =>
     console.error('Failed to save queue:', error),
   );
-  await client.musicUI.sendNowPlaying(player, track);
+  await Promise.all([
+    client.musicUI.sendNowPlaying(player, track),
+    setVoiceTrackStatus(client, player, track),
+  ]);
 });
 
 client.lavalink.on('trackEnd', async (player, track, payload) => {
   await savePlayerState(player).catch(() => {});
 });
 
-client.lavalink.on('trackException', (player, track, payload) => {
+client.lavalink.on('trackError', async (player, track, payload) => {
+  const exception = payload?.exception;
   console.error(
-    `[TrackException] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} reason=${payload.exception?.message}`,
+    `[TrackError] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} severity=${exception?.severity ?? 'unknown'} reason=${exception?.message ?? payload?.error ?? 'unknown'}`,
   );
+  await client.musicUI.sendPlaybackError(player, track, payload);
 });
 
-client.lavalink.on('trackStuck', (player, track, payload) => {
+client.lavalink.on('trackStuck', async (player, track, payload) => {
   console.warn(
     `[TrackStuck] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} threshold=${payload.thresholdMs}`,
   );
+  await client.musicUI.sendPlaybackError(player, track, {
+    ...payload,
+    message: `Track stuck after ${payload.thresholdMs}ms`,
+  });
 });
 
 client.lavalink.on('queueEnd', async (player, track) => {
@@ -274,6 +294,7 @@ client.lavalink.on('queueEnd', async (player, track) => {
   
   const autoplayTriggered = await handleAutoplay(player, track, client);
   if (!autoplayTriggered) {
+    await clearVoiceTrackStatus(client, player);
     await client.musicUI.refresh(player);
     scheduleIdleLeave(player, client);
     handleVoiceStateUpdate(player, client);
@@ -283,6 +304,7 @@ client.lavalink.on('queueEnd', async (player, track) => {
 client.lavalink.on('playerDestroy', async (player) => {
   clearEmptyChannelTimer(player.guildId);
   clearAutoplayState(player.guildId);
+  await clearVoiceTrackStatus(client, player);
   await client.musicUI.clear(player.guildId);
 });
 

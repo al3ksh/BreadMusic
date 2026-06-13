@@ -9,6 +9,8 @@ const { getGuildInsights } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
 const { setAutoplay, resetSeed, recordAutoplaySkip } = require('./music/autoplay');
 const { applyPreferredSource } = require('./music/searchUtils');
+const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
+const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('./music/voiceStatus');
 const { createFileSessionStore } = require('./state/sessionStore');
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -473,6 +475,7 @@ function createApiServer(client) {
       playerTextChannelName,
       defaultVolume: config.defaultVolume,
       autoplay: config.autoplay,
+      voiceChannelStatus: config.voiceChannelStatus,
     });
   });
 
@@ -502,6 +505,7 @@ function createApiServer(client) {
     if (typeof body.persistentQueue === 'boolean') updates.persistentQueue = body.persistentQueue;
     if (typeof body.preferredSource === 'string') updates.preferredSource = body.preferredSource || null;
     if (typeof body.autoplay === 'boolean') updates.autoplay = body.autoplay;
+    if (typeof body.voiceChannelStatus === 'boolean') updates.voiceChannelStatus = body.voiceChannelStatus;
     if (typeof body.defaultVolume === 'number') updates.defaultVolume = Math.max(0, Math.min(100, body.defaultVolume));
 
     const updated = setConfig(guildId, updates);
@@ -521,12 +525,25 @@ function createApiServer(client) {
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(updates, 'voiceChannelStatus')) {
+      const player = client.lavalink?.players?.get(guildId);
+      if (!updated.voiceChannelStatus && player) {
+        await clearVoiceTrackStatus(client, player);
+      } else if (updated.voiceChannelStatus && player?.queue.current) {
+        await setVoiceTrackStatus(client, player, player.queue.current);
+      }
+    }
+
     res.json({ success: true, config: updated });
   });
 
-  app.post('/api/guilds/:guildId/config/reset', requireAuth, requireGuildAdmin, requireTrustedOrigin, requireDashboardActionRateLimit, (req, res) => {
+  app.post('/api/guilds/:guildId/config/reset', requireAuth, requireGuildAdmin, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
     deleteConfig(req.params.guildId);
     const fresh = getConfig(req.params.guildId);
+    const player = client.lavalink?.players?.get(req.params.guildId);
+    if (fresh.voiceChannelStatus && player?.queue.current) {
+      await setVoiceTrackStatus(client, player, player.queue.current);
+    }
     res.json({ success: true, config: fresh });
   });
 
@@ -1016,7 +1033,23 @@ function createApiServer(client) {
           const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform || 'ytsearch';
           const preparedQuery = applyPreferredSource(query, guildConfig, defaultSource);
           const requester = getDashboardRequester(req, client);
-          const result = await node.search({ query: preparedQuery }, requester);
+          let result;
+          try {
+            result = await node.search({ query: preparedQuery }, requester);
+          } catch (error) {
+            const failure = classifyPlaybackError(error);
+            return res.status(502).json({
+              error: failure.description,
+              code: failure.code,
+            });
+          }
+          if (result?.loadType === 'error' || result?.exception) {
+            const failure = describeSearchFailure(result);
+            return res.status(502).json({
+              error: failure.description,
+              code: failure.code,
+            });
+          }
           const tracks = (result?.tracks || []).slice(0, 10).map((t) => ({
             title: t.info.title,
             author: t.info.author,
@@ -1049,9 +1082,25 @@ function createApiServer(client) {
             if (!searchNode) return res.status(503).json({ error: 'No Lavalink node available' });
             const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform || 'ytsearch';
             const preparedQuery = applyPreferredSource(query, guildConfig, defaultSource);
-            const result = await searchNode.search({ query: preparedQuery }, requester);
+            let result;
+            try {
+              result = await searchNode.search({ query: preparedQuery }, requester);
+            } catch (error) {
+              const failure = classifyPlaybackError(error);
+              return res.status(502).json({
+                error: failure.description,
+                code: failure.code,
+              });
+            }
             const track = result?.tracks?.[0];
-            if (!track) return res.status(404).json({ error: 'No results found' });
+            if (!track) {
+              const failure = describeSearchFailure(result);
+              const status = failure.code === 'not_found' ? 404 : 502;
+              return res.status(status).json({
+                error: failure.description,
+                code: failure.code,
+              });
+            }
             if (track.info) {
               resetSeed(guildId, {
                 title: track.info.title,
@@ -1202,6 +1251,7 @@ function createApiServer(client) {
       console.error('Roles fetch error:', err);
       res.status(500).json({ error: 'Failed to fetch roles' });
     }
+
   });
 
   app.get('/api/guilds/:guildId/members', requireAuth, requireGuildAdmin, async (req, res) => {

@@ -8,8 +8,8 @@
 - Node.js 18+
 - Java 17/21
 - Lavalink 4.x with plugins:
-  - `youtube-plugin` (YouTube support)
-  - `lavasrc-plugin` (Spotify, Deezer, Apple Music support)
+  - `youtube-plugin` 1.18.1 (YouTube support)
+  - `lavasrc-plugin` 4.8.3 (Spotify, Deezer, Apple Music support)
 
 ### Environment
 Copy `.env.example` to `.env` and fill in the values:
@@ -41,6 +41,9 @@ WEB_HOST=0.0.0.0
 WEB_URL=http://localhost:3000
 SESSION_SECRET=random-secret-change-this
 
+# Optional logging level: error, warn, info, debug
+AUTOPLAY_LOG_LEVEL=warn
+
 # Optional (used by /dashboard command for external link)
 # DASHBOARD_URL=https://your-domain.example
 ```
@@ -57,8 +60,7 @@ Use three terminals:
 
 ```powershell
 # 1) Lavalink
-cd lavalink
-java -jar Lavalink.jar
+npm run dev:lavalink
 ```
 
 ```powershell
@@ -297,8 +299,12 @@ plugins:
 
 ### Required Plugins
 Place these in `lavalink/plugins/`:
-- `youtube-plugin-1.x.x.jar` - [GitHub](https://github.com/lavalink-devs/youtube-source)
-- `lavasrc-plugin-4.x.x.jar` - [GitHub](https://github.com/topi314/LavaSrc)
+- `youtube-plugin-1.18.1.jar` - [GitHub](https://github.com/lavalink-devs/youtube-source)
+- `lavasrc-plugin-4.8.3.jar` - [GitHub](https://github.com/topi314/LavaSrc)
+
+Copy `lavalink/application.example.yml` to `lavalink/application.yml` for a fresh
+installation. Keep Spotify credentials in `.env`; never commit them to the
+Lavalink configuration file.
 
 ---
 

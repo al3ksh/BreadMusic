@@ -1,0 +1,40 @@
+server:
+  port: 2333
+
+lavalink:
+  server:
+    password: "${LAVALINK_PASSWORD:youshallnotpass}"
+    bufferDurationMs: 400
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: true
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+
+spring:
+  main:
+    allow-bean-definition-overriding: true
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+  lavasrc:
+    providers:
+      - "ytsearch:\"%ISRC%\""
+      - "ytsearch:%QUERY%"
+    sources:
+      spotify: true
+      applemusic: false
+      deezer: false
+      yandexmusic: false
+      flowerytts: false
+      youtube: false
+    spotify:
+      clientId: "${SPOTIFY_CLIENT_ID:}"
+      clientSecret: "${SPOTIFY_CLIENT_SECRET:}"
+      countryCode: "PL"
+      playlistLoadLimit: 6
+      albumLoadLimit: 6
+      localFiles: false

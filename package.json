@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/bot.js",
     "dev:api": "node src/bot.js",
+    "dev:lavalink": "node scripts/start-lavalink.js",
     "dev:web": "cd web && npm run dev",
     "register": "node src/register-commands.js"
   },
