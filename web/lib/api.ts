@@ -44,6 +44,22 @@ export interface GuildInfo {
   permissions: number;
   member_count: number;
   bot_present: boolean;
+  access_level: 'admin' | 'dj' | 'member';
+  dashboard_access: 'admin' | 'dj' | 'members';
+  can_access: boolean;
+  can_invite: boolean;
+}
+
+export interface DashboardCapabilities {
+  accessLevel: 'admin' | 'dj' | 'member';
+  dashboardAccess: 'admin' | 'dj' | 'members';
+  canAccess: boolean;
+  canView: boolean;
+  canControlPlayer: boolean;
+  canUpload: boolean;
+  canManageConfig: boolean;
+  canManageEconomy: boolean;
+  canUseRemoteControl: boolean;
 }
 
 export interface GuildConfig {
@@ -62,6 +78,47 @@ export interface GuildConfig {
   defaultVolume: number;
   autoplay: boolean;
   voiceChannelStatus: boolean;
+  dashboardAccess: 'admin' | 'dj' | 'members';
+}
+
+export interface HistoryEntry {
+  id: string;
+  playedAt: number;
+  autoplay: boolean;
+  track: {
+    title: string;
+    author: string;
+    uri: string;
+    duration: number;
+    artwork: string | null;
+    source: string | null;
+  };
+  requester: {
+    userId: string;
+    username: string;
+    displayName: string;
+    avatar: string | null;
+  } | null;
+}
+
+export interface HistoryPage {
+  items: HistoryEntry[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface LyricsResult {
+  id: number | null;
+  title: string;
+  artist: string;
+  album: string | null;
+  duration: number;
+  instrumental: boolean;
+  plainLyrics: string;
+  syncedLyrics: string;
+  provider: string;
 }
 
 export interface PlayerStatus {

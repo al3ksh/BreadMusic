@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { apiFetch, type DiscordUser, getUserAvatar } from '@/lib/api';
+import { apiFetch, type DiscordUser, type DashboardCapabilities, getUserAvatar } from '@/lib/api';
 import {
   LayoutDashboard,
   LogOut,
@@ -14,6 +14,8 @@ import {
   X,
   Home,
   Terminal,
+  History,
+  BookOpenText,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -26,6 +28,7 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
   const pathname = usePathname();
   const botName = 'Bread';
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [capabilities, setCapabilities] = useState<DashboardCapabilities | null>(null);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -33,7 +36,7 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
   }, [pathname]);
 
   const searchParams = useSearchParams();
-  const currentView = searchParams.get('view') || 'settings';
+  const currentView = searchParams.get('view') || (capabilities?.canManageConfig ? 'settings' : 'player');
 
   const isActive = (path: string, view?: string) => {
     if (view) return pathname === path && currentView === view;
@@ -44,6 +47,16 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
   const guildMatch = pathname?.match(/^\/dashboard\/(\d+)/);
   const currentGuildId = guildMatch ? guildMatch[1] : null;
 
+  useEffect(() => {
+    if (!currentGuildId) {
+      setCapabilities(null);
+      return;
+    }
+    apiFetch<DashboardCapabilities>(`/guilds/${currentGuildId}/access`)
+      .then(setCapabilities)
+      .catch(() => setCapabilities(null));
+  }, [currentGuildId]);
+
   const navItems = [
     { href: '/', icon: <Home size={18} />, label: 'Home' },
     { href: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Servers', exact: true },
@@ -51,11 +64,19 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
 
   const guildNavItems = currentGuildId
     ? [
-        { href: `/dashboard/${currentGuildId}`, view: 'settings', icon: <Settings size={18} />, label: 'Settings', exact: true },
+        ...(capabilities?.canManageConfig
+          ? [{ href: `/dashboard/${currentGuildId}`, view: 'settings', icon: <Settings size={18} />, label: 'Settings', exact: true }]
+          : []),
         { href: `/dashboard/${currentGuildId}?view=status`, view: 'status', icon: <Activity size={18} />, label: 'Status' },
         { href: `/dashboard/${currentGuildId}?view=player`, view: 'player', icon: <Play size={18} />, label: 'Player' },
-        { href: `/dashboard/${currentGuildId}?view=economy`, view: 'economy', icon: <Coins size={18} />, label: 'Economy' },
-        { href: `/dashboard/${currentGuildId}?view=control`, view: 'control', icon: <Terminal size={18} />, label: 'Control' },
+        { href: `/dashboard/${currentGuildId}?view=history`, view: 'history', icon: <History size={18} />, label: 'History' },
+        { href: `/dashboard/${currentGuildId}?view=lyrics`, view: 'lyrics', icon: <BookOpenText size={18} />, label: 'Lyrics' },
+        ...(capabilities?.canManageEconomy
+          ? [{ href: `/dashboard/${currentGuildId}?view=economy`, view: 'economy', icon: <Coins size={18} />, label: 'Economy' }]
+          : []),
+        ...(capabilities?.canUseRemoteControl
+          ? [{ href: `/dashboard/${currentGuildId}?view=control`, view: 'control', icon: <Terminal size={18} />, label: 'Control' }]
+          : []),
       ]
     : [];
 
@@ -176,6 +197,17 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
             >
               <LogOut size={14} />
             </button>
+          </div>
+          <div className="mt-2 flex items-center justify-center gap-2 text-[10px] text-text-muted">
+            <a href="https://github.com/al3ksh/BreadMusic" target="_blank" rel="noreferrer" className="hover:text-text-secondary transition-colors">
+              Source
+            </a>
+            <span>/</span>
+            <a href="https://github.com/al3ksh/BreadMusic/blob/main/LICENSE" target="_blank" rel="noreferrer" className="hover:text-text-secondary transition-colors">
+              AGPL-3.0
+            </a>
+            <span>/</span>
+            <span>No warranty</span>
           </div>
         </div>
       </aside>

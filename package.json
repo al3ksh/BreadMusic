@@ -8,11 +8,12 @@
     "dev:api": "node src/bot.js",
     "dev:lavalink": "node scripts/start-lavalink.js",
     "dev:web": "cd web && npm run dev",
-    "register": "node src/register-commands.js"
+    "register": "node src/register-commands.js",
+    "test": "node --test test/access.test.js test/history.test.js test/lyrics.test.js"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@discordjs/voice": "0.19.2",
     "cookie-parser": "^1.4.7",

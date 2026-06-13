@@ -5,13 +5,16 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
-const { getGuildInsights } = require('./state/analyticsStore');
+const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
 const { setAutoplay, resetSeed, recordAutoplaySkip } = require('./music/autoplay');
 const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('./music/voiceStatus');
 const { createFileSessionStore } = require('./state/sessionStore');
+const { resolveDashboardCapabilities } = require('./dashboard/access');
+const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
+const { handleSkipRequest } = require('./music/skipManager');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const SCOPES = ['identify', 'guilds'].join(' ');
@@ -167,26 +170,62 @@ function createApiServer(client) {
     next();
   }
 
-  async function requireGuildAdmin(req, res, next) {
+  async function loadGuildAccess(req, res) {
     const guildId = req.params.guildId;
-    if (!guildId) return res.status(400).json({ error: 'Missing guild ID' });
+    if (!guildId) {
+      res.status(400).json({ error: 'Missing guild ID' });
+      return null;
+    }
 
     const guild = client.guilds.cache.get(guildId);
-    if (!guild) return res.status(404).json({ error: 'Bot is not in this guild' });
+    if (!guild) {
+      res.status(404).json({ error: 'Bot is not in this guild' });
+      return null;
+    }
 
     let member = guild.members.cache.get(req.session.user.id);
     if (!member) {
       try {
         member = await guild.members.fetch(req.session.user.id);
       } catch {
-        return res.status(403).json({ error: 'You are not in this guild' });
+        res.status(403).json({ error: 'You are not in this guild' });
+        return null;
       }
     }
 
-    if (!member.permissions.has('ManageGuild')) {
+    const config = getConfig(guildId);
+    const capabilities = resolveDashboardCapabilities(member, config);
+    req.guild = guild;
+    req.guildMember = member;
+    req.guildConfig = config;
+    req.dashboardCapabilities = capabilities;
+    return { guild, member, config, capabilities };
+  }
+
+  async function requireGuildAccess(req, res, next) {
+    const access = await loadGuildAccess(req, res);
+    if (!access) return;
+    if (!access.capabilities.canAccess) {
+      return res.status(403).json({ error: 'Dashboard access is not enabled for your role' });
+    }
+    next();
+  }
+
+  async function requireGuildDJ(req, res, next) {
+    const access = await loadGuildAccess(req, res);
+    if (!access) return;
+    if (!access.capabilities.canUpload) {
+      return res.status(403).json({ error: 'DJ role or Manage Guild permission required' });
+    }
+    next();
+  }
+
+  async function requireGuildAdmin(req, res, next) {
+    const access = await loadGuildAccess(req, res);
+    if (!access) return;
+    if (!access.capabilities.canManageConfig) {
       return res.status(403).json({ error: 'Manage Guild permission required' });
     }
-
     next();
   }
 
@@ -391,17 +430,38 @@ function createApiServer(client) {
       const MANAGE_GUILD = BigInt(0x20);
       const botGuildIds = new Set(client.guilds.cache.keys());
 
-      function mapGuilds(discordGuilds) {
-        return discordGuilds
-          .filter((g) => (BigInt(g.permissions) & MANAGE_GUILD) === MANAGE_GUILD)
-          .map((g) => ({
+      async function mapGuilds(discordGuilds) {
+        const mapped = await Promise.all(discordGuilds.map(async (g) => {
+          const guild = client.guilds.cache.get(g.id);
+          const oauthAdmin = (BigInt(g.permissions) & MANAGE_GUILD) === MANAGE_GUILD;
+          let capabilities = {
+            accessLevel: oauthAdmin ? 'admin' : 'member',
+            dashboardAccess: 'admin',
+            canAccess: oauthAdmin,
+          };
+
+          if (guild) {
+            let member = guild.members.cache.get(req.session.user.id);
+            if (!member) member = await guild.members.fetch(req.session.user.id).catch(() => null);
+            if (member) capabilities = resolveDashboardCapabilities(member, getConfig(g.id));
+          }
+
+          return {
             id: g.id,
             name: g.name,
             icon: g.icon,
             permissions: g.permissions,
             member_count: g.approximate_member_count || 0,
             bot_present: botGuildIds.has(g.id),
-          }))
+            access_level: capabilities.accessLevel,
+            dashboard_access: capabilities.dashboardAccess,
+            can_access: capabilities.canAccess,
+            can_invite: oauthAdmin,
+          };
+        }));
+
+        return mapped
+          .filter((g) => (g.bot_present ? g.can_access : g.can_invite))
           .sort((a, b) => b.bot_present - a.bot_present);
       }
 
@@ -418,7 +478,7 @@ function createApiServer(client) {
             headers: { Authorization: `Bearer ${accessToken}` },
           });
           if (retryRes.ok) {
-            return res.json(mapGuilds(await retryRes.json()));
+            return res.json(await mapGuilds(await retryRes.json()));
           }
         }
         const errBody = await guildsRes.json().catch(() => ({}));
@@ -426,7 +486,7 @@ function createApiServer(client) {
         return res.status(502).json({ error: `Failed to fetch guilds: ${guildsRes.status}` });
       }
 
-      const guilds = mapGuilds(await guildsRes.json());
+      const guilds = await mapGuilds(await guildsRes.json());
 
       res.json(guilds);
     } catch (err) {
@@ -436,6 +496,10 @@ function createApiServer(client) {
   });
 
   // ---- Guild Config ----
+
+  app.get('/api/guilds/:guildId/access', requireAuth, requireGuildAccess, (req, res) => {
+    res.json(req.dashboardCapabilities);
+  });
 
   app.get('/api/guilds/:guildId/config', requireAuth, requireGuildAdmin, (req, res) => {
     const config = getConfig(req.params.guildId);
@@ -476,6 +540,7 @@ function createApiServer(client) {
       defaultVolume: config.defaultVolume,
       autoplay: config.autoplay,
       voiceChannelStatus: config.voiceChannelStatus,
+      dashboardAccess: config.dashboardAccess,
     });
   });
 
@@ -506,6 +571,7 @@ function createApiServer(client) {
     if (typeof body.preferredSource === 'string') updates.preferredSource = body.preferredSource || null;
     if (typeof body.autoplay === 'boolean') updates.autoplay = body.autoplay;
     if (typeof body.voiceChannelStatus === 'boolean') updates.voiceChannelStatus = body.voiceChannelStatus;
+    if (['admin', 'dj', 'members'].includes(body.dashboardAccess)) updates.dashboardAccess = body.dashboardAccess;
     if (typeof body.defaultVolume === 'number') updates.defaultVolume = Math.max(0, Math.min(100, body.defaultVolume));
 
     const updated = setConfig(guildId, updates);
@@ -549,11 +615,11 @@ function createApiServer(client) {
 
   // ---- Guild Status / Player ----
 
-  app.get('/api/guilds/:guildId/status', requireAuth, requireGuildAdmin, (req, res) => {
+  app.get('/api/guilds/:guildId/status', requireAuth, requireGuildAccess, (req, res) => {
     res.json(buildPlayerStatusSnapshot(client, req.params.guildId));
   });
 
-  app.get('/api/guilds/:guildId/player/events', requireAuth, requireGuildAdmin, (req, res) => {
+  app.get('/api/guilds/:guildId/player/events', requireAuth, requireGuildAccess, (req, res) => {
     const guildId = req.params.guildId;
     const page = parseQueuePage(req.query.page);
 
@@ -588,14 +654,14 @@ function createApiServer(client) {
     });
   });
 
-  app.get('/api/guilds/:guildId/player/filters', requireAuth, requireGuildAdmin, (_req, res) => {
+  app.get('/api/guilds/:guildId/player/filters', requireAuth, requireGuildAccess, (_req, res) => {
     res.json({ presets: FILTER_PRESET_CHOICES });
   });
 
   app.post(
     '/api/guilds/:guildId/player/upload',
     requireAuth,
-    requireGuildAdmin,
+    requireGuildDJ,
     requireTrustedOrigin,
     requireDashboardActionRateLimit,
     express.raw({ type: '*/*', limit: AUDIO_UPLOAD_MAX_BYTES }),
@@ -724,7 +790,7 @@ function createApiServer(client) {
     },
   );
 
-  app.get('/api/guilds/:guildId/health', requireAuth, requireGuildAdmin, (req, res) => {
+  app.get('/api/guilds/:guildId/health', requireAuth, requireGuildAccess, (req, res) => {
     const guildId = req.params.guildId;
     const guild = client.guilds.cache.get(guildId);
     const player = client.lavalink?.players?.get(guildId) ?? null;
@@ -772,7 +838,7 @@ function createApiServer(client) {
     });
   });
 
-  app.get('/api/guilds/:guildId/insights', requireAuth, requireGuildAdmin, (req, res) => {
+  app.get('/api/guilds/:guildId/insights', requireAuth, requireGuildAccess, (req, res) => {
     const guildId = req.params.guildId;
     const requested = parseInt(req.query.limit, 10);
     const limit = Number.isFinite(requested) ? Math.max(1, Math.min(25, requested)) : 5;
@@ -782,13 +848,40 @@ function createApiServer(client) {
     res.json(getGuildInsights(guildId, { limit, range }));
   });
 
-  app.get('/api/guilds/:guildId/queue', requireAuth, requireGuildAdmin, (req, res) => {
+  app.get('/api/guilds/:guildId/queue', requireAuth, requireGuildAccess, (req, res) => {
     res.json(buildQueueSnapshot(client, req.params.guildId, parseQueuePage(req.query.page)));
+  });
+
+  app.get('/api/guilds/:guildId/history', requireAuth, requireGuildAccess, (req, res) => {
+    res.json(getGuildHistory(req.params.guildId, {
+      page: req.query.page,
+      limit: req.query.limit,
+    }));
+  });
+
+  app.get('/api/guilds/:guildId/lyrics', requireAuth, requireGuildAccess, async (req, res) => {
+    try {
+      const player = client.lavalink?.players?.get(req.params.guildId);
+      const requestedTitle = typeof req.query.title === 'string' ? req.query.title.trim() : '';
+      const requestedArtist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+      const query = requestedTitle && requestedArtist
+        ? { title: requestedTitle, artist: requestedArtist, duration: Number(req.query.duration) || 0 }
+        : trackToLyricsQuery(player?.queue?.current);
+      if (!query.title || !query.artist) {
+        return res.status(404).json({ error: 'Nothing is playing and no song was provided' });
+      }
+      const lyrics = await findLyrics(query);
+      if (!lyrics) return res.status(404).json({ error: 'Lyrics not found' });
+      res.json(lyrics);
+    } catch (error) {
+      console.error('Lyrics lookup failed:', error.message);
+      res.status(502).json({ error: 'Lyrics provider is temporarily unavailable' });
+    }
   });
 
   // ---- Economy ----
 
-  app.get('/api/guilds/:guildId/economy/leaderboard', requireAuth, requireGuildAdmin, async (req, res) => {
+  app.get('/api/guilds/:guildId/economy/leaderboard', requireAuth, requireGuildAccess, async (req, res) => {
     try {
       const guild = client.guilds.cache.get(req.params.guildId);
       if (!guild) return res.status(404).json({ error: 'Guild not found' });
@@ -903,7 +996,7 @@ function createApiServer(client) {
 
   // ---- Player Controls ----
 
-  app.post('/api/guilds/:guildId/player/:action', requireAuth, requireGuildAdmin, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
+  app.post('/api/guilds/:guildId/player/:action', requireAuth, requireGuildAccess, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
     const guildId = req.params.guildId;
     const action = req.params.action;
     let player = client.lavalink?.players?.get(guildId);
@@ -911,6 +1004,33 @@ function createApiServer(client) {
 
     try {
       const guildConfig = getConfig(guildId);
+      const member = req.guildMember;
+      const capabilities = req.dashboardCapabilities;
+      const memberVoiceChannelId = member?.voice?.channelId || null;
+      const botVoiceChannelId = guild?.members?.me?.voice?.channelId || player?.voiceChannelId || null;
+      const privileged = capabilities.accessLevel === 'admin' || capabilities.accessLevel === 'dj';
+      if (!capabilities.canControlPlayer) {
+        return res.status(403).json({ error: 'Player control is not enabled for your role' });
+      }
+      if (!privileged && (!memberVoiceChannelId || memberVoiceChannelId !== botVoiceChannelId)) {
+        return res.status(403).json({ error: 'Join the same voice channel as the bot to control playback' });
+      }
+      const djOnlyActions = new Set([
+        'stop',
+        'clearqueue',
+        'shuffle',
+        'loop',
+        'back',
+        'volume',
+        'filter',
+        'autoplay',
+        'remove',
+        'seek',
+        'move',
+      ]);
+      if (!privileged && djOnlyActions.has(action)) {
+        return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
+      }
 
       // Allow dashboard play when the bot is already in voice but player object is missing.
       if (!player && action === 'play' && guild) {
@@ -956,12 +1076,21 @@ function createApiServer(client) {
 
         case 'skip':
           if (player) {
-            const currentTrack = player.queue.current;
-            recordAutoplaySkip(guildId, currentTrack, { position: player.position });
-            if (player.queue.tracks.length === 0 && player.queue.current) {
-               await player.stopPlaying(false, false);
+            if (privileged) {
+              const currentTrack = player.queue.current;
+              recordAutoplaySkip(guildId, currentTrack, { position: player.position });
+              if (player.queue.tracks.length === 0 && player.queue.current) {
+                await player.stopPlaying(false, false);
+              } else {
+                await player.skip();
+              }
             } else {
-               await player.skip();
+              const result = await handleSkipRequest({
+                member,
+                guild,
+                user: { id: req.session.user.id },
+              }, player, guildConfig, client);
+              return res.json({ success: true, skipped: result.skipped, message: result.message });
             }
           }
           break;
@@ -1002,6 +1131,14 @@ function createApiServer(client) {
             await client.musicUI?.refresh(player).catch(() => {});
             return res.json({ success: true, repeatMode: next });
           }
+          break;
+        }
+
+        case 'back': {
+          const previous = await player.queue.shiftPrevious();
+          if (!previous) return res.status(404).json({ error: 'No previous tracks' });
+          await player.play({ clientTrack: previous });
+          await client.musicUI?.refresh(player).catch(() => {});
           break;
         }
 

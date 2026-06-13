@@ -2,11 +2,11 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
-import { apiFetch, type GuildConfig, type PlayerStatus, type QueueTrack, type GuildHealth, type GuildInsights, type GuildInsightsRange, type FilterPreset, type EconomyLeaderboardEntry, type EconomyMember, formatDuration } from '@/lib/api';
-import { Settings, Activity, Play, Pause, SkipForward, Square, Shuffle, Repeat, Volume2, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, SlidersHorizontal, Trash2, Upload, FileAudio, SkipBack, GripVertical, Bold, Italic, Code2, AtSign, Hash } from 'lucide-react';
+import { apiFetch, type GuildConfig, type PlayerStatus, type QueueTrack, type GuildHealth, type GuildInsights, type GuildInsightsRange, type FilterPreset, type EconomyLeaderboardEntry, type EconomyMember, type DashboardCapabilities, type HistoryPage, type LyricsResult, formatDuration } from '@/lib/api';
+import { Settings, Activity, Play, Pause, SkipForward, Square, Shuffle, Repeat, Volume2, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, SlidersHorizontal, Trash2, Upload, FileAudio, SkipBack, GripVertical, Bold, Italic, Code2, AtSign, Hash, History, BookOpenText, Clock3 } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
 
-type Tab = 'settings' | 'status' | 'player' | 'economy' | 'control';
+type Tab = 'settings' | 'status' | 'player' | 'history' | 'lyrics' | 'economy' | 'control';
 
 export default function GuildPage() {
   const params = useParams();
@@ -14,9 +14,39 @@ export default function GuildPage() {
   const searchParams = useSearchParams();
   const guildId = params.guildId as string;
   const rawView = searchParams.get('view');
-  const validTabs: Tab[] = ['settings', 'status', 'player', 'economy', 'control'];
+  const [capabilities, setCapabilities] = useState<DashboardCapabilities | null>(null);
+  const [accessLoading, setAccessLoading] = useState(true);
+  const validTabs: Tab[] = ['settings', 'status', 'player', 'history', 'lyrics', 'economy', 'control'];
   const invalidView = rawView && !validTabs.includes(rawView as Tab) ? rawView : null;
-  const activeTab = invalidView ? 'settings' : ((rawView as Tab) || 'settings');
+  const defaultTab: Tab = capabilities?.canManageConfig ? 'settings' : 'player';
+  const activeTab = invalidView ? defaultTab : ((rawView as Tab) || defaultTab);
+  const restrictedView = (
+    (activeTab === 'settings' && !capabilities?.canManageConfig) ||
+    (activeTab === 'economy' && !capabilities?.canManageEconomy) ||
+    (activeTab === 'control' && !capabilities?.canUseRemoteControl)
+  );
+
+  useEffect(() => {
+    setAccessLoading(true);
+    apiFetch<DashboardCapabilities>(`/guilds/${guildId}/access`)
+      .then(setCapabilities)
+      .catch(() => setCapabilities(null))
+      .finally(() => setAccessLoading(false));
+  }, [guildId]);
+
+  useEffect(() => {
+    if (!accessLoading && capabilities && restrictedView) {
+      router.replace(`/dashboard/${guildId}?view=player`);
+    }
+  }, [accessLoading, capabilities, restrictedView, router, guildId]);
+
+  if (accessLoading) {
+    return <div className="flex justify-center py-24"><Spinner /></div>;
+  }
+
+  if (!capabilities?.canAccess) {
+    return <div className="rounded-lg border border-border bg-bg-card p-8 text-center text-text-secondary">You do not have dashboard access for this server.</div>;
+  }
 
   return (
     <div className="animate-fade-up">
@@ -31,6 +61,8 @@ export default function GuildPage() {
                 {activeTab === 'settings' && 'Server Settings'}
                 {activeTab === 'status' && 'Server Status'}
                 {activeTab === 'player' && 'Music Player'}
+                {activeTab === 'history' && 'Listening History'}
+                {activeTab === 'lyrics' && 'Lyrics'}
                 {activeTab === 'economy' && 'Economy'}
                 {activeTab === 'control' && 'Remote Control'}
               </h2>
@@ -51,11 +83,13 @@ export default function GuildPage() {
         </div>
       </div>
 
-      {!invalidView && activeTab === 'settings' && <SettingsTab guildId={guildId} />}
+      {!invalidView && !restrictedView && activeTab === 'settings' && <SettingsTab guildId={guildId} />}
       {!invalidView && activeTab === 'status' && <StatusTab guildId={guildId} />}
-      {!invalidView && activeTab === 'player' && <PlayerTab guildId={guildId} />}
-      {!invalidView && activeTab === 'economy' && <EconomyTab guildId={guildId} />}
-      {!invalidView && activeTab === 'control' && <ControlTab guildId={guildId} />}
+      {!invalidView && activeTab === 'player' && <PlayerTab guildId={guildId} capabilities={capabilities} />}
+      {!invalidView && activeTab === 'history' && <HistoryTab guildId={guildId} />}
+      {!invalidView && activeTab === 'lyrics' && <LyricsTab guildId={guildId} />}
+      {!invalidView && !restrictedView && activeTab === 'economy' && <EconomyTab guildId={guildId} />}
+      {!invalidView && !restrictedView && activeTab === 'control' && <ControlTab guildId={guildId} />}
 
       {invalidView && (
         <div className="w-full max-w-5xl mx-auto rounded-lg border border-border bg-bg-card p-6 text-center">
@@ -218,6 +252,17 @@ function SettingsTab({ guildId }: { guildId: string }) {
     <div className="space-y-5 w-full max-w-5xl mx-auto">
 
       <Section title="DJ & Permissions">
+        <Row label="Dashboard Access" desc="DJ access uses the configured DJ role; without one, every member is treated as a DJ">
+          <select
+            value={config.dashboardAccess}
+            onChange={(e) => setConfig({ ...config, dashboardAccess: e.target.value as GuildConfig['dashboardAccess'] })}
+            className={selectClass + " w-full sm:w-64"}
+          >
+            <option value="admin">Administrators only</option>
+            <option value="dj">Administrators and DJs</option>
+            <option value="members">All server members</option>
+          </select>
+        </Row>
         <Row label="DJ Role" desc={config.djRoleName || 'All members can DJ'}>
           <select
             value={config.djRoleId || ''}
@@ -941,7 +986,310 @@ function SegmentedVolume({ value, onChange, onCommit }: { value: number; onChang
   );
 }
 
-function PlayerTab({ guildId }: { guildId: string }) {
+function HistoryTab({ guildId }: { guildId: string }) {
+  const toast = useToast();
+  const [history, setHistory] = useState<HistoryPage | null>(null);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    apiFetch<HistoryPage>(`/guilds/${guildId}/history?page=${page}&limit=30`)
+      .then(setHistory)
+      .catch((error) => toast.error('History unavailable', error instanceof Error ? error.message : 'Failed to load history.'))
+      .finally(() => setLoading(false));
+  }, [guildId, page, toast]);
+
+  return (
+    <div className="w-full max-w-5xl mx-auto">
+      <div className="rounded-lg border border-border bg-bg-card overflow-hidden">
+        <div className="border-b border-border bg-bg-secondary px-5 py-4">
+          <h3 className="flex items-center gap-2 text-[15px] font-medium"><History size={17} /> Listening History</h3>
+          <p className="mt-1 text-xs text-text-muted">{history ? `${history.total} retained plays` : 'Recent server playback'}</p>
+        </div>
+        <div className="divide-y divide-border/60">
+          {loading && <div className="p-8 text-center text-text-muted"><Spinner /></div>}
+          {!loading && history?.items.length === 0 && <div className="p-10 text-center text-sm text-text-muted">No playback history yet.</div>}
+          {!loading && history?.items.map((entry) => (
+            <div key={entry.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+              {entry.track.artwork ? (
+                <img src={entry.track.artwork} alt="" className="h-11 w-11 shrink-0 rounded-md object-cover" />
+              ) : (
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-bg-hover"><Play size={16} className="text-text-muted" /></div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <p className="truncate text-sm font-medium">{entry.track.title}</p>
+                  {entry.autoplay && <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">AUTO</span>}
+                </div>
+                <p className="truncate text-xs text-text-secondary">
+                  {entry.track.author}{entry.requester ? ` · requested by ${entry.requester.displayName}` : ''}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-xs tabular-nums text-text-secondary">{formatDuration(entry.track.duration)}</p>
+                <p className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-text-muted">
+                  <Clock3 size={10} />{new Date(entry.playedAt).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+        {history && history.totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-border bg-bg-secondary px-4 py-3">
+            <button className="rounded-md border border-border p-2 disabled:opacity-40" disabled={page === 0} onClick={() => setPage((value) => Math.max(0, value - 1))} aria-label="Previous history page"><ChevronLeft size={16} /></button>
+            <span className="text-xs text-text-secondary">Page {page + 1} of {history.totalPages}</span>
+            <button className="rounded-md border border-border p-2 disabled:opacity-40" disabled={page + 1 >= history.totalPages} onClick={() => setPage((value) => value + 1)} aria-label="Next history page"><ChevronRight size={16} /></button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type SyncedLyricLine = {
+  time: number;
+  text: string;
+};
+
+function parseSyncedLyrics(value: string): SyncedLyricLine[] {
+  const lines: SyncedLyricLine[] = [];
+  const pattern = /^\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?]\s*(.*)$/;
+
+  for (const rawLine of value.split(/\r?\n/)) {
+    const match = rawLine.match(pattern);
+    if (!match) continue;
+    const minutes = Number(match[1]);
+    const seconds = Number(match[2]);
+    const fraction = match[3] ? Number(`0.${match[3].padEnd(3, '0').slice(0, 3)}`) : 0;
+    lines.push({
+      time: (minutes * 60 + seconds + fraction) * 1000,
+      text: match[4].trim() || '♪',
+    });
+  }
+
+  return lines.sort((a, b) => a.time - b.time);
+}
+
+function LyricsTab({ guildId }: { guildId: string }) {
+  const toast = useToast();
+  const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
+  const [artist, setArtist] = useState('');
+  const [title, setTitle] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [liveMode, setLiveMode] = useState(false);
+  const [playerStatus, setPlayerStatus] = useState<PlayerStatus | null>(null);
+  const [livePosition, setLivePosition] = useState(0);
+  const activeLineRef = useRef<HTMLParagraphElement | null>(null);
+  const lastLiveTrackRef = useRef('');
+  const liveClockRef = useRef<{
+    trackKey: string;
+    position: number;
+    duration: number;
+    capturedAt: number;
+    paused: boolean;
+  } | null>(null);
+
+  const loadLyrics = useCallback(async (manual: boolean, requestedArtist = artist, requestedTitle = title) => {
+    setLoading(true);
+    try {
+      const params = manual
+        ? `?artist=${encodeURIComponent(requestedArtist.trim())}&title=${encodeURIComponent(requestedTitle.trim())}`
+        : '';
+      const result = await apiFetch<LyricsResult>(`/guilds/${guildId}/lyrics${params}`);
+      setLyrics(result);
+      if (!manual) {
+        setArtist(result.artist);
+        setTitle(result.title);
+      }
+    } catch (error) {
+      setLyrics(null);
+      if (manual) toast.error('Lyrics unavailable', error instanceof Error ? error.message : 'Lyrics not found.');
+    } finally {
+      setLoading(false);
+    }
+  }, [artist, title, guildId, toast]);
+
+  useEffect(() => {
+    loadLyrics(false, '', '');
+  }, [guildId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!liveMode) return;
+    const source = new EventSource(`/api/guilds/${guildId}/player/events?page=0`);
+    const handleSnapshot = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { status?: PlayerStatus };
+        if (!payload.status) return;
+
+        const status = payload.status;
+        const track = status.currentTrack;
+        if (!track) {
+          liveClockRef.current = null;
+          setLivePosition(0);
+          setPlayerStatus(status);
+          return;
+        }
+
+        const now = Date.now();
+        const trackKey = `${track.uri}|${track.title}|${track.author}`;
+        const incomingPosition = track.position || 0;
+        const previousClock = liveClockRef.current;
+        let stablePosition = incomingPosition;
+
+        if (previousClock?.trackKey === trackKey) {
+          const estimatedPrevious = previousClock.position +
+            (previousClock.paused ? 0 : now - previousClock.capturedAt);
+          const movedBackwards = incomingPosition < estimatedPrevious - 5000;
+
+          if (status.paused && !previousClock.paused) {
+            stablePosition = Math.max(incomingPosition, estimatedPrevious);
+          } else if (status.paused && previousClock.paused && !movedBackwards) {
+            stablePosition = previousClock.position;
+          } else if (!status.paused && !movedBackwards) {
+            stablePosition = Math.max(incomingPosition, estimatedPrevious);
+          }
+        }
+
+        stablePosition = Math.min(track.duration || Infinity, Math.max(0, stablePosition));
+        liveClockRef.current = {
+          trackKey,
+          position: stablePosition,
+          duration: track.duration || 0,
+          capturedAt: now,
+          paused: status.paused,
+        };
+        setLivePosition(stablePosition);
+        setPlayerStatus({
+          ...status,
+          currentTrack: {
+            ...track,
+            position: stablePosition,
+          },
+        });
+      } catch {
+        // Wait for the next valid snapshot.
+      }
+    };
+    source.addEventListener('snapshot', handleSnapshot as EventListener);
+    return () => source.close();
+  }, [guildId, liveMode]);
+
+  useEffect(() => {
+    if (!liveMode || !playerStatus?.currentTrack) return;
+    const track = playerStatus.currentTrack;
+    const trackKey = `${track.uri}|${track.title}|${track.author}`;
+    if (trackKey === lastLiveTrackRef.current) return;
+    lastLiveTrackRef.current = trackKey;
+    loadLyrics(false, '', '');
+  }, [liveMode, playerStatus?.currentTrack?.uri]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!liveMode) return;
+    const updatePosition = () => {
+      const clock = liveClockRef.current;
+      if (!clock) return;
+      const elapsed = clock.paused ? 0 : Date.now() - clock.capturedAt;
+      setLivePosition(Math.min(clock.duration || Infinity, clock.position + elapsed));
+    };
+    updatePosition();
+    const timer = setInterval(updatePosition, 250);
+    return () => clearInterval(timer);
+  }, [liveMode]);
+
+  const syncedLines = React.useMemo(
+    () => (lyrics?.syncedLyrics ? parseSyncedLyrics(lyrics.syncedLyrics) : []),
+    [lyrics?.syncedLyrics],
+  );
+  const activeLineIndex = syncedLines.reduce(
+    (current, line, index) => (line.time <= livePosition ? index : current),
+    -1,
+  );
+
+  useEffect(() => {
+    if (liveMode && activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [activeLineIndex, liveMode]);
+
+  return (
+    <div className="w-full max-w-5xl mx-auto space-y-4">
+      <div className="rounded-lg border border-border bg-bg-card p-4">
+        <form
+          className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (artist.trim() && title.trim()) loadLyrics(true);
+          }}
+        >
+          <input className={inputClass + ' w-full'} value={artist} onChange={(event) => setArtist(event.target.value)} placeholder="Artist" />
+          <input className={inputClass + ' w-full'} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Track title" />
+          <button type="submit" disabled={loading || !artist.trim() || !title.trim()} className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-40">
+            {loading ? <Spinner /> : <Search size={16} />} Find
+          </button>
+        </form>
+      </div>
+      <div className="rounded-lg border border-border bg-bg-card overflow-hidden">
+        <div className="flex items-center justify-between gap-4 border-b border-border bg-bg-secondary px-5 py-4">
+          <div className="min-w-0">
+            <h3 className="flex items-center gap-2 text-[15px] font-medium"><BookOpenText size={17} /> <span className="truncate">{lyrics?.title || 'Lyrics'}</span></h3>
+            {lyrics && <p className="mt-1 truncate text-xs text-text-secondary">{lyrics.artist}{lyrics.album ? ` · ${lyrics.album}` : ''}</p>}
+          </div>
+          <label className={`flex shrink-0 items-center gap-2 text-xs ${syncedLines.length ? 'text-text-secondary' : 'text-text-muted'}`}>
+            <span>Live</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={liveMode}
+              disabled={!syncedLines.length}
+              onClick={() => setLiveMode((value) => !value)}
+              className={`relative h-6 w-11 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${liveMode ? 'bg-accent' : 'bg-border'}`}
+            >
+              <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${liveMode ? 'translate-x-5' : ''}`} />
+            </button>
+          </label>
+        </div>
+        <div className={`p-5 sm:p-7 ${liveMode ? 'max-h-[60vh] overflow-y-auto scroll-smooth' : ''}`}>
+          {loading ? (
+            <div className="flex justify-center py-12"><Spinner /></div>
+          ) : lyrics?.instrumental ? (
+            <p className="py-10 text-center text-sm text-text-secondary">This track is marked as instrumental.</p>
+          ) : lyrics && liveMode && syncedLines.length ? (
+            <div className="space-y-5 py-[24vh] text-center">
+              {syncedLines.map((line, index) => (
+                <p
+                  key={`${line.time}-${index}`}
+                  ref={index === activeLineIndex ? activeLineRef : null}
+                  className={`transition-all duration-300 ${
+                    index === activeLineIndex
+                      ? 'text-xl font-semibold text-text-primary'
+                      : index < activeLineIndex
+                        ? 'text-sm text-text-muted/60'
+                        : 'text-base text-text-secondary'
+                  }`}
+                >
+                  {line.text}
+                </p>
+              ))}
+            </div>
+          ) : lyrics ? (
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-text-primary">{lyrics.plainLyrics || lyrics.syncedLyrics}</pre>
+          ) : (
+            <p className="py-10 text-center text-sm text-text-muted">No lyrics found for the current track. Try a manual search.</p>
+          )}
+        </div>
+        {lyrics && (
+          <div className="flex items-center justify-between border-t border-border px-5 py-3 text-[10px] text-text-muted">
+            <span>Lyrics provided by {lyrics.provider}</span>
+            {lyrics.syncedLyrics && <span>{liveMode ? formatDuration(livePosition) : 'Synced lyrics available'}</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: DashboardCapabilities }) {
   const toast = useToast();
   const [status, setStatus] = useState<PlayerStatus | null>(null);
   const [queue, setQueue] = useState<{ current: QueueTrack | null; tracks: QueueTrack[]; total: number; page: number; totalPages: number } | null>(null);
@@ -976,7 +1324,12 @@ function PlayerTab({ guildId }: { guildId: string }) {
         if (s.paused) {
           if (pausedTrackKeyRef.current !== trackKey || pausedTrackPositionRef.current === null) {
             pausedTrackKeyRef.current = trackKey;
-            pausedTrackPositionRef.current = s.currentTrack.position || 0;
+            const previousTrackKey = prev?.currentTrack
+              ? `${prev.currentTrack.uri}|${prev.currentTrack.title}|${prev.currentTrack.author}`
+              : null;
+            pausedTrackPositionRef.current = previousTrackKey === trackKey
+              ? Math.max(prev?.currentTrack?.position || 0, s.currentTrack.position || 0)
+              : s.currentTrack.position || 0;
           }
 
           s = {
@@ -989,6 +1342,18 @@ function PlayerTab({ guildId }: { guildId: string }) {
         } else {
           pausedTrackKeyRef.current = trackKey;
           pausedTrackPositionRef.current = null;
+          const previousTrackKey = prev?.currentTrack
+            ? `${prev.currentTrack.uri}|${prev.currentTrack.title}|${prev.currentTrack.author}`
+            : null;
+          if (prev?.paused && previousTrackKey === trackKey) {
+            s = {
+              ...s,
+              currentTrack: {
+                ...s.currentTrack,
+                position: Math.max(prev.currentTrack?.position || 0, s.currentTrack.position || 0),
+              },
+            };
+          }
         }
 
         lastTrackSeenAtRef.current = Date.now();
@@ -1255,6 +1620,10 @@ function PlayerTab({ guildId }: { guildId: string }) {
   };
 
   const handleSeekCommit = (pos: number) => {
+    if (status?.paused && status.currentTrack) {
+      pausedTrackKeyRef.current = `${status.currentTrack.uri}|${status.currentTrack.title}|${status.currentTrack.author}`;
+      pausedTrackPositionRef.current = pos;
+    }
     playerAction('seek', { position: pos });
     setTimeout(() => setLocalSeek(null), 100);
   };
@@ -1331,6 +1700,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
   const hasCurrentTrack = Boolean(status.connected && status.currentTrack);
   const canUsePlayerControls = Boolean(status.connected);
   const canControlTrack = Boolean(status.connected && status.currentTrack);
+  const canUseDJControls = capabilities.accessLevel !== 'member';
 
   const updateSeekPreview = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
     if (!currentDuration) {
@@ -1369,7 +1739,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
                   <p className="text-sm text-text-secondary truncate mt-0.5">{status.currentTrack.author}</p>
                   <div className="mt-4 group/slider">
                     <div className="relative">
-                      {seekPreview && canControlTrack && (
+                      {seekPreview && canUseDJControls && canControlTrack && (
                         <div
                           className="pointer-events-none absolute -top-8 z-10 rounded bg-bg-primary border border-border px-1.5 py-0.5 text-[11px] font-medium text-text-primary shadow-lg tabular-nums"
                           style={{ left: `${seekPreview.left}%`, transform: 'translateX(-50%)' }}
@@ -1392,7 +1762,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
                           setSeekPreview(null);
                         }}
                         onMouseUp={(e) => handleSeekCommit(Number((e.target as HTMLInputElement).value))}
-                        disabled={!canControlTrack}
+                        disabled={!canUseDJControls || !canControlTrack}
                         className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-border transition-all duration-200 hover:h-2 disabled:cursor-not-allowed disabled:opacity-60
                           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(107,99,255,0.6)] [&::-webkit-slider-thumb]:opacity-0 hover:[&::-webkit-slider-thumb]:opacity-100 [&::-webkit-slider-thumb]:transition-opacity
                           [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:shadow-[0_0_10px_rgba(107,99,255,0.6)] [&::-moz-range-thumb]:opacity-0 hover:[&::-moz-range-thumb]:opacity-100"
@@ -1431,11 +1801,11 @@ function PlayerTab({ guildId }: { guildId: string }) {
             <CtrlBtn
               onClick={() => playerAction('shuffle')}
               title="Shuffle"
-              disabled={!canUsePlayerControls || !queue || queue.tracks.length === 0}
+              disabled={!canUseDJControls || !canUsePlayerControls || !queue || queue.tracks.length === 0}
             >
               <Shuffle size={16} />
             </CtrlBtn>
-            <CtrlBtn onClick={() => playerAction('back')} title="Previous" disabled={!canControlTrack}>
+            <CtrlBtn onClick={() => playerAction('back')} title="Previous" disabled={!canUseDJControls || !canControlTrack}>
               <SkipBack size={16} />
             </CtrlBtn>
             <CtrlBtn onClick={() => playerAction('toggle')} title={status.paused ? 'Play' : 'Pause'} primary disabled={!canControlTrack}>
@@ -1444,15 +1814,15 @@ function PlayerTab({ guildId }: { guildId: string }) {
             <CtrlBtn onClick={() => playerAction('skip')} title="Skip" disabled={!canControlTrack}>
               <SkipForward size={16} />
             </CtrlBtn>
-            <CtrlBtn onClick={() => playerAction('stop')} title="Stop" disabled={!canControlTrack}>
+            <CtrlBtn onClick={() => playerAction('stop')} title="Stop" disabled={!canUseDJControls || !canControlTrack}>
               <Square size={14} />
             </CtrlBtn>
-            <CtrlBtn onClick={() => playerAction('loop')} title="Loop" badge={status.repeatMode !== 'off' ? (status.repeatMode === 'track' ? '1' : 'A') : undefined} disabled={!canControlTrack}>
+            <CtrlBtn onClick={() => playerAction('loop')} title="Loop" badge={status.repeatMode !== 'off' ? (status.repeatMode === 'track' ? '1' : 'A') : undefined} disabled={!canUseDJControls || !canControlTrack}>
               <Repeat size={16} />
             </CtrlBtn>
           </div>
 
-          <div className={`flex items-center gap-4 mt-5 px-1 ${canUsePlayerControls ? '' : 'opacity-45 pointer-events-none'}`}>
+          <div className={`flex items-center gap-4 mt-5 px-1 ${canUsePlayerControls && canUseDJControls ? '' : 'opacity-45 pointer-events-none'}`}>
             <Volume2 size={18} className="text-text-muted shrink-0" />
             <div className="flex-1 flex justify-center items-center">
               <SegmentedVolume
@@ -1467,7 +1837,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               onClick={() => playerAction('autoplay', { enabled: !status.autoplay })}
-              disabled={!canUsePlayerControls}
+              disabled={!canUseDJControls || !canUsePlayerControls}
               className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${status.autoplay ? 'bg-success/15 text-success border border-success/30 hover:bg-success/20' : 'bg-bg-input text-text-secondary border border-border hover:text-text-primary hover:border-accent/30'}`}
             >
               <Activity size={15} />
@@ -1478,7 +1848,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
               <select
                 value={selectedFilter}
                 onChange={(e) => setSelectedFilter(e.target.value)}
-                disabled={!canUsePlayerControls}
+                disabled={!canUseDJControls || !canUsePlayerControls}
                 className={selectClass + ' flex-1 min-w-0 disabled:opacity-50'}
               >
                 {filterPresets.map((preset) => (
@@ -1489,7 +1859,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
               </select>
               <button
                 onClick={handleApplyFilter}
-                disabled={applyingFilter || !selectedFilter || !canUsePlayerControls}
+                disabled={applyingFilter || !selectedFilter || !canUseDJControls || !canUsePlayerControls}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-input border border-border text-text-secondary hover:text-text-primary hover:border-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 title="Apply filter preset"
               >
@@ -1498,7 +1868,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
               </button>
               <button
                 onClick={() => playerAction('filter', { preset: 'clear' })}
-                disabled={!canUsePlayerControls}
+                disabled={!canUseDJControls || !canUsePlayerControls}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-danger/10 border border-danger/25 text-danger hover:bg-danger/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 title="Clear filter"
               >
@@ -1533,7 +1903,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
             </div>
             <p className="text-xs text-text-muted mt-2">Link starts playback immediately. Text query shows quick search results.</p>
 
-            <div className="mt-4 rounded-md border border-border bg-bg-secondary/40 p-3">
+            {capabilities.canUpload && <div className="mt-4 rounded-md border border-border bg-bg-secondary/40 p-3">
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <input
                   ref={uploadInputRef}
@@ -1569,7 +1939,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
                   {uploading ? 'Uploading...' : 'Queue Upload'}
                 </button>
               </div>
-            </div>
+            </div>}
 
             {searchResults.length > 0 && (
               <div className="mt-3 rounded-md overflow-hidden border border-border">
@@ -1611,7 +1981,7 @@ function PlayerTab({ guildId }: { guildId: string }) {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleClearQueue}
-                disabled={queue.total === 0}
+                disabled={!canUseDJControls || queue.total === 0}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-danger/10 border border-danger/20 text-danger hover:bg-danger/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs"
               >
                 <Trash2 size={13} />
@@ -1666,21 +2036,21 @@ function PlayerTab({ guildId }: { guildId: string }) {
               {queue.tracks.map((track, i) => (
                 <div 
                   key={`${track.uri}-${i}`} 
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, i)}
-                  onDragEnter={(e) => handleDragOver(e, i)}
-                  onDragOver={(e) => handleDragOver(e, i)}
-                  onDrop={(e) => handleDrop(e, i)}
+                  draggable={canUseDJControls}
+                  onDragStart={(e) => canUseDJControls && handleDragStart(e, i)}
+                  onDragEnter={(e) => canUseDJControls && handleDragOver(e, i)}
+                  onDragOver={(e) => canUseDJControls && handleDragOver(e, i)}
+                  onDrop={(e) => canUseDJControls && handleDrop(e, i)}
                   onDragEnd={resetDragState}
-                  className={`group flex items-center gap-3 px-3 py-2 border rounded-md hover:bg-bg-hover/50 transition-colors cursor-grab active:cursor-grabbing ${
+                  className={`group flex items-center gap-3 px-3 py-2 border rounded-md hover:bg-bg-hover/50 transition-colors ${canUseDJControls ? 'cursor-grab active:cursor-grabbing' : ''} ${
                     dropTargetIdx === i && draggedIdx !== i
                       ? 'border-accent/70 bg-accent/10'
                       : 'border-transparent'
                   } ${draggedIdx === i ? 'opacity-50' : ''}`}
                 >
-                  <div className="flex items-center justify-center w-5 text-text-muted cursor-move opacity-50 hover:opacity-100">
+                  {canUseDJControls && <div className="flex items-center justify-center w-5 text-text-muted cursor-move opacity-50 hover:opacity-100">
                     <GripVertical size={14} />
-                  </div>
+                  </div>}
                   {track.artwork ? (
                     <img src={track.artwork} alt="" className="w-8 h-8 rounded shrink-0 object-cover" />
                   ) : (
@@ -1696,13 +2066,13 @@ function PlayerTab({ guildId }: { guildId: string }) {
                   <span className="text-xs text-text-muted tabular-nums">{formatDuration(track.duration)}</span>
                   
                   {/* Remove Track Button */}
-                  <button 
+                  {canUseDJControls && <button
                      onClick={() => playerAction('remove', { start: queuePage * 20 + i })}
                      className="p-1.5 ml-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-md transition-colors opacity-70 group-hover:opacity-100"
                      title="Remove track"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  </button>
+                  </button>}
                 </div>
               ))}
             </div>

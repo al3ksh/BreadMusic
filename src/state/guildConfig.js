@@ -15,6 +15,7 @@ const DEFAULT_CONFIG = {
   defaultVolume: 100,
   autoplay: false,
   voiceChannelStatus: true,
+  dashboardAccess: 'admin',
 };
 
 const OLD_DEFAULT_AFK_TIMEOUT = 5 * 60 * 1000;
@@ -86,6 +87,7 @@ function formatConfig(config) {
     `defaultVolume: ${config.defaultVolume}`,
     `autoplay: ${config.autoplay ? 'yes' : 'no'}`,
     `voiceChannelStatus: ${config.voiceChannelStatus ? 'yes' : 'no'}`,
+    `dashboardAccess: ${config.dashboardAccess}`,
   ].join('\n');
 }
 

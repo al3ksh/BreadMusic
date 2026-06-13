@@ -70,7 +70,7 @@ export default function DashboardPage() {
       {manageable.length > 0 && (
         <div className="mb-8">
           <h2 className="text-[11px] font-semibold text-text-secondary uppercase tracking-[1px] mb-4">
-            Manageable
+            Available
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {manageable.map((guild) => (
@@ -90,7 +90,7 @@ export default function DashboardPage() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm truncate text-text-primary">{guild.name}</div>
                   <div className="text-xs text-text-muted mt-0.5">
-                    {guild.member_count?.toLocaleString()} members
+                    {guild.member_count?.toLocaleString()} members · {guild.access_level}
                   </div>
                 </div>
                 <ChevronRight size={18} className="text-text-muted group-hover:text-accent transition-colors shrink-0" />
@@ -105,7 +105,7 @@ export default function DashboardPage() {
           <img src="/assets/breadicon.png?v=3" alt="" className="w-16 h-16 mx-auto mb-4 opacity-70 rounded-xl object-cover" />
           <p className="text-text-secondary font-medium mb-1">No servers found</p>
           <p className="text-sm text-text-muted">
-            Add the bot to a server where you have the <strong className="text-text-secondary">Manage Guild</strong> permission.
+            No server has dashboard access enabled for your account.
           </p>
         </div>
       )}

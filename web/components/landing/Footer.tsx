@@ -26,7 +26,11 @@ export function Footer() {
             </span>
             <span>•</span>
             <a href="https://github.com/al3ksh/BreadMusic" target="_blank" rel="noreferrer" className="hover:text-text-primary transition-colors">
-              GitHub
+              Source
+            </a>
+            <span>•</span>
+            <a href="https://github.com/al3ksh/BreadMusic/blob/main/LICENSE" target="_blank" rel="noreferrer" className="hover:text-text-primary transition-colors">
+              AGPL-3.0
             </a>
             <span>•</span>
             <a href="/cookies" className="hover:text-text-primary transition-colors">

@@ -74,6 +74,7 @@ function normalizeTrackInfo(track) {
     uri: typeof info.uri === 'string' ? info.uri : '',
     duration: Number.isFinite(info.duration) ? info.duration : 0,
     artwork: extractArtwork(info),
+    source: typeof info.sourceName === 'string' ? info.sourceName : null,
   };
 }
 
@@ -366,6 +367,7 @@ function recordTrackPlay(guildId, track, options = {}) {
     uri: normalizedTrack.uri,
     duration: normalizedTrack.duration,
     artwork: normalizedTrack.artwork,
+    source: normalizedTrack.source,
     count: 0,
     lastPlayedAt: null,
   };
@@ -377,6 +379,7 @@ function recordTrackPlay(guildId, track, options = {}) {
     uri: normalizedTrack.uri || previousTrack.uri,
     duration: normalizedTrack.duration || previousTrack.duration,
     artwork: normalizedTrack.artwork || previousTrack.artwork || null,
+    source: normalizedTrack.source || previousTrack.source || null,
     count: (previousTrack.count || 0) + 1,
     lastPlayedAt: now,
   };
@@ -414,6 +417,9 @@ function recordTrackPlay(guildId, track, options = {}) {
     userId: requester && requester.id && !requester.isBot && requester.id !== botUserId
       ? requester.id
       : null,
+    autoplay: Boolean(track.isAutoplay),
+    track: normalizedTrack,
+    requester: requester && !requester.isBot && requester.id !== botUserId ? requester : null,
   });
   guild.events = pruneEvents(guild.events, now);
 
@@ -421,6 +427,56 @@ function recordTrackPlay(guildId, track, options = {}) {
   guild.summary.lastPlayAt = now;
 
   analyticsStore.set(guildId, guild);
+}
+
+function getGuildHistory(guildId, options = {}) {
+  const requestedPage = Number.parseInt(options.page, 10);
+  const requestedLimit = Number.parseInt(options.limit, 10);
+  const page = Number.isFinite(requestedPage) ? Math.max(0, requestedPage) : 0;
+  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 30;
+  const guild = ensureGuildBucket(guildId);
+  const now = Date.now();
+  const originalLength = guild.events.length;
+  guild.events = pruneEvents(guild.events, now);
+  if (guild.events.length !== originalLength) analyticsStore.set(guildId, guild);
+
+  const events = [...guild.events].reverse();
+  const total = events.length;
+  const start = page * limit;
+  const items = events.slice(start, start + limit).map((event, index) => {
+    const track = event.track || guild.tracks[event.trackKey] || {};
+    const fallback = parseTrackKeyFallback(event.trackKey);
+    const requester = event.requester || (event.userId ? guild.users[event.userId] || null : null);
+    return {
+      id: `${event.ts}-${event.trackKey}-${start + index}`,
+      playedAt: event.ts,
+      autoplay: Boolean(event.autoplay),
+      track: {
+        title: track.title || fallback.title,
+        author: track.author || fallback.author,
+        uri: track.uri || '',
+        duration: Number.isFinite(track.duration) ? track.duration : 0,
+        artwork: track.artwork || null,
+        source: track.source || null,
+      },
+      requester: requester
+        ? {
+            userId: requester.userId,
+            username: requester.username,
+            displayName: requester.displayName,
+            avatar: requester.avatar || null,
+          }
+        : null,
+    };
+  });
+
+  return {
+    items,
+    page,
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+  };
 }
 
 function sortByCountAndRecent(a, b) {
@@ -518,4 +574,5 @@ function getGuildInsights(guildId, options = {}) {
 module.exports = {
   recordTrackPlay,
   getGuildInsights,
+  getGuildHistory,
 };

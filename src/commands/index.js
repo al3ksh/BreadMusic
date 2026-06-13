@@ -2,14 +2,11 @@ const {
   SlashCommandBuilder,
   EmbedBuilder,
   PermissionFlagsBits,
-  AttachmentBuilder,
-  ChannelType,
   MessageFlags,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
 } = require('discord.js');
-const path = require('path');
 const { ensureVoice, ensurePlayer, CommandError } = require('../music/utils');
 const { buildTrackEmbed, buildNowPlayingEmbed } = require('../music/embeds');
 const { savePlayerState } = require('../state/queueStore');
@@ -65,15 +62,7 @@ const { deleteInteractionReply } = require('../utils/interactions');
 const { isAutoplayEnabled, toggleAutoplay, resetSeed } = require('../music/autoplay');
 const { classifyPlaybackError, describeSearchFailure } = require('../music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('../music/voiceStatus');
-
-const BREAD_IMAGE_PATH = path.resolve(__dirname, '..', 'assets', 'images', 'bread.png');
-const MONSTER_BREAD_IMAGE_PATH = path.resolve(
-  __dirname,
-  '..',
-  'assets',
-  'images',
-  'monsterbread.png',
-);
+const { findLyrics, trackToLyricsQuery, LyricsProviderError } = require('../music/lyrics');
 
 const FILTER_PRESET_CHOICES = [
   { value: 'bassboost', label: 'Bassboost', description: 'Deep, punchy bass boost.' },
@@ -185,6 +174,7 @@ const HELP_CATEGORIES = [
       { name: '/back', value: 'Play previous track.' },
       { name: '/replay', value: 'Replay current track.' },
       { name: '/autoplay', value: 'Toggle autoplay mode.' },
+      { name: '/lyrics', value: 'Show lyrics for the current track or a search.' },
     ],
   },
   {
@@ -201,7 +191,6 @@ const HELP_CATEGORIES = [
     name: 'Fun',
     description: 'Games and memes.',
     commands: [
-      { name: '/bread', value: 'Get some bread.' },
       { name: '/blackjack', value: 'Play blackjack (bet optional).' },
       { name: '/slots', value: 'Spin the slot machine.' },
       { name: '/roulette', value: 'Spin the roulette wheel.' },
@@ -694,6 +683,67 @@ const commands = [
     },
   },
   {
+    data: new SlashCommandBuilder()
+      .setName('lyrics')
+      .setDescription('Show song lyrics.')
+      .addStringOption((option) =>
+        option
+          .setName('query')
+          .setDescription('Optional song in "artist - title" format.')
+          .setRequired(false),
+      ),
+    async execute(interaction) {
+      await interaction.deferReply();
+      const rawQuery = interaction.options.getString('query')?.trim();
+      let query;
+
+      if (rawQuery) {
+        const separator = rawQuery.indexOf(' - ');
+        if (separator < 1 || separator >= rawQuery.length - 3) {
+          throw new CommandError('Use the format `artist - title`, or omit the query for the current track.');
+        }
+        query = {
+          artist: rawQuery.slice(0, separator),
+          title: rawQuery.slice(separator + 3),
+          duration: 0,
+        };
+      } else {
+        const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
+        if (!player?.queue?.current) {
+          throw new CommandError('Nothing is playing. Provide a query in `artist - title` format.');
+        }
+        query = trackToLyricsQuery(player.queue.current);
+      }
+
+      let lyrics;
+      try {
+        lyrics = await findLyrics(query);
+      } catch (error) {
+        if (error instanceof LyricsProviderError) {
+          throw new CommandError('The lyrics provider is temporarily unavailable. Try again in a moment.');
+        }
+        throw error;
+      }
+      if (!lyrics) {
+        throw new CommandError(`Lyrics were not found for **${query.artist} - ${query.title}**.`);
+      }
+
+      const body = lyrics.instrumental
+        ? '*This track is marked as instrumental.*'
+        : lyrics.plainLyrics || lyrics.syncedLyrics.replace(/^\[[^\]]+]\s*/gm, '');
+      const maxLength = 3900;
+      const truncated = body.length > maxLength;
+      const description = truncated ? `${body.slice(0, maxLength)}\n\n*Lyrics truncated.*` : body;
+      const embed = new EmbedBuilder()
+        .setTitle(lyrics.title)
+        .setAuthor({ name: lyrics.artist })
+        .setDescription(description)
+        .setColor('#6366f1')
+        .setFooter({ text: `Lyrics provided by ${lyrics.provider}` });
+      await interaction.editReply({ embeds: [embed] });
+    },
+  },
+  {
     data: new SlashCommandBuilder().setName('autoplay').setDescription('Toggle autoplay - automatically plays similar tracks.'),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -858,6 +908,16 @@ const commands = [
           )
           .addStringOption((option) =>
             option
+              .setName('dashboard_access')
+              .setDescription('Who can open the server dashboard?')
+              .addChoices(
+                { name: 'Administrators only', value: 'admin' },
+                { name: 'Administrators and DJs', value: 'dj' },
+                { name: 'All server members', value: 'members' },
+              ),
+          )
+          .addStringOption((option) =>
+            option
               .setName('preferred_source')
               .setDescription('Preferred provider')
               .addChoices(
@@ -919,6 +979,8 @@ const commands = [
       if (persistent !== null) updates.persistentQueue = persistent;
       const voiceStatus = interaction.options.getBoolean('voice_status');
       if (voiceStatus !== null) updates.voiceChannelStatus = voiceStatus;
+      const dashboardAccess = interaction.options.getString('dashboard_access');
+      if (dashboardAccess) updates.dashboardAccess = dashboardAccess;
       const prefSource = interaction.options.getString('preferred_source');
       if (prefSource) updates.preferredSource = prefSource;
 
@@ -935,52 +997,6 @@ const commands = [
         .setColor('#6366f1')
         .setDescription(`Dashboard: ${dashboardUrl}\n\`\`\`\n${formatConfig(updated)}\n\`\`\``);
       await interaction.editReply({ embeds: [embed] });
-    },
-  },
-  {
-    data: new SlashCommandBuilder().setName('bread').setDescription('Send some fresh bread.'),
-    async execute(interaction) {
-      const breadAttachment = new AttachmentBuilder(BREAD_IMAGE_PATH).setName('bread.png');
-      const breadEmbed = new EmbedBuilder()
-        .setTitle('Fresh bread delivery')
-        .setDescription('Because bread makes everything better.')
-        .setImage('attachment://bread.png')
-        .setColor('#f59e0b');
-      await interaction.reply({ embeds: [breadEmbed], files: [breadAttachment] });
-
-      const sendableChannels = interaction.guild?.channels?.cache.filter((channel) => {
-        if (channel.type !== ChannelType.GuildText) return false;
-        const permissions = channel.permissionsFor(interaction.client.user);
-        return (
-          permissions?.has(PermissionFlagsBits.ViewChannel) &&
-          permissions?.has(PermissionFlagsBits.SendMessages)
-        );
-      });
-
-      if (!sendableChannels?.size) return;
-
-      const alternativeChannels = sendableChannels.filter(
-        (channel) => channel.id !== interaction.channelId,
-      );
-      const pool = alternativeChannels.size ? alternativeChannels : sendableChannels;
-      const poolArray = [...pool.values()];
-      const randomChannel = poolArray[Math.floor(Math.random() * poolArray.length)];
-      if (!randomChannel) return;
-
-      const monsterAttachment = new AttachmentBuilder(
-        MONSTER_BREAD_IMAGE_PATH,
-      ).setName('monsterbread.png');
-      const monsterEmbed = new EmbedBuilder()
-        .setTitle('Monster Bread is coming')
-        .setDescription('Who dares to take a slice?')
-        .setImage('attachment://monsterbread.png')
-        .setColor('#8b5cf6');
-
-      try {
-        await randomChannel.send({ embeds: [monsterEmbed], files: [monsterAttachment] });
-      } catch {
-        // Sending to a random channel is best-effort.
-      }
     },
   },
   {

@@ -4,13 +4,13 @@ export default function TermsPage() {
       <div className="max-w-3xl mx-auto rounded-xl border border-border bg-bg-card p-6 sm:p-8">
         <p className="text-xs uppercase tracking-wider text-text-muted">Legal</p>
         <h1 className="text-2xl font-bold mt-2 text-text-primary">Terms of Use</h1>
-        <p className="text-sm text-text-secondary mt-2">Last updated: 2026-04-06</p>
+        <p className="text-sm text-text-secondary mt-2">Last updated: 2026-06-13</p>
 
         <div className="mt-6 space-y-5 text-sm text-text-secondary leading-relaxed">
           <section>
             <h2 className="text-base font-semibold text-text-primary">Service scope</h2>
             <p className="mt-2">
-              Bread is a Discord music bot with a web dashboard for server administrators.
+              Bread is a Discord music bot with a permission-controlled web dashboard.
               Features are provided "as is" and may change over time.
             </p>
           </section>
@@ -37,6 +37,22 @@ export default function TermsPage() {
               We do not guarantee uninterrupted availability.
               To the maximum extent permitted by law, Bread maintainers are not liable for downtime, data loss, or indirect damages related to use of the bot.
             </p>
+          </section>
+
+          <section>
+            <h2 className="text-base font-semibold text-text-primary">Free software license</h2>
+            <p className="mt-2">
+              Bread is free software licensed under the GNU Affero General Public License version 3 only.
+              It is provided without warranty. You may view the corresponding source code and complete license terms on GitHub.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-4">
+              <a href="https://github.com/al3ksh/BreadMusic" target="_blank" rel="noreferrer" className="underline hover:text-text-primary transition-colors">
+                Source code
+              </a>
+              <a href="https://github.com/al3ksh/BreadMusic/blob/main/LICENSE" target="_blank" rel="noreferrer" className="underline hover:text-text-primary transition-colors">
+                AGPL-3.0 license
+              </a>
+            </div>
           </section>
         </div>
 

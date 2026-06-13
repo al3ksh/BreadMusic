@@ -1,379 +1,387 @@
-# 🍞 Bread Music Bot
+<div align="center">
 
-> Discord music bot with economy, games, and advanced audio features. Fully AI "vibecoded" – commands, logic and docs were generated and refined with an AI assistant.
+```text
+ ____   ____   _____    _    ____
+| __ ) |  _ \ | ____|  / \  |  _ \
+|  _ \ | |_) ||  _|   / _ \ | | | |
+| |_) ||  _ < | |___ / ___ \| |_| |
+|____/ |_| \_\|_____/_/   \_\____/
+
+             DISCORD MUSIC SYSTEM
+```
+
+Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
+
+`Discord.js` / `Lavalink` / `Next.js` / `Node.js`
+
+</div>
+
+---
+
+## System Overview
+
+```text
+                         +-------------------+
+                         |      Discord      |
+                         +---------+---------+
+                                   |
+                          commands | events
+                                   |
+                         +---------v---------+
+                         |     Bread Bot     |
+                         |  Node.js API 3001 |
+                         +----+---------+----+
+                              |         |
+                     playback|         |OAuth / SSE
+                              |         |
+                    +---------v--+   +--v---------------+
+                    |  Lavalink  |   | Next.js Dashboard|
+                    |    2333    |   |      3000        |
+                    +------------+   +------------------+
+```
+
+| Component | Purpose |
+| --- | --- |
+| Bot | Discord commands, interactions and playback orchestration |
+| Lavalink | Audio loading, streaming, filters and source plugins |
+| API | OAuth, dashboard data, player actions and live SSE updates |
+| Dashboard | Player, queue, history, lyrics, settings and remote control |
+| JSON stores | Guild configuration, sessions, queues and analytics |
+
+## Features
+
+```text
+[ playback ]  YouTube / Spotify / SoundCloud / Bandcamp
+[ autoplay ]  prefetch / skip feedback / repetition avoidance
+[ dashboard]  live player / queue drag-and-drop / uploads / controls
+[ lyrics   ]  search / current track / synchronized live mode
+[ history  ]  requester / source / autoplay marker / persistence
+[ audio    ]  filters / seek / volume / loop / shuffle
+[ state    ]  persistent queue / sessions / per-guild configuration
+[ extras   ]  economy / blackjack / roulette / slots / RPS
+```
+
+### Autoplay
+
+- Prefetches one candidate before the queue ends.
+- Never jumps ahead of tracks manually added to the queue.
+- Learns from skipped autoplay tracks during the current bot session.
+- Avoids recent tracks, repeated artists and weak recommendations.
+- Ignores local uploads as recommendation seeds.
+
+### Lyrics
+
+- `/lyrics` loads lyrics for the current track.
+- `/lyrics query:artist - title` performs a manual search.
+- Dashboard search supports artist and title fields.
+- Live mode highlights and scrolls synchronized LRCLIB lines.
+- Provider requests use retry, exponential backoff and request deduplication.
+- Successful results are cached for 6 hours.
+
+### History
+
+- Stored separately for every Discord server.
+- Includes track metadata, requester, source and autoplay state.
+- Retained for 35 days with a limit of 40,000 events per guild.
+- Survives bot and container restarts through `data/analytics.json`.
+
+---
 
 ## Quick Start
 
 ### Requirements
-- Node.js 18+
-- Java 17/21
-- Lavalink 4.x with plugins:
-  - `youtube-plugin` 1.18.1 (YouTube support)
-  - `lavasrc-plugin` 4.8.3 (Spotify, Deezer, Apple Music support)
 
-### Environment
-Copy `.env.example` to `.env` and fill in the values:
-```ini
-DISCORD_TOKEN=bot_token
-DISCORD_CLIENT_ID=application_id
-DISCORD_CLIENT_SECRET=oauth2_client_secret
-# DISCORD_GUILD_ID=optional_test_guild_id
-
-# Lavalink connection
-LAVALINK_HOST=127.0.0.1
-LAVALINK_PORT=2333
-LAVALINK_PASSWORD=youshallnotpass
-LAVALINK_SECURE=false
-
-# Multiple nodes (JSON format)
-# LAVALINK_NODES=[{"id":"main","host":"127.0.0.1","port":2333,"password":"youshallnotpass","secure":false}]
-
-# Spotify API (required for Spotify links)
-SPOTIFY_CLIENT_ID=your_spotify_client_id
-SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-
-DEFAULT_SOURCE=ytsearch
-IDLE_TIMEOUT_MS=300000
-
-# Web Dashboard
-WEB_PORT=3001
-WEB_HOST=0.0.0.0
-WEB_URL=http://localhost:3000
-SESSION_SECRET=random-secret-change-this
-
-# Optional logging level: error, warn, info, debug
-AUTOPLAY_LOG_LEVEL=warn
-
-# Optional (used by /dashboard command for external link)
-# DASHBOARD_URL=https://your-domain.example
+```text
+Node.js  22
+Java     25
+Discord  application + bot token
+Spotify  developer credentials (optional)
 ```
 
-### Install & Run
+### Install
+
 ```powershell
+git clone <repository-url>
+cd Bread
+
 npm install
-npm run register   # register slash commands (one-time)
-npm start
+npm install --prefix web
+Copy-Item .env.example .env
 ```
 
-### Run With Dashboard (development)
-Use three terminals:
+Configure `.env`, then register slash commands:
 
 ```powershell
-# 1) Lavalink
+npm run register
+```
+
+Start the development stack in three terminals:
+
+```powershell
+# Terminal 1
 npm run dev:lavalink
 ```
 
 ```powershell
-# 2) Bot + API
+# Terminal 2
 npm run dev:api
 ```
 
 ```powershell
-# 3) Next.js dashboard
+# Terminal 3
 npm run dev:web
 ```
 
----
+```text
+Dashboard  http://localhost:3000
+API        http://localhost:3001
+Lavalink   http://localhost:2333
+```
 
-## Features
-
-### 🎵 Music Playback
-- **Multi-source**: YouTube, Spotify, SoundCloud, Bandcamp
-- **Spotify integration**: Play tracks, albums, playlists directly from Spotify links
-- **Now-playing embed** with progress bar, artwork, source link and control buttons
-- **Autocomplete** suggestions while typing in `/play`
-
-### 🔁 Autoplay
-- **Smart autoplay**: Automatically finds and plays similar tracks when queue ends
-- **YouTube Radio Mix**: Uses YouTube's own recommendation system as primary source
-- **Heuristic fallback**: Scores YouTube/Lavalink search candidates when YouTube Mix is weak
-- **Intelligent filtering**: Excludes remixes, covers, live versions
-- **Loop detection**: Prevents getting stuck on same tracks
-- **`[AUTO]` indicator**: Shows in now-playing when track was auto-queued
-
-### 📋 Queue Management
-- Paginated queue view with ETA and total duration
-- Remove, move, skip to specific tracks
-- Shuffle, loop (off/track/queue)
-- Back/replay navigation
-- Queue persistence across restarts (24/7 mode)
-
-### 🎛️ Audio Filters
-9 presets with custom EQ curves:
-
-| Preset | Description |
-|--------|-------------|
-| `bassboost` | Gentle bass boost (+3dB sub-bass) - warm, no distortion |
-| `nightcore` | Speed 1.25x, pitch 1.2x - anime/happy hardcore style |
-| `vaporwave` | Speed 0.85x, pitch 0.8x - slowed, dreamy aesthetic |
-| `soft` | FullSound EQ - warm mids, enhanced vocals |
-| `karaoke` | Center channel cancellation - reduces lead vocals |
-| `8d` | Rotating stereo panning (0.15 Hz) - immersive effect |
-| `vibrato` | Pitch modulation (8 Hz, 100%) - wobble/synth effect |
-| `tremolo` | Volume modulation (4 Hz, 60%) - pulsating effect |
-| `radio` | Lo-fi telephone effect - cuts lows & highs + lowpass |
-
-### 💰 Economy System
-- **Currency**: 🍞 (bread)
-- `/hourly` - Claim reward every hour
-- `/balance` - Check your or someone's balance
-- `/leaderboard` - Server ranking
-
-### 🎰 Gambling Games
-| Game | Description |
-|------|-------------|
-| `/blackjack [bet]` | Classic 21 card game with Hit/Stand/Double |
-| `/slots [bet]` | Slot machine with multipliers (up to 10x) |
-| `/roulette <red\|black\|green> [bet]` | Roulette with color bets |
-| `/coinflip <heads/tails> [bet]` | 50/50 coin flip |
-| `/rps solo <choice>` | Rock-Paper-Scissors vs bot |
-| `/rps duel <opponent> [bet]` | Duel another user with hidden move selection |
-
-### ⚙️ Guild Configuration
-- DJ role requirement for admin commands
-- Vote-skip with configurable threshold (`0.0`-`1.0`)
-- 24/7 mode with queue persistence
-- Custom announce channel
-- Max volume limit
-
-### 🌐 Web Dashboard
-- Discord OAuth2 login + protected dashboard routes
-- Tabs for **Settings**, **Status**, **Player**, **Economy**, **Control**
-- Live player state and bot session history
-- Per-guild configuration without typing all options in slash commands
-- `/dashboard` command opens the right guild panel directly
+> Slash commands are registered globally when `DISCORD_GUILD_ID` is empty.
+> Set it only when immediate registration on one development server is needed.
 
 ---
 
-## Commands Reference
+## Configuration
 
-### 🎵 Music
-| Command | Description |
-|---------|-------------|
-| `/play <query>` | Play track/playlist (YouTube, Spotify, SoundCloud) |
-| `/skip` | Skip current track (vote-skip if configured) |
-| `/stop` | Stop playback and clear queue |
-| `/pause` | Pause playback |
-| `/resume` | Resume playback |
-| `/seek <time>` | Seek to position (e.g., `1:30`, `90`) |
-| `/back` | Go back to previous track |
-| `/replay` | Replay current track from start |
-| `/nowplaying` | Show current track info |
+### Required
 
-### 📋 Queue
-| Command | Description |
-|---------|-------------|
-| `/queue` | Show queue with pagination |
-| `/remove <start> [end]` | Remove track(s) from queue |
-| `/move <from> <to>` | Move track in queue |
-| `/skipto <index>` | Skip to specific position |
-| `/shuffle` | Shuffle the queue |
-| `/loop <off\|track\|queue>` | Set repeat mode |
-| `/clearqueue` | Clear upcoming tracks |
-| `/autoplay` | Toggle autoplay (plays similar tracks) |
+```ini
+DISCORD_TOKEN=bot_token
+DISCORD_CLIENT_ID=application_id
+DISCORD_CLIENT_SECRET=oauth_client_secret
 
-### 🎛️ Audio
-| Command | Description |
-|---------|-------------|
-| `/volume <0-100>` | Set volume (bounded by maxVolume) |
-| `/filter preset <name>` | Apply audio filter |
-| `/filter list` | Show active filters |
-| `/filter clear` | Reset all filters and EQ |
+SESSION_SECRET=long_random_value
+WEB_URL=http://localhost:3000
+```
 
-### ⚙️ Settings
-| Command | Description |
-|---------|-------------|
-| `/dashboard` | Open web dashboard for current server |
-| `/config get` | Show current configuration |
-| `/config set` | Configure guild settings |
-| `/config reset` | Restore default settings |
-| `/leave` | Disconnect bot from voice channel |
+### Lavalink
 
-### 💰 Economy
-| Command | Description |
-|---------|-------------|
-| `/hourly` | Claim hourly reward (50-150 🍞) |
-| `/balance [user]` | Check balance |
-| `/leaderboard` | Server top 10 ranking |
+```ini
+LAVALINK_HOST=127.0.0.1
+LAVALINK_PORT=2333
+LAVALINK_PASSWORD=youshallnotpass
+LAVALINK_SECURE=false
+```
 
-### 🎰 Games
-| Command | Description |
-|---------|-------------|
-| `/blackjack [bet]` | Play blackjack (min bet: 10 🍞) |
-| `/slots [bet]` | Spin the slot machine |
-| `/roulette <red\|black\|green> [bet]` | Spin roulette |
-| `/coinflip <side> [bet]` | Flip a coin |
-| `/rps solo <choice>` | Play RPS against bot |
-| `/rps duel <opponent> [bet]` | Challenge user with hidden moves |
-| `/8ball <question>` | Ask magic 8-ball |
-| `/roll [dice]` | Roll dice notation (e.g. `2d20`) |
+### Spotify
 
-### 🎮 Fun
-| Command | Description |
-|---------|-------------|
-| `/bread` | Send some fresh bread 🍞 |
-| `/help` | Show help menu |
-| `/ping` | Check bot latency |
+```ini
+SPOTIFY_CLIENT_ID=spotify_client_id
+SPOTIFY_CLIENT_SECRET=spotify_client_secret
+```
 
----
-
-## Dashboard & OAuth Setup
-
-For dashboard auth to work, set these environment variables:
-- `DISCORD_CLIENT_SECRET`
-- `WEB_URL`
-- `SESSION_SECRET`
-
-Discord OAuth2 redirect URI must match:
+The Discord OAuth redirect must exactly match:
 
 ```text
 {WEB_URL}/api/auth/callback
 ```
 
-Example for local development:
+See [`.env.example`](.env.example) for the complete configuration.
+
+---
+
+## Dashboard Access
+
+Access is configured independently for every guild.
+
+| Mode | Who can open the dashboard |
+| --- | --- |
+| `admin` | Members with Manage Server |
+| `dj` | Admins and members recognized as DJs |
+| `members` | Every member of the guild |
+
+Default:
 
 ```text
-http://localhost:3000/api/auth/callback
+dashboardAccess = admin
 ```
 
-If you deploy dashboard externally, set `DASHBOARD_URL` so `/dashboard` points to your public domain.
+DJ recognition follows the same behavior as Discord player commands:
 
----
-
-## Permissions
-
-| Command Type | Required Permission |
-|--------------|---------------------|
-| Admin commands (`/stop`, `/volume`, `/filter`, `/remove`, `/move`) | DJ role OR Manage Guild OR Administrator |
-| Playback buttons | Must be in same voice channel as bot |
-| Vote-skip | Anyone in voice channel (configurable threshold) |
-
----
-
-## Timeouts & Auto-leave
-
-| Scenario | Timeout |
-|----------|---------|
-| Bot alone in channel | 30 seconds |
-| Bot idle (nothing playing) | 5 minutes (configurable) |
-| Configure via | `/config set afk_timeout` |
-
----
-
-## Lavalink Configuration
-
-### Minimal `application.yml`
-```yaml
-server:
-  port: 2333
-
-lavalink:
-  server:
-    password: "youshallnotpass"
-    sources:
-      youtube: false
-      soundcloud: true
-      bandcamp: true
-    playerUpdateInterval: 5
-
-plugins:
-  youtube:
-    enabled: true
-    allowSearch: true
-  lavasrc:
-    providers:
-      - "ytsearch:\"%ISRC%\""
-      - "ytsearch:%QUERY%"
-    sources:
-      spotify: true
-      applemusic: false
-      deezer: false
-      yandexmusic: false
-    spotify:
-      clientId: "your_spotify_client_id"
-      clientSecret: "your_spotify_client_secret"
-      countryCode: "PL"
-      playlistLoadLimit: 6
-      albumLoadLimit: 6
+```text
+DJ role configured     -> admin / moderator / member with DJ role
+DJ role not configured -> every member is treated as a DJ
 ```
 
-### Required Plugins
-Place these in `lavalink/plugins/`:
-- `youtube-plugin-1.18.1.jar` - [GitHub](https://github.com/lavalink-devs/youtube-source)
-- `lavasrc-plugin-4.8.3.jar` - [GitHub](https://github.com/topi314/LavaSrc)
+Administrative boundaries remain fixed:
 
-Copy `lavalink/application.example.yml` to `lavalink/application.yml` for a fresh
-installation. Keep Spotify credentials in `.env`; never commit them to the
-Lavalink configuration file.
+| Capability | Member | DJ | Admin |
+| --- | :---: | :---: | :---: |
+| Status, history and lyrics | yes | yes | yes |
+| Basic player controls | voice channel | yes | yes |
+| Queue management and filters | no | yes | yes |
+| Local audio uploads | no | yes | yes |
+| Server settings | no | no | yes |
+| Economy administration | no | no | yes |
+| Remote Control / send as bot | no | no | yes |
 
----
+If no DJ role is configured, users admitted through `dj` or `members` receive
+the DJ player capabilities shown above.
 
-## Troubleshooting
+Change access from Dashboard Settings or Discord:
 
-| Issue | Solution |
-|-------|----------|
-| `401 Unauthorized` | Check Lavalink password matches in `.env` and `application.yml` |
-| No YouTube results | Verify `youtube-plugin` loaded correctly |
-| Spotify not working | Check `SPOTIFY_CLIENT_ID/SECRET` and restart Lavalink |
-| WebSocket 1006 | Check firewall, host/port, Java version (17/21) |
-| Autoplay not working | Check Lavalink/YouTube search and try a different seed track |
-| Filter not clearing | Use `/filter clear` - resets both filters and EQ |
-| Vibrato too weak | It's now set to 8 Hz / 100% depth - should be very noticeable |
-
----
-
-## Project Structure
-
+```text
+/config set dashboard_access
 ```
-src/
-├── bot.js              # Main entry, event handlers
-├── config.js           # Environment configuration
-├── server.js           # Express API + OAuth + dashboard endpoints
-├── register-commands.js
-├── commands/
-│   └── index.js        # Slash command definitions
-├── music/
-│   ├── autoplay.js     # Autoplay with YouTube Mix + candidate scoring
-│   ├── embeds.js       # Now-playing embed builder
-│   ├── ui.js           # Button components & mutex locks
-│   ├── idleTracker.js  # Auto-leave logic
-│   ├── skipManager.js  # Vote-skip & skip handling
-│   ├── voteManager.js  # Vote tracking
-│   ├── queueFormatter.js # Queue pagination
-│   ├── searchUtils.js  # Track search helpers
-│   └── utils.js        # Music utilities
-├── state/
-│   ├── guildConfig.js  # Per-guild settings
-│   ├── queueStore.js   # Queue persistence
-│   ├── fileStore.js    # JSON file storage
-│   ├── searchCache.js  # Search result caching
-│   └── analyticsStore.js # Dashboard analytics persistence
-├── games/
-│   ├── blackjack.js    # Blackjack game logic
-│   ├── gambling.js     # Slots, coinflip, RPS
-│   ├── economy.js      # Balance, hourly, leaderboard
-│   └── fun.js          # RPS logic
-└── utils/
-    ├── commandError.js # Error handling
-    ├── interactions.js # Interaction helpers
-    └── time.js         # Time formatting
 
-lavalink/
-├── application.yml     # Lavalink config
-└── plugins/            # JAR plugins
+---
 
+## Commands
+
+### Playback
+
+| Command | Action |
+| --- | --- |
+| `/play <query>` | Play or queue a track or playlist |
+| `/pause` / `/resume` | Pause or resume playback |
+| `/skip` / `/stop` | Skip or terminate playback |
+| `/back` / `/replay` | Return to or replay a track |
+| `/seek <time>` | Seek within the current track |
+| `/volume` | Change player volume |
+| `/loop` / `/shuffle` | Change queue behavior |
+| `/autoplay` | Toggle automatic recommendations |
+
+### Queue and audio
+
+| Command | Action |
+| --- | --- |
+| `/queue` | Display the paginated queue |
+| `/remove` / `/move` | Modify queue positions |
+| `/skipto` | Jump to a queue position |
+| `/clearqueue` | Remove upcoming tracks |
+| `/filter` | Apply or reset audio filters |
+
+### System
+
+| Command | Action |
+| --- | --- |
+| `/lyrics [query]` | Current track or `artist - title` lyrics |
+| `/dashboard` | Open the guild dashboard |
+| `/config` | Read or modify guild configuration |
+| `/help` | Show the complete command list |
+
+Economy and game commands are documented by `/help` inside Discord.
+
+---
+
+## Docker
+
+```text
++----------------------+-------+------------------------+
+| Service              | Port  | Container              |
++----------------------+-------+------------------------+
+| Lavalink             | 2333  | breadmusic-lavalink    |
+| Bot API              | 3001  | breadmusic-bot         |
+| Dashboard            | 3000  | breadmusic-web         |
++----------------------+-------+------------------------+
+```
+
+Create `.env` using `env.docker`, then build the stack:
+
+```powershell
+docker compose up -d --build
+```
+
+Production source is baked into the images. Updating the repository therefore
+requires rebuilding the affected services.
+
+Persistent mounts:
+
+```text
+./data                  -> bot state, sessions, queues and uploads
+./lavalink/application.yml
+./lavalink/plugins
+```
+
+---
+
+## Verification
+
+```powershell
+# Backend tests
+npm test
+
+# Dashboard type check
+.\web\node_modules\.bin\tsc.cmd --noEmit --project web\tsconfig.json
+
+# Production dashboard build
+npm run build --prefix web
+
+# Compose validation
+docker compose config
+```
+
+---
+
+## Runtime Data
+
+```text
 data/
-├── configs.json        # Guild configurations
-├── economy.json        # User balances
-└── queues.json         # Saved queues (24/7 mode)
+|-- analytics.json      playback history and insights
+|-- configs.json        per-guild configuration
+|-- queues.json         persistent player queues
+|-- sessions/           OAuth sessions
+`-- uploads/            temporary local audio
+```
 
-web/
-├── app/                # Next.js App Router pages
-├── components/         # Dashboard + landing UI components
-├── lib/                # API client and utilities
-└── public/assets/      # Static dashboard/landing assets
+Never commit `data/`, `.env` or production secrets.
+
+---
+
+## Repository Layout
+
+```text
+Bread/
+|-- src/
+|   |-- bot.js                  Discord client and Lavalink events
+|   |-- server.js               OAuth and dashboard API
+|   |-- commands/               slash command definitions
+|   |-- dashboard/              access and capability rules
+|   |-- music/                  playback, autoplay, UI and lyrics
+|   |-- state/                  persistent JSON stores
+|   |-- games/                  economy and games
+|   `-- utils/                  shared utilities
+|-- web/
+|   |-- app/                    Next.js routes
+|   |-- components/             dashboard and landing components
+|   `-- lib/                    API client and helpers
+|-- lavalink/
+|   |-- application.example.yml
+|   `-- plugins/
+|-- test/                       backend unit tests
+|-- Dockerfile
+`-- docker-compose.yml
 ```
 
 ---
 
-Made with 🍞 and AI assistance.
+## License
+
+```text
+GNU Affero General Public License v3.0 only
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright (C) 2026 Aleks Szotek
+```
+
+Bread is free software distributed under the
+[GNU Affero General Public License v3.0](LICENSE). If you modify Bread and make
+that version available through a network, you must make the corresponding
+source code available to users under the same license.
+
+Third-party dependencies and bundled Lavalink plugins remain covered by their
+respective licenses.
+
+Source: [github.com/al3ksh/BreadMusic](https://github.com/al3ksh/BreadMusic)
+
+---
+
+<div align="center">
+
+```text
+audio in  ->  queue  ->  lavalink  ->  voice out
+events in ->  state  ->  dashboard ->  control
+```
+
+</div>

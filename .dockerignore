@@ -1,0 +1,13 @@
+node_modules
+web/node_modules
+web/.next
+data
+.git
+.env
+.env.*
+!.env.example
+*.log
+.vscode
+.idea
+README.md
+lavalink/Lavalink.jar

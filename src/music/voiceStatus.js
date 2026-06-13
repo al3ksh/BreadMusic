@@ -43,7 +43,7 @@ function formatVoiceTrackStatus(track) {
     !isYouTubeTrack(track) && author && !isUnknownAuthor(author)
       ? `${author} - ${title}`
       : title;
-  return truncate(`🎵 ${label}`, MAX_VISIBLE_STATUS_LENGTH);
+  return truncate(`♪ ${label}`, MAX_VISIBLE_STATUS_LENGTH);
 }
 
 async function updateVoiceStatus(client, channelId, status) {
