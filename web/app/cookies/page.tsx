@@ -4,7 +4,7 @@ export default function CookiesPage() {
       <div className="max-w-3xl mx-auto rounded-xl border border-border bg-bg-card p-6 sm:p-8">
         <p className="text-xs uppercase tracking-wider text-text-muted">Legal</p>
         <h1 className="text-2xl font-bold mt-2 text-text-primary">Cookies Policy</h1>
-        <p className="text-sm text-text-secondary mt-2">Last updated: 2026-04-06</p>
+        <p className="text-sm text-text-secondary mt-2">Last updated: 2026-06-14</p>
 
         <div className="mt-6 space-y-5 text-sm text-text-secondary leading-relaxed">
           <section>
@@ -41,6 +41,10 @@ export default function CookiesPage() {
         </div>
 
         <div className="mt-8 flex flex-wrap items-center gap-3 text-sm">
+          <a href="/privacy" className="underline text-text-secondary hover:text-text-primary transition-colors">
+            Read Privacy Policy
+          </a>
+          <span className="text-text-muted">•</span>
           <a href="/terms" className="underline text-text-secondary hover:text-text-primary transition-colors">
             Read Terms of Use
           </a>

@@ -33,6 +33,10 @@ export function Footer() {
               AGPL-3.0
             </a>
             <span>•</span>
+            <a href="/privacy" className="hover:text-text-primary transition-colors">
+              Privacy
+            </a>
+            <span>•</span>
             <a href="/cookies" className="hover:text-text-primary transition-colors">
               Cookies
             </a>

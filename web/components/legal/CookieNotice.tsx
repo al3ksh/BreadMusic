@@ -32,7 +32,7 @@ export function CookieNotice() {
       <p className="text-xs font-semibold text-text-primary">Cookie notice</p>
       <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">
         We use essential cookies for Discord login and dashboard session (`bread.sid`).
-        By using Bread dashboard, you agree to our cookie policy and terms.
+        See our privacy, cookies, and terms pages for details.
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
@@ -46,6 +46,9 @@ export function CookieNotice() {
 
         <a href="/cookies" className="underline text-text-secondary hover:text-text-primary transition-colors">
           Cookies policy
+        </a>
+        <a href="/privacy" className="underline text-text-secondary hover:text-text-primary transition-colors">
+          Privacy policy
         </a>
         <a href="/terms" className="underline text-text-secondary hover:text-text-primary transition-colors">
           Terms of use
