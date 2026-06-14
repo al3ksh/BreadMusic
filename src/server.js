@@ -15,6 +15,7 @@ const { createFileSessionStore } = require('./state/sessionStore');
 const { resolveDashboardCapabilities } = require('./dashboard/access');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
 const { handleSkipRequest } = require('./music/skipManager');
+const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const SCOPES = ['identify', 'guilds'].join(' ');
@@ -174,6 +175,14 @@ function createApiServer(client) {
     const guildId = req.params.guildId;
     if (!guildId) {
       res.status(400).json({ error: 'Missing guild ID' });
+      return null;
+    }
+
+    if (!isGuildAllowed(client.guildAccess, guildId)) {
+      res.status(403).json({
+        error: buildAccessDeniedMessage(client.guildAccess),
+        code: 'GUILD_NOT_ALLOWED',
+      });
       return null;
     }
 
@@ -433,6 +442,9 @@ function createApiServer(client) {
       async function mapGuilds(discordGuilds) {
         const mapped = await Promise.all(discordGuilds.map(async (g) => {
           const guild = client.guilds.cache.get(g.id);
+          const guildAllowed = isGuildAllowed(client.guildAccess, g.id);
+          if (!guildAllowed) return null;
+
           const oauthAdmin = (BigInt(g.permissions) & MANAGE_GUILD) === MANAGE_GUILD;
           let capabilities = {
             accessLevel: oauthAdmin ? 'admin' : 'member',
@@ -461,6 +473,7 @@ function createApiServer(client) {
         }));
 
         return mapped
+          .filter(Boolean)
           .filter((g) => (g.bot_present ? g.can_access : g.can_invite))
           .sort((a, b) => b.bot_present - a.bot_present);
       }

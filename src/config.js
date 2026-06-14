@@ -1,5 +1,6 @@
 const path = require('path');
 const dotenv = require('dotenv');
+const { createGuildAccessPolicy } = require('./access/guildAccess');
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
@@ -76,6 +77,7 @@ function loadConfig() {
     behavior: {
       idleTimeoutMs: Number(IDLE_TIMEOUT_MS ?? 300000),
     },
+    guildAccess: createGuildAccessPolicy(process.env),
   };
 }
 

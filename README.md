@@ -172,6 +172,22 @@ SPOTIFY_CLIENT_ID=spotify_client_id
 SPOTIFY_CLIENT_SECRET=spotify_client_secret
 ```
 
+### Private guild access
+
+Bread can remain publicly installable while refusing commands and dashboard access
+outside an explicit server allowlist:
+
+```ini
+GUILD_ACCESS_MODE=allowlist
+ALLOWED_GUILD_IDS=123456789012345678,987654321098765432
+PRIVATE_ACCESS_CONTACT=aleksh8
+```
+
+Unauthorized servers keep the installed bot, but commands and interactions return a
+private access notice. The bot also posts the notice once when it joins, does not
+restore 24/7 playback there, and hides the server from the dashboard. An empty
+allowlist denies every server. Use `GUILD_ACCESS_MODE=public` to disable the restriction.
+
 The Discord OAuth redirect must exactly match:
 
 ```text

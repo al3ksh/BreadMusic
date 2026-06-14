@@ -9,7 +9,7 @@
     "dev:lavalink": "node scripts/start-lavalink.js",
     "dev:web": "cd web && npm run dev",
     "register": "node src/register-commands.js",
-    "test": "node --test test/access.test.js test/history.test.js test/lyrics.test.js"
+    "test": "node --test test/access.test.js test/guildAccess.test.js test/history.test.js test/lyrics.test.js"
   },
   "keywords": [],
   "author": "",

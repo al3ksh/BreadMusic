@@ -46,6 +46,7 @@ const {
   clearVoiceTrackStatus,
   setVoiceTrackStatus,
 } = require('./music/voiceStatus');
+const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 const {
   RPS_BUTTON_PREFIX,
   RPS_CHOICES,
@@ -134,6 +135,7 @@ for (const command of commands) {
 
 client.musicUI = new MusicUI(client);
 client.behavior = config.behavior;
+client.guildAccess = config.guildAccess;
 
 client.lavalink = new LavalinkManager({
   nodes: config.lavalink.nodes,
@@ -187,6 +189,26 @@ client.once(Events.ClientReady, async (readyClient) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   if (isShuttingDown) return;
 
+  if (interaction.guildId && !isGuildAllowed(config.guildAccess, interaction.guildId)) {
+    if (interaction.isAutocomplete()) {
+      await interaction.respond([]).catch(() => {});
+      return;
+    }
+
+    if (interaction.isRepliable()) {
+      const payload = {
+        content: buildAccessDeniedMessage(config.guildAccess),
+        flags: MessageFlags.Ephemeral,
+      };
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp(payload).catch(() => {});
+      } else {
+        await interaction.reply(payload).catch(() => {});
+      }
+    }
+    return;
+  }
+
   if (interaction.isAutocomplete()) {
     try {
       await handleAutocomplete(interaction);
@@ -231,6 +253,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } catch (error) {
     await handleInteractionError(interaction, error);
   }
+});
+
+client.on(Events.GuildCreate, async (guild) => {
+  if (isGuildAllowed(config.guildAccess, guild.id)) return;
+
+  console.warn(`[GuildAccess] Unauthorized guild joined: ${guild.name} (${guild.id})`);
+  const canSend = (candidate) =>
+    candidate?.isTextBased?.() &&
+    (typeof candidate.isSendable !== 'function' || candidate.isSendable());
+  const channel = canSend(guild.systemChannel)
+    ? guild.systemChannel
+    : guild.channels.cache.find(canSend);
+
+  if (!channel?.send) return;
+  await channel.send({
+    content: buildAccessDeniedMessage(config.guildAccess),
+  }).catch(() => {});
 });
 
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
@@ -940,6 +979,7 @@ function truncateLabel(text, maxLength) {
 async function restoreTwentyFourSevenPlayers() {
   const configs = listConfigs();
   for (const [guildId, guildConfig] of configs) {
+    if (!isGuildAllowed(config.guildAccess, guildId)) continue;
     if (!guildConfig.stayInChannel || !guildConfig.twentyFourSevenChannelId) continue;
     const guild = client.guilds.cache.get(guildId);
     if (!guild) continue;

@@ -49,6 +49,9 @@ services:
       - WEB_URL=${WEB_URL:-http://localhost:3000}
       - SESSION_SECRET=${SESSION_SECRET}
       - AUTOPLAY_LOG_LEVEL=${AUTOPLAY_LOG_LEVEL:-warn}
+      - GUILD_ACCESS_MODE=${GUILD_ACCESS_MODE:-public}
+      - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS:-}
+      - PRIVATE_ACCESS_CONTACT=${PRIVATE_ACCESS_CONTACT:-aleksh8}
       - NODE_ENV=production
     ports:
       - "3001:3001"
