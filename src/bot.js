@@ -23,6 +23,7 @@ const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clear
 const { resetVotes } = require('./music/voteManager');
 const { getConfig, listConfigs, assertDJ, hasDJPermissions } = require('./state/guildConfig');
 const { createSelection } = require('./state/searchCache');
+const { deleteInteractionReply } = require('./utils/interactions');
 const {
   buildQueueEmbed,
   buildQueueComponents,
@@ -1043,7 +1044,13 @@ async function handleInteractionError(interaction, error) {
   try {
     if (!interaction.isRepliable()) return;
 
-    if (interaction.deferred || interaction.replied) {
+    if ((interaction.deferred || interaction.replied) && ephemeral && !interaction.ephemeral) {
+      await deleteInteractionReply(interaction).catch(() => {});
+      await interaction.followUp({
+        content,
+        flags: MessageFlags.Ephemeral,
+      });
+    } else if (interaction.deferred || interaction.replied) {
       await interaction.editReply({ content });
     } else {
       await interaction.reply({

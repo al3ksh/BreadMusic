@@ -11,13 +11,13 @@
   --color-border: #222222;
   --color-border-light: #2a2a2a;
 
-  --color-accent: #6b63ff; /* Matching the Bread purple */
-  --color-accent-hover: #5a54d8;
-  --color-accent-text: #8e87ff;
-  --color-accent-dim: #4a44b5;
-  --color-accent-glow: rgba(107, 99, 255, 0.25);
-  --color-accent-soft: rgba(107, 99, 255, 0.08);
-  --color-accent-muted: rgba(107, 99, 255, 0.15);
+  --color-accent: #5a5494;
+  --color-accent-hover: #4d477f;
+  --color-accent-text: #9b94cf;
+  --color-accent-dim: #213d7c;
+  --color-accent-glow: rgba(90, 84, 148, 0.25);
+  --color-accent-soft: rgba(90, 84, 148, 0.08);
+  --color-accent-muted: rgba(90, 84, 148, 0.15);
 
   --color-text-primary: #e0e0e0;
   --color-text-secondary: #888888;
@@ -68,7 +68,7 @@ a { color: inherit; text-decoration: none; }
 /* ---- Glows ---- */
 
 .glow {
-  box-shadow: 0 0 40px var(--color-accent-glow), 0 0 80px rgba(44, 147, 250, 0.1);
+  box-shadow: 0 0 40px var(--color-accent-glow), 0 0 80px rgba(33, 61, 124, 0.14);
 }
 
 .glow-sm {
@@ -78,7 +78,7 @@ a { color: inherit; text-decoration: none; }
 /* ---- Gradients ---- */
 
 .gradient-text {
-  background: linear-gradient(135deg, var(--color-accent) 0%, #5aafff 50%, #8dd4ff 100%);
+  background: linear-gradient(135deg, #5a5494 0%, #213d7c 52%, #675796 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

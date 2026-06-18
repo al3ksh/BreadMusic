@@ -63,6 +63,7 @@ const { isAutoplayEnabled, toggleAutoplay, resetSeed } = require('../music/autop
 const { classifyPlaybackError, describeSearchFailure } = require('../music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('../music/voiceStatus');
 const { findLyrics, trackToLyricsQuery, LyricsProviderError } = require('../music/lyrics');
+const { BRAND_COLORS } = require('../theme');
 
 const FILTER_PRESET_CHOICES = [
   { value: 'bassboost', label: 'Bassboost', description: 'Deep, punchy bass boost.' },
@@ -216,7 +217,7 @@ function buildHelpEmbed(pageIndex) {
   const embed = new EmbedBuilder()
     .setTitle(`Bread - Help (${category.name})`)
     .setDescription(category.description)
-    .setColor('#10b981')
+    .setColor(BRAND_COLORS.primary)
     .setFooter({ text: `Page ${pageIndex + 1}/${HELP_CATEGORIES.length}` });
 
   for (const cmd of category.commands) {
@@ -262,15 +263,21 @@ const commands = [
       .setDMPermission(false),
     async execute(interaction) {
       const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
+      const botAvatar = interaction.client.user?.displayAvatarURL({ size: 128 }) ?? null;
       const embed = new EmbedBuilder()
-        .setTitle('Dashboard')
-        .setColor('#6366f1')
-        .setDescription(`Manage settings, player and economy here:\n${dashboardUrl}`);
+        .setTitle('Bread Dashboard')
+        .setColor(BRAND_COLORS.primary)
+        .setDescription('Manage playback, queue, lyrics, history, uploads, economy, and server settings from the web dashboard.')
+        .setFooter({ text: 'Only you can see this message.' });
+
+      if (botAvatar) {
+        embed.setThumbnail(botAvatar);
+      }
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setStyle(ButtonStyle.Link)
-          .setLabel('Open Dashboard')
+          .setLabel('Open Web Dashboard')
           .setURL(dashboardUrl),
       );
 
@@ -392,7 +399,7 @@ const commands = [
             { name: 'Tracks', value: `${tracksToAdd.length}`, inline: true },
             { name: 'Voice channel', value: `<#${voiceChannelId}>`, inline: true },
           )
-          .setColor('#f97316')
+          .setColor(BRAND_COLORS.primary)
           .setTimestamp();
         await interaction.editReply({ embeds: [playlistEmbed] });
       } else {
@@ -738,7 +745,7 @@ const commands = [
         .setTitle(lyrics.title)
         .setAuthor({ name: lyrics.artist })
         .setDescription(description)
-        .setColor('#6366f1')
+        .setColor(BRAND_COLORS.primary)
         .setFooter({ text: `Lyrics provided by ${lyrics.provider}` });
       await interaction.editReply({ embeds: [embed] });
     },
@@ -848,7 +855,7 @@ const commands = [
 
         const embed = new EmbedBuilder()
           .setTitle('Filter presets')
-          .setColor('#0ea5e9')
+          .setColor(BRAND_COLORS.secondary)
           .setDescription(description);
 
         await interaction.editReply({ embeds: [embed] });
@@ -936,7 +943,7 @@ const commands = [
         const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
         const embed = new EmbedBuilder()
           .setTitle('Current configuration')
-          .setColor('#14b8a6')
+          .setColor(BRAND_COLORS.secondary)
           .setDescription(`Dashboard: ${dashboardUrl}\n\`\`\`\n${formatConfig(config)}\n\`\`\``);
         await interaction.editReply({ embeds: [embed] });
         return;
@@ -956,7 +963,7 @@ const commands = [
         const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
         const embed = new EmbedBuilder()
           .setTitle('Configuration reset')
-          .setColor('#f97316')
+          .setColor(BRAND_COLORS.secondary)
           .setDescription(`Dashboard: ${dashboardUrl}\n\`\`\`\n${formatConfig(fresh)}\n\`\`\``);
         await interaction.editReply({ embeds: [embed] });
         return;
@@ -994,7 +1001,7 @@ const commands = [
       const dashboardUrl = buildDashboardUrl(interaction.guildId, 'settings');
       const embed = new EmbedBuilder()
         .setTitle('Configuration updated')
-        .setColor('#6366f1')
+        .setColor(BRAND_COLORS.primary)
         .setDescription(`Dashboard: ${dashboardUrl}\n\`\`\`\n${formatConfig(updated)}\n\`\`\``);
       await interaction.editReply({ embeds: [embed] });
     },
@@ -1078,7 +1085,7 @@ const commands = [
 
       const embed = new EmbedBuilder()
         .setTitle(`💰 Balance - ${targetUser.username}`)
-        .setColor('#6366f1')
+        .setColor(BRAND_COLORS.primary)
         .setDescription(`**${balance}** 🍞`)
         .setThumbnail(targetUser.displayAvatarURL());
 

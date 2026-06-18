@@ -1,4 +1,5 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { BRAND_COLORS } = require('../theme');
 
 const RPS_CHOICES = ['rock', 'paper', 'scissors'];
 const RPS_EMOJIS = { rock: '🪨', paper: '📄', scissors: '✂️' };
@@ -319,7 +320,7 @@ function buildRPSDuelResultEmbed(challenge, outcome) {
 function build8BallEmbed(question, answer) {
   return new EmbedBuilder()
     .setTitle('🎱 Magic 8 Ball')
-    .setColor('#6366f1')
+    .setColor(BRAND_COLORS.primary)
     .addFields(
       { name: 'Question', value: question },
       { name: 'Answer', value: `*${answer}*` },

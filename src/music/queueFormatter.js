@@ -5,6 +5,7 @@ const {
   ButtonStyle,
 } = require('discord.js');
 const { formatDuration } = require('../utils/time');
+const { BRAND_COLORS } = require('../theme');
 
 const PAGE_SIZE = 10;
 const QUEUE_BUTTON_PREFIX = 'queue';
@@ -46,7 +47,7 @@ function buildQueueEmbed(player, page = 0, pageSize = PAGE_SIZE) {
 
   const embed = new EmbedBuilder()
     .setTitle('Queue')
-    .setColor('#f97316')
+    .setColor(BRAND_COLORS.secondary)
     .setDescription(
       lines.length ? lines.join('\n') : 'No upcoming tracks. Add something with /play.',
     )

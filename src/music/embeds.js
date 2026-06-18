@@ -1,6 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const { formatDuration, buildProgressBar } = require('../utils/time');
 const { isAutoplayEnabled } = require('./autoplay');
+const { BRAND_COLORS } = require('../theme');
 
 const LABELS = {
   TITLE: '🎶',
@@ -36,7 +37,7 @@ function buildTrackEmbed(track, requester, voiceChannelId) {
         inline: true,
       },
     )
-    .setColor('#22d3ee')
+    .setColor(BRAND_COLORS.primary)
     .setTimestamp()
     .setFooter({ text: `Requested by ${requesterLabel}` });
 
@@ -53,7 +54,7 @@ function buildNowPlayingEmbed(player, track) {
     return new EmbedBuilder()
       .setTitle('Nothing playing')
       .setDescription('Queue is empty.')
-      .setColor('#6b7280');
+      .setColor(BRAND_COLORS.secondary);
   }
 
   const duration = track.info.duration ?? track.info.length ?? 0;
@@ -73,7 +74,7 @@ function buildNowPlayingEmbed(player, track) {
         duration,
       )}`,
     )
-    .setColor('#22d3ee')
+    .setColor(player?.paused ? BRAND_COLORS.secondary : BRAND_COLORS.primary)
     .addFields(
       { name: LABELS.ARTIST, value: trackAuthor, inline: true },
       { name: LABELS.DURATION, value: formatDuration(duration), inline: true },
