@@ -5,6 +5,8 @@ const skippedAutoplayTracks = new Map();
 const preferredSeed = new Map();
 const currentAutoplaySeed = new Map();
 const autoplayInProgress = new Set();
+const autoplayEpoch = new Map();
+const autoplayBlockedUntil = new Map();
 const autoplayPrefetch = new Map();
 
 const MAX_RECENT_TRACKS = 40;
@@ -912,8 +914,10 @@ async function consumePrefetchedTrack(guildId, lastTrack) {
 
 async function handleAutoplay(player, lastTrack, client) {
   const guildId = player.guildId;
+  const epoch = autoplayEpoch.get(guildId) || 0;
 
   if (!isAutoplayEnabled(guildId)) return false;
+  if ((autoplayBlockedUntil.get(guildId) || 0) > Date.now()) return false;
   if (player.queue.tracks.length > 0) return false;
   if (player.queue.current && player.playing) return false;
 
@@ -927,6 +931,10 @@ async function handleAutoplay(player, lastTrack, client) {
   try {
     const nextTrack = await consumePrefetchedTrack(guildId, lastTrack) || await findNextTrack(player, lastTrack, client);
     if (!nextTrack) return false;
+    if ((autoplayEpoch.get(guildId) || 0) !== epoch) return false;
+    if (client?.lavalink?.players?.get(guildId) !== player) return false;
+    if (!isAutoplayEnabled(guildId) || player.queue.tracks.length > 0) return false;
+    if (player.queue.current && player.playing) return false;
 
     nextTrack.isAutoplay = true;
     await player.queue.add(nextTrack);
@@ -945,6 +953,8 @@ async function handleAutoplay(player, lastTrack, client) {
 }
 
 function clearAutoplayState(guildId) {
+  autoplayEpoch.set(guildId, (autoplayEpoch.get(guildId) || 0) + 1);
+  autoplayBlockedUntil.set(guildId, Date.now() + 15_000);
   clearAutoplayPrefetch(guildId);
   recentTracks.delete(guildId);
   skippedAutoplayTracks.delete(guildId);
@@ -958,6 +968,7 @@ function resetSeed(guildId, trackInfo = null) {
   recentTracks.delete(guildId);
   skippedAutoplayTracks.delete(guildId);
   currentAutoplaySeed.delete(guildId);
+  autoplayBlockedUntil.delete(guildId);
   if (trackInfo) {
     const seedInfo = snapshotTrackInfo(trackInfo);
     if (!seedInfo) return;

@@ -1,0 +1,983 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
+import {
+  Activity as ActivityIcon,
+  AudioLines,
+  BookOpenText,
+  ChevronDown,
+  Disc3,
+  FileAudio,
+  GripVertical,
+  ListMusic,
+  ListPlus,
+  Mic2,
+  Music2,
+  Pause,
+  Play,
+  Repeat,
+  Search,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Square,
+  Trash2,
+  Upload,
+  Volume2,
+  X,
+} from 'lucide-react';
+import type { DashboardCapabilities, LyricsResult, PlayerStatus, QueueTrack } from '@/lib/api';
+
+type ActivitySdk = {
+  ready: () => Promise<void>;
+  guildId: string | null;
+  channelId: string | null;
+  commands: {
+    authorize: (options: Record<string, unknown>) => Promise<{ code: string }>;
+    authenticate: (options: { access_token: string }) => Promise<{ access_token?: string } | null>;
+    openExternalLink: (options: { url: string }) => Promise<{ opened: boolean }>;
+  };
+};
+
+type ActivityPhase = 'starting' | 'ready' | 'error' | 'unsupported';
+type ActivityPanel = 'queue' | 'search' | 'lyrics' | null;
+type QueueSnapshot = {
+  current: QueueTrack | null;
+  tracks: QueueTrack[];
+  total: number;
+  page: number;
+  totalPages: number;
+};
+type SearchTrack = QueueTrack & { encoded?: string };
+type SyncedLine = { time: number; text: string };
+type PlayerClock = {
+  trackKey: string;
+  base: number;
+  startedAt: number;
+  paused: boolean;
+};
+
+const EMPTY_STATUS: PlayerStatus = {
+  connected: false,
+  playing: false,
+  paused: false,
+  voiceChannelId: null,
+  voiceChannelName: null,
+  currentTrack: null,
+  queueLength: 0,
+  repeatMode: 'off',
+  volume: 100,
+  filters: null,
+  autoplay: false,
+  sessionHistory: [],
+};
+
+function formatMs(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function parseSyncedLyrics(value: string | null | undefined): SyncedLine[] {
+  if (!value) return [];
+  return value
+    .split('\n')
+    .map((line) => {
+      const match = line.match(/^\[(\d+):(\d+(?:\.\d+)?)\](.*)$/);
+      if (!match) return null;
+      return {
+        time: (Number(match[1]) * 60 + Number(match[2])) * 1000,
+        text: match[3].trim() || '...',
+      };
+    })
+    .filter((line): line is SyncedLine => Boolean(line))
+    .sort((a, b) => a.time - b.time);
+}
+
+function activityArtworkSrc(value: string | null | undefined) {
+  if (!value || value.startsWith('/')) return value || '';
+  return `/api/activity/artwork?url=${encodeURIComponent(value)}`;
+}
+
+function ActivitySpinner() {
+  return <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />;
+}
+
+function ActivityArtwork({ src, large = false }: { src?: string | null; large?: boolean }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => setFailed(false), [src]);
+
+  if (!src || failed) {
+    return (
+      <div className={large ? 'activity-art-fallback' : 'activity-queue-art'}>
+        <Music2 size={large ? 46 : 15} />
+      </div>
+    );
+  }
+
+  return <img src={activityArtworkSrc(src)} alt="" onError={() => setFailed(true)} />;
+}
+
+export default function ActivityPage() {
+  const sdkRef = useRef<ActivitySdk | null>(null);
+  const activityTokenRef = useRef<string | null>(null);
+  const drawerCloseTimerRef = useRef<number | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const clockRef = useRef<PlayerClock>({ trackKey: '', base: 0, startedAt: Date.now(), paused: true });
+  const lyricsListRef = useRef<HTMLDivElement | null>(null);
+  const activeLyricRef = useRef<HTMLParagraphElement | null>(null);
+  const [phase, setPhase] = useState<ActivityPhase>('starting');
+  const [message, setMessage] = useState('Connecting to Discord...');
+  const [guildId, setGuildId] = useState<string | null>(null);
+  const [channelId, setChannelId] = useState<string | null>(null);
+  const [capabilities, setCapabilities] = useState<DashboardCapabilities | null>(null);
+  const [status, setStatus] = useState<PlayerStatus>(EMPTY_STATUS);
+  const [queue, setQueue] = useState<QueueSnapshot | null>(null);
+  const [position, setPosition] = useState(0);
+  const [activePanel, setActivePanel] = useState<ActivityPanel>(null);
+  const [drawerClosing, setDrawerClosing] = useState(false);
+  const [seekPreview, setSeekPreview] = useState<{ position: number; percent: number } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchTrack[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+  const [lyricsError, setLyricsError] = useState('');
+  const [lyricsSyncEnabled, setLyricsSyncEnabled] = useState(false);
+  const [karaokeEnabled, setKaraokeEnabled] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
+
+  const getClockPosition = useCallback(() => {
+    const clock = clockRef.current;
+    return clock.base + (clock.paused ? 0 : Date.now() - clock.startedAt);
+  }, []);
+
+  const setClockPosition = useCallback((nextPosition: number) => {
+    clockRef.current = { ...clockRef.current, base: nextPosition, startedAt: Date.now() };
+    setPosition(nextPosition);
+  }, []);
+
+  const activityFetch = useCallback(async <T,>(path: string, options: RequestInit = {}) => {
+    const token = activityTokenRef.current;
+    if (!token) throw new Error('Activity authentication is not ready');
+    const response = await fetch(path, {
+      ...options,
+      headers: {
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        Authorization: `Bearer ${token}`,
+        ...options.headers,
+      },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
+    return body as T;
+  }, []);
+
+  const applySnapshot = useCallback((payload: { status?: PlayerStatus; queue?: QueueSnapshot }) => {
+    if (payload.status) {
+      const incomingStatus = payload.status;
+      const track = incomingStatus.currentTrack;
+
+      if (!track) {
+        clockRef.current = { trackKey: '', base: 0, startedAt: Date.now(), paused: true };
+        setPosition(0);
+        setStatus(incomingStatus);
+      } else {
+        const now = Date.now();
+        const trackKey = `${track.uri}|${track.title}|${track.author}`;
+        const previous = clockRef.current;
+        const incoming = track.position || 0;
+        let stablePosition = incoming;
+
+        if (previous.trackKey === trackKey) {
+          const estimated = previous.base + (previous.paused ? 0 : now - previous.startedAt);
+          const intentionalBackwardsMove = incoming < estimated - 5000;
+
+          if (incomingStatus.paused && !previous.paused) {
+            stablePosition = Math.max(incoming, estimated);
+          } else if (incomingStatus.paused && previous.paused && !intentionalBackwardsMove) {
+            stablePosition = previous.base;
+          } else if (!incomingStatus.paused && !intentionalBackwardsMove) {
+            stablePosition = Math.max(incoming, estimated);
+          }
+        }
+
+        stablePosition = Math.min(track.duration || Infinity, Math.max(0, stablePosition));
+        clockRef.current = {
+          trackKey,
+          base: stablePosition,
+          startedAt: now,
+          paused: incomingStatus.paused,
+        };
+        setPosition(stablePosition);
+        setStatus({ ...incomingStatus, currentTrack: { ...track, position: stablePosition } });
+      }
+    }
+    if (payload.queue) setQueue(payload.queue);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initialize() {
+      try {
+        const config = await fetch('/api/activity/config').then(async (response) => {
+          if (!response.ok) throw new Error('Activity is not configured');
+          return response.json() as Promise<{ enabled: boolean; clientId: string | null }>;
+        });
+
+        if (!config.enabled || !config.clientId) {
+          setPhase('error');
+          setMessage('Discord Activity is not configured on this deployment.');
+          return;
+        }
+        if (typeof window === 'undefined' || window.parent === window) {
+          setPhase('unsupported');
+          setMessage('Open this page from Discord as a Bread Activity.');
+          return;
+        }
+
+        const { DiscordSDK } = await import('@discord/embedded-app-sdk');
+        const sdk = new DiscordSDK(config.clientId) as unknown as ActivitySdk;
+        sdkRef.current = sdk;
+        await sdk.ready();
+
+        const { code } = await sdk.commands.authorize({
+          client_id: config.clientId,
+          response_type: 'code',
+          state: '',
+          prompt: 'none',
+          scope: ['identify', 'guilds'],
+        });
+        const tokenResponse = await fetch('/api/activity/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        }).then(async (response) => {
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || 'Activity authorization failed');
+          return body as { access_token: string };
+        });
+        const auth = await sdk.commands.authenticate({ access_token: tokenResponse.access_token });
+        if (!auth) throw new Error('Discord Activity authentication failed');
+
+        activityTokenRef.current = auth.access_token || tokenResponse.access_token;
+        if (!sdk.guildId) throw new Error('Open the Activity from a server voice channel');
+        if (!sdk.channelId) throw new Error('Open the Activity from a voice channel');
+        if (cancelled) return;
+
+        setGuildId(sdk.guildId);
+        setChannelId(sdk.channelId);
+        const access = await activityFetch<DashboardCapabilities>(`/api/guilds/${sdk.guildId}/access`);
+        if (!access.canAccess) throw new Error('You do not have access to Bread on this server');
+        if (access.canControlPlayer) {
+          await activityFetch(`/api/guilds/${sdk.guildId}/player/join`, {
+            method: 'POST',
+            body: JSON.stringify({ channelId: sdk.channelId }),
+          });
+        }
+        if (cancelled) return;
+        setCapabilities(access);
+        setPhase('ready');
+        setMessage('');
+      } catch (error) {
+        if (cancelled) return;
+        setPhase('error');
+        setMessage(error instanceof Error ? error.message : 'Could not start Bread Activity');
+      }
+    }
+
+    initialize();
+    return () => { cancelled = true; };
+  }, [activityFetch]);
+
+  const closePanel = useCallback(() => {
+    if (!activePanel || drawerClosing) return;
+    setDrawerClosing(true);
+    if (drawerCloseTimerRef.current) window.clearTimeout(drawerCloseTimerRef.current);
+    drawerCloseTimerRef.current = window.setTimeout(() => {
+      setActivePanel(null);
+      setDrawerClosing(false);
+      drawerCloseTimerRef.current = null;
+    }, 190);
+  }, [activePanel, drawerClosing]);
+
+  const togglePanel = useCallback((panel: Exclude<ActivityPanel, null>) => {
+    if (drawerCloseTimerRef.current) {
+      window.clearTimeout(drawerCloseTimerRef.current);
+      drawerCloseTimerRef.current = null;
+    }
+    if (activePanel === panel && !drawerClosing) {
+      setDrawerClosing(true);
+      drawerCloseTimerRef.current = window.setTimeout(() => {
+        setActivePanel(null);
+        setDrawerClosing(false);
+        drawerCloseTimerRef.current = null;
+      }, 190);
+      return;
+    }
+    setDrawerClosing(false);
+    setActivePanel(panel);
+  }, [activePanel, drawerClosing]);
+
+  useEffect(() => () => {
+    if (drawerCloseTimerRef.current) window.clearTimeout(drawerCloseTimerRef.current);
+  }, []);
+
+  const openExternalUrl = useCallback(async (url: string) => {
+    if (!/^https?:\/\//i.test(url)) return;
+    try {
+      await sdkRef.current?.commands.openExternalLink({ url });
+    } catch {
+      setNotice('Could not open the link in your browser');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (phase !== 'ready' || !guildId) return;
+    const controller = new AbortController();
+    let active = true;
+
+    async function streamSnapshots() {
+      try {
+        const response = await fetch(`/api/guilds/${guildId}/player/events?page=0`, {
+          headers: { Authorization: `Bearer ${activityTokenRef.current}` },
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error('Live player connection failed');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (active) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() || '';
+          for (const frame of frames) {
+            const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+            if (!dataLine) continue;
+            try {
+              applySnapshot(JSON.parse(dataLine.slice(5).trim()));
+            } catch {
+              // The next snapshot repairs malformed or incomplete data.
+            }
+          }
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : 'Live player connection lost');
+      }
+    }
+
+    streamSnapshots();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [applySnapshot, guildId, phase]);
+
+  useEffect(() => {
+    if (phase !== 'ready') return;
+    const tick = () => {
+      const duration = status.currentTrack?.duration || Infinity;
+      setPosition(Math.min(duration, getClockPosition()));
+    };
+    tick();
+    const timer = setInterval(tick, 250);
+    return () => clearInterval(timer);
+  }, [getClockPosition, phase, status.currentTrack?.duration]);
+
+  const playerAction = useCallback(async (action: string, body?: Record<string, unknown>) => {
+    if (!guildId) return false;
+    const previousClock = { ...clockRef.current };
+    const previousStatus = status;
+
+    if (action === 'toggle' && status.currentTrack) {
+      const nextPaused = !status.paused;
+      const frozenPosition = Math.min(status.currentTrack.duration || Infinity, getClockPosition());
+      clockRef.current = { ...clockRef.current, base: frozenPosition, startedAt: Date.now(), paused: nextPaused };
+      setPosition(frozenPosition);
+      setStatus((current) => ({ ...current, paused: nextPaused, playing: true }));
+    }
+
+    setActionBusy(action);
+    setNotice('');
+    try {
+      await activityFetch(`/api/guilds/${guildId}/player/${action}`, {
+        method: 'POST',
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return true;
+    } catch (error) {
+      if (action === 'toggle') {
+        clockRef.current = previousClock;
+        setStatus(previousStatus);
+        setPosition(previousClock.base);
+      }
+      setNotice(error instanceof Error ? error.message : 'Player action failed');
+      return false;
+    } finally {
+      setActionBusy(null);
+    }
+  }, [activityFetch, getClockPosition, guildId, status]);
+
+  const handleSearch = useCallback(async (queryOverride?: string) => {
+    const query = (queryOverride ?? searchQuery).trim();
+    if (!query || !guildId) return;
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    setSearching(true);
+    setNotice('');
+    try {
+      const result = await activityFetch<{ tracks: SearchTrack[] }>(`/api/guilds/${guildId}/player/search`, {
+        method: 'POST',
+        body: JSON.stringify({ query }),
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted) setSearchResults(result.tracks || []);
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+      setSearchResults([]);
+      setNotice(error instanceof Error ? error.message : 'Search failed');
+    } finally {
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+        setSearching(false);
+      }
+    }
+  }, [activityFetch, guildId, searchQuery]);
+
+  useEffect(() => {
+    if (activePanel !== 'search') return;
+    const query = searchQuery.trim();
+    if (!query) {
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    const timer = window.setTimeout(() => handleSearch(query), 1000);
+    return () => {
+      window.clearTimeout(timer);
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
+    };
+  }, [activePanel, handleSearch, searchQuery]);
+
+  const currentTrackUri = status.currentTrack?.uri || '';
+  const loadLyrics = useCallback(async () => {
+    if (!guildId || !currentTrackUri) return;
+    setLyricsLoading(true);
+    setLyricsError('');
+    try {
+      setLyrics(await activityFetch<LyricsResult>(`/api/guilds/${guildId}/lyrics`));
+    } catch (error) {
+      setLyrics(null);
+      setLyricsError(error instanceof Error ? error.message : 'Lyrics are unavailable');
+    } finally {
+      setLyricsLoading(false);
+    }
+  }, [activityFetch, currentTrackUri, guildId]);
+
+  useEffect(() => {
+    if (activePanel === 'lyrics' || karaokeEnabled) loadLyrics();
+    else setLyricsError('');
+  }, [activePanel, karaokeEnabled, loadLyrics]);
+
+  useEffect(() => {
+    if (!activePanel) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closePanel();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activePanel, closePanel]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(''), 4500);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
+  const handleUploadSelection = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    if (!file) return;
+    if (!/\.(mp3|flac|wav|ogg|m4a|aac|opus|webm)$/i.test(file.name)) {
+      setNotice('Unsupported audio file type');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 256 * 1024 * 1024) {
+      setNotice('Maximum audio upload size is 256 MB');
+      event.target.value = '';
+      return;
+    }
+    setUploadFile(file);
+  }, []);
+
+  const handleUpload = useCallback(async () => {
+    if (!guildId || !uploadFile || !activityTokenRef.current) return;
+    setUploading(true);
+    setNotice('');
+    try {
+      const response = await fetch(`/api/guilds/${guildId}/player/upload`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${activityTokenRef.current}`,
+          'Content-Type': uploadFile.type || 'application/octet-stream',
+          'X-File-Name': uploadFile.name,
+        },
+        body: uploadFile,
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `Upload failed: ${response.status}`);
+      setNotice(`Queued: ${body.title || uploadFile.name}`);
+      setUploadFile(null);
+      setActivePanel('queue');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }, [guildId, uploadFile]);
+
+  const playSearchResult = useCallback(async (track: SearchTrack, mode: 'queue' | 'now') => {
+    const startsPlayback = !status.currentTrack;
+    const action = mode === 'now' ? 'playnow' : 'play';
+    const queued = await playerAction(action, { query: track.uri || `${track.author} ${track.title}` });
+    if (!queued) return;
+    setNotice(mode === 'now' || startsPlayback ? `Playing now: ${track.title}` : `Added to queue: ${track.title}`);
+    if (mode === 'now' || startsPlayback) {
+      setSearchResults([]);
+      setSearchQuery('');
+      closePanel();
+    }
+  }, [closePanel, playerAction, status.currentTrack]);
+
+  const canDj = capabilities?.canControlPlayer === true;
+  const hasTrack = Boolean(status.connected && status.currentTrack);
+  const currentDuration = status.currentTrack?.duration || 0;
+  const currentTrackLink = /^https?:\/\//i.test(status.currentTrack?.uri || '') ? status.currentTrack?.uri || '' : '';
+  const percent = currentDuration ? Math.min(100, (position / currentDuration) * 100) : 0;
+  const syncedLyrics = parseSyncedLyrics(lyrics?.syncedLyrics);
+  const activeLyricIndex = syncedLyrics.reduce((current, line, index) => (line.time <= position ? index : current), -1);
+  const activeLyric = syncedLyrics[activeLyricIndex]?.text || '';
+  const previousLyric = syncedLyrics[activeLyricIndex - 1]?.text || '';
+  const nextLyric = syncedLyrics[activeLyricIndex + 1]?.text || '';
+
+  useEffect(() => {
+    if (!lyricsSyncEnabled || activePanel !== 'lyrics' || activeLyricIndex < 0) return;
+    const container = lyricsListRef.current;
+    const activeLine = activeLyricRef.current;
+    if (!container || !activeLine) return;
+    const top = activeLine.offsetTop - container.clientHeight / 2 + activeLine.clientHeight / 2;
+    container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }, [activeLyricIndex, activePanel, lyricsSyncEnabled]);
+
+  useEffect(() => {
+    if (!karaokeEnabled || lyricsLoading) return;
+    const lyricsResolved = Boolean(lyrics || lyricsError);
+    if (!lyricsResolved || syncedLyrics.length > 0) return;
+    setKaraokeEnabled(false);
+    setLyricsSyncEnabled(false);
+    setNotice('Synced lyrics are unavailable for this track. Karaoke was closed.');
+  }, [karaokeEnabled, lyrics, lyricsError, lyricsLoading, syncedLyrics.length]);
+
+  const handleQueueDrop = useCallback(async (targetIndex: number) => {
+    if (!canDj || dragIndex === null || dragIndex === targetIndex) {
+      setDragIndex(null);
+      setDropIndex(null);
+      return;
+    }
+    await playerAction('move', { from: dragIndex, to: targetIndex });
+    setDragIndex(null);
+    setDropIndex(null);
+  }, [canDj, dragIndex, playerAction]);
+
+  const handleQueueRemove = useCallback((index: number) => {
+    if (canDj) playerAction('remove', { start: index });
+  }, [canDj, playerAction]);
+
+  if (phase === 'starting') {
+    return (
+      <main className="activity-shell activity-intro">
+        <div className="activity-intro-visual" aria-hidden="true">
+          <span className="activity-intro-ring" />
+          <img src="/assets/breadicon.png?v=3" alt="" />
+          <div className="activity-intro-wave">
+            <i /><i /><i /><i /><i />
+          </div>
+        </div>
+        <h1>Opening Bread</h1>
+        <p>{message}</p>
+      </main>
+    );
+  }
+
+  if (phase !== 'ready') {
+    return (
+      <main className="activity-shell activity-centered">
+        <div className="activity-status-mark"><Disc3 size={30} /></div>
+        <p className="activity-kicker">Bread Activity</p>
+        <h1>{phase === 'unsupported' ? 'Open in Discord' : 'Activity unavailable'}</h1>
+        <p className="activity-muted">{message}</p>
+        {phase === 'unsupported' && <a className="activity-link" href="/">Back to Bread</a>}
+      </main>
+    );
+  }
+
+  return (
+    <main className="activity-shell">
+      <header className="activity-header">
+        <button type="button" className="activity-brand" onClick={() => openExternalUrl('https://breadmusic.aleksh.xyz')} aria-label="Open Bread website">
+          <img src="/assets/breadicon.png?v=3" alt="" />
+          <div><strong>Bread</strong><span>Music Activity</span></div>
+        </button>
+        <div className="activity-context">
+          <span className="activity-live-dot" />
+          <span>{status.voiceChannelName || (channelId ? 'Voice channel' : 'Discord')}</span>
+          <span className="activity-context-divider" />
+          <span>{canDj ? 'DJ controls' : 'View only'}</span>
+        </div>
+      </header>
+
+      {notice && (
+        <div className="activity-notice" role="status">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss message"><X size={16} /></button>
+        </div>
+      )}
+
+      <div className="activity-workspace">
+        {karaokeEnabled ? (
+          <section className="activity-karaoke-stage">
+            <div className="activity-karaoke-track">
+              <ActivityArtwork src={status.currentTrack?.artwork} />
+              <div>
+                <div className="activity-mini-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{status.paused ? 'Paused' : 'Playing'}</span></div>
+                <strong>{status.currentTrack?.title || 'Nothing is playing'}</strong>
+                <span className="activity-karaoke-author">{status.currentTrack?.author || 'Bread'}</span>
+              </div>
+              <button type="button" onClick={() => setKaraokeEnabled(false)}><X size={16} /><span>Exit karaoke</span></button>
+            </div>
+            <div className="activity-karaoke-lines" aria-live="polite">
+              {lyricsLoading ? (
+                <div className="activity-karaoke-empty"><ActivitySpinner /> Loading lyrics</div>
+              ) : lyricsError ? (
+                <div className="activity-karaoke-empty">{lyricsError}</div>
+              ) : (
+                <>
+                  <p>{previousLyric}</p>
+                  <strong>{activeLyric || 'Instrumental'}</strong>
+                  <p>{nextLyric}</p>
+                </>
+              )}
+            </div>
+            <div className="activity-karaoke-progress">
+              <span><i style={{ width: `${percent}%` }} /></span>
+              <time>{formatMs(position)} / {formatMs(currentDuration)}</time>
+            </div>
+          </section>
+        ) : (
+        <section className={`activity-player-stage ${status.paused ? 'is-paused' : 'is-playing'}`}>
+          <div className="activity-track-art">
+            <ActivityArtwork src={status.currentTrack?.artwork} large />
+            <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />
+          </div>
+
+          <div className="activity-player-main">
+            <div className="activity-track-copy">
+              <div className="activity-mini-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{status.paused ? 'Paused' : 'Playing'}</span></div>
+              <div className="activity-playback-state">
+                <span className={status.paused ? 'paused' : ''}>{status.connected ? (status.paused ? 'Paused' : 'Now playing') : 'Player idle'}</span>
+                {status.autoplay && <span>Autoplay</span>}
+              </div>
+              <h1>
+                {currentTrackLink ? (
+                  <a href={currentTrackLink} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); openExternalUrl(currentTrackLink); }}>
+                    {status.currentTrack?.title}
+                  </a>
+                ) : status.currentTrack?.title || 'Nothing is playing'}
+              </h1>
+              <p>{status.currentTrack?.author || 'Open Add music to start playback.'}</p>
+              {hasTrack && <small className="activity-track-requester">Requested by <strong>{status.currentTrack?.requester || 'Unknown'}</strong></small>}
+              {hasTrack && (
+                <div className="activity-mini-progress" aria-hidden="true">
+                  <span><i style={{ width: `${percent}%` }} /></span>
+                  <time>{formatMs(position)} / {formatMs(currentDuration)}</time>
+                </div>
+              )}
+              {hasTrack && (
+                <>
+                  <div
+                    className="activity-seek"
+                    onPointerMove={(event) => {
+                      if (!canDj || !currentDuration) return;
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const previewPercent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+                      setSeekPreview({ position: previewPercent * currentDuration, percent: previewPercent * 100 });
+                    }}
+                    onPointerLeave={() => setSeekPreview(null)}
+                  >
+                    {seekPreview && canDj && (
+                      <output className="activity-seek-preview" style={{ '--seek-preview': `${seekPreview.percent}%` } as CSSProperties}>
+                        {formatMs(seekPreview.position)}
+                      </output>
+                    )}
+                    <input
+                      className="activity-range"
+                      type="range"
+                      min={0}
+                      max={currentDuration || 1}
+                      value={Math.min(position, currentDuration || 1)}
+                      disabled={!canDj}
+                      onChange={(event) => setClockPosition(Number(event.target.value))}
+                      onMouseUp={(event) => playerAction('seek', { position: Number(event.currentTarget.value) })}
+                      onTouchEnd={(event) => playerAction('seek', { position: Number(event.currentTarget.value) })}
+                      style={{ '--range-progress': `${percent}%` } as CSSProperties}
+                      aria-label="Track position"
+                    />
+                  </div>
+                  <div className="activity-time-row"><span>{formatMs(position)}</span><span>{formatMs(currentDuration)}</span></div>
+                </>
+              )}
+            </div>
+
+            <div className="activity-controls-panel">
+              <div className="activity-primary-controls">
+                <ControlButton label="Previous" disabled={!canDj || !hasTrack} onClick={() => playerAction('back')}><SkipBack size={18} /></ControlButton>
+                <ControlButton label={status.paused ? 'Resume' : 'Pause'} primary disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => playerAction('toggle')}>
+                  {actionBusy === 'toggle' ? <ActivitySpinner /> : status.paused ? <Play size={20} /> : <Pause size={20} />}
+                </ControlButton>
+                <ControlButton label="Skip" disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => playerAction('skip')}><SkipForward size={18} /></ControlButton>
+                <ControlButton label="Stop" disabled={!canDj || !hasTrack} onClick={() => playerAction('stop')}><Square size={16} /></ControlButton>
+              </div>
+              <div className="activity-secondary-controls">
+                <ControlButton label="Shuffle" disabled={!canDj || !queue?.total} onClick={() => playerAction('shuffle')}><Shuffle size={16} /></ControlButton>
+                <ControlButton label={`Loop ${status.repeatMode}`} disabled={!canDj || !hasTrack} onClick={() => playerAction('loop')}><Repeat size={16} /></ControlButton>
+                <label className="activity-volume">
+                  <Volume2 size={16} />
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={status.volume}
+                    disabled={!canDj || !status.connected}
+                    onChange={(event) => setStatus((current) => ({ ...current, volume: Number(event.target.value) }))}
+                    onMouseUp={(event) => playerAction('volume', { volume: Number(event.currentTarget.value) })}
+                    onTouchEnd={(event) => playerAction('volume', { volume: Number(event.currentTarget.value) })}
+                    style={{ '--range-progress': `${status.volume}%` } as CSSProperties}
+                    aria-label="Volume"
+                  />
+                  <span>{status.volume}%</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+        )}
+
+        <nav className="activity-panel-nav" aria-label="Player panels">
+          <button type="button" className={activePanel === 'queue' ? 'active' : ''} onClick={() => togglePanel('queue')}>
+            <ListMusic size={18} /><span>Queue</span><em>{queue?.total || 0}</em>
+          </button>
+          <button type="button" className={activePanel === 'search' ? 'active' : ''} disabled={!canDj} onClick={() => togglePanel('search')}>
+            <Search size={18} /><span>Add music</span>
+          </button>
+          <button type="button" className={activePanel === 'lyrics' ? 'active' : ''} disabled={!hasTrack} onClick={() => togglePanel('lyrics')}>
+            <BookOpenText size={18} /><span>Lyrics</span>
+          </button>
+        </nav>
+
+        {activePanel && (
+          <>
+            <button type="button" className={`activity-drawer-backdrop ${drawerClosing ? 'is-closing' : ''}`} onClick={closePanel} aria-label="Close panel" />
+            <aside className={`activity-drawer ${drawerClosing ? 'is-closing' : ''}`} aria-label={`${activePanel} panel`}>
+              <div className="activity-drawer-header">
+                <div>
+                  <strong>{activePanel === 'queue' ? 'Queue' : activePanel === 'search' ? 'Add music' : 'Live lyrics'}</strong>
+                  <span>
+                    {activePanel === 'queue'
+                      ? `${queue?.total || 0} tracks - autoplay ${status.autoplay ? 'on' : 'off'}`
+                      : activePanel === 'search'
+                        ? 'Search or upload audio'
+                        : status.currentTrack?.title || 'Current track'}
+                  </span>
+                </div>
+                <button type="button" onClick={closePanel} aria-label="Close panel"><X size={18} /></button>
+              </div>
+
+              <div className="activity-drawer-body">
+                {activePanel === 'queue' && (
+                  <div className="activity-queue-list">
+                    <div className="activity-queue-state"><ActivityIcon size={15} /> Autoplay {status.autoplay ? 'on' : 'off'}</div>
+                    {!queue?.tracks.length ? (
+                      <div className="activity-empty"><Disc3 size={20} /><span>Queue is empty</span></div>
+                    ) : queue.tracks.map((track, index) => (
+                      <div
+                        className={`activity-queue-row ${dropIndex === index ? 'drop-target' : ''}`}
+                        key={`${track.uri}-${index}`}
+                        draggable={canDj}
+                        onDragStart={() => { setDragIndex(index); setDropIndex(index); }}
+                        onDragOver={(event) => { if (canDj) { event.preventDefault(); setDropIndex(index); } }}
+                        onDrop={() => handleQueueDrop(index)}
+                        onDragEnd={() => { setDragIndex(null); setDropIndex(null); }}
+                      >
+                        <GripVertical size={15} className="activity-drag-icon" />
+                        <div className="activity-queue-index">{index + 1}</div>
+                        <ActivityArtwork src={track.artwork} />
+                        <div className="activity-queue-copy"><strong>{track.title}</strong><span>{track.author} - {track.requester || 'Unknown requester'}</span></div>
+                        <time>{formatMs(track.duration)}</time>
+                        <button type="button" className="activity-queue-remove" disabled={!canDj} onClick={(event) => { event.stopPropagation(); handleQueueRemove(index); }} aria-label={`Remove ${track.title}`} title="Remove from queue"><Trash2 size={14} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {activePanel === 'search' && (
+                  <div className="activity-search-panel">
+                    <div className="activity-search-box">
+                      <Search size={18} />
+                      <input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        onKeyDown={(event) => { if (event.key === 'Enter') handleSearch(); }}
+                        placeholder="Search YouTube or paste a link"
+                        aria-label="Search for a track"
+                      />
+                      <button type="button" onClick={() => handleSearch()} disabled={searching || !searchQuery.trim()} aria-label="Search">
+                        {searching ? <ActivitySpinner /> : <ChevronDown size={17} className="activity-search-arrow" />}
+                      </button>
+                    </div>
+                    <div className="activity-upload-row">
+                      <input type="file" accept=".mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.webm,audio/*" className="sr-only" id="activity-upload" disabled={!canDj} onChange={handleUploadSelection} />
+                      <label htmlFor="activity-upload" className={`activity-upload-picker ${!canDj ? 'disabled' : ''}`}><Upload size={15} /> Choose audio</label>
+                      {uploadFile && (
+                        <>
+                          <span className="activity-upload-name" title={uploadFile.name}>{uploadFile.name}</span>
+                          <button type="button" className="activity-upload-submit" disabled={uploading || !canDj} onClick={handleUpload}>
+                            {uploading ? <ActivitySpinner /> : <FileAudio size={15} />} {uploading ? 'Uploading' : 'Queue'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {searchResults.length > 0 && (
+                      <div className="activity-search-results">
+                        {searchResults.map((track, index) => (
+                          <div key={`${track.uri}-${index}`} className="activity-search-result">
+                            <ActivityArtwork src={track.artwork} />
+                            <span><strong>{track.title}</strong><small>{track.author} - {formatMs(track.duration)}</small></span>
+                            <div className="activity-search-actions">
+                              {hasTrack && (
+                                <button type="button" disabled={!canDj || Boolean(actionBusy)} onClick={() => playSearchResult(track, 'now')} title="Play now" aria-label={`Play ${track.title} now`}><Play size={15} /></button>
+                              )}
+                              <button type="button" disabled={!canDj || Boolean(actionBusy)} onClick={() => playSearchResult(track, 'queue')} title={hasTrack ? 'Add to queue' : 'Play'} aria-label={hasTrack ? `Add ${track.title} to queue` : `Play ${track.title}`}>
+                                {hasTrack ? <ListPlus size={15} /> : <Play size={15} />}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activePanel === 'lyrics' && (
+                  <div className="activity-lyrics-panel">
+                    <div className="activity-lyrics-actions">
+                      <button
+                        type="button"
+                        className={`activity-lyrics-refresh ${lyricsSyncEnabled ? 'active' : ''}`}
+                        onClick={() => setLyricsSyncEnabled((enabled) => !enabled)}
+                        disabled={lyricsLoading || syncedLyrics.length === 0}
+                      >
+                        <AudioLines size={15} /> {lyricsSyncEnabled ? 'Live sync on' : 'Live sync'}
+                      </button>
+                      <button
+                        type="button"
+                        className={`activity-lyrics-refresh ${karaokeEnabled ? 'active' : ''}`}
+                        onClick={() => {
+                          const nextEnabled = !karaokeEnabled;
+                          setLyricsSyncEnabled(nextEnabled);
+                          setKaraokeEnabled(nextEnabled);
+                          closePanel();
+                        }}
+                        disabled={lyricsLoading || syncedLyrics.length === 0}
+                      >
+                        <Mic2 size={15} /> {karaokeEnabled ? 'Karaoke on' : 'Karaoke'}
+                      </button>
+                      <button type="button" className="activity-lyrics-refresh" onClick={loadLyrics} disabled={lyricsLoading}>{lyricsLoading ? <ActivitySpinner /> : 'Refresh'}</button>
+                    </div>
+                    {lyricsLoading ? (
+                      <div className="activity-empty"><ActivitySpinner /><span>Loading lyrics</span></div>
+                    ) : lyricsError ? (
+                      <div className="activity-lyrics-error">
+                        <span><BookOpenText size={20} /></span>
+                        <strong>Lyrics unavailable</strong>
+                        <p>{lyricsError}</p>
+                      </div>
+                    ) : lyricsSyncEnabled && syncedLyrics.length ? (
+                      <div className="activity-lyrics-list" ref={lyricsListRef} aria-live="polite">
+                        {syncedLyrics.map((line, index) => (
+                          <p
+                            key={`${line.time}-${index}`}
+                            ref={index === activeLyricIndex ? activeLyricRef : null}
+                            className={index === activeLyricIndex ? 'active' : ''}
+                          >
+                            {line.text}
+                          </p>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="activity-lyrics-plain">
+                        {lyrics?.plainLyrics || syncedLyrics.map((line) => line.text).join('\n') || 'No lyrics available for this track.'}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </aside>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function ControlButton({
+  label,
+  disabled,
+  primary,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  primary?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={`activity-control-button ${primary ? 'primary' : ''}`}
+      disabled={disabled}
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+    >
+      {children}
+      <span>{label}</span>
+    </button>
+  );
+}

@@ -7,18 +7,30 @@ const path = require('path');
 const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
 const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
-const { setAutoplay, resetSeed, recordAutoplaySkip } = require('./music/autoplay');
+const { setAutoplay, resetSeed, recordAutoplaySkip, clearAutoplayState } = require('./music/autoplay');
 const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('./music/voiceStatus');
 const { createFileSessionStore } = require('./state/sessionStore');
-const { resolveDashboardCapabilities } = require('./dashboard/access');
+const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
 const { handleSkipRequest } = require('./music/skipManager');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const SCOPES = ['identify', 'guilds'].join(' ');
+const activityAuthCache = new Map();
+const ACTIVITY_ARTWORK_MAX_BYTES = 6 * 1024 * 1024;
+const ACTIVITY_ARTWORK_HOSTS = [
+  'i.ytimg.com',
+  'img.youtube.com',
+  'yt3.ggpht.com',
+  'i.scdn.co',
+  'scdn.co',
+  'sndcdn.com',
+  'cdn.discordapp.com',
+  'media.discordapp.net',
+];
 
 const FILTER_PRESET_CHOICES = [
   { value: 'bassboost', label: 'Bassboost', description: 'Deep, punchy bass boost.' },
@@ -129,6 +141,100 @@ function createApiServer(client) {
   );
   attachControlMessageCacheListeners(client);
 
+  app.get('/api/activity/config', (_req, res) => {
+    res.json({
+      enabled: process.env.ACTIVITY_ENABLED !== 'false',
+      clientId: process.env.DISCORD_CLIENT_ID || null,
+    });
+  });
+
+  app.get('/api/activity/artwork', async (req, res) => {
+    const rawUrl = typeof req.query.url === 'string' ? req.query.url : '';
+    let artworkUrl;
+
+    try {
+      artworkUrl = new URL(rawUrl);
+    } catch {
+      return res.status(400).json({ error: 'Invalid artwork URL' });
+    }
+
+    if (artworkUrl.protocol !== 'https:' || !isAllowedActivityArtworkHost(artworkUrl.hostname)) {
+      return res.status(403).json({ error: 'Artwork host is not allowed' });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const response = await fetch(artworkUrl, {
+        signal: controller.signal,
+        redirect: 'error',
+        headers: { 'User-Agent': 'Bread Discord Activity' },
+      });
+      const contentType = response.headers.get('content-type') || '';
+      const contentLength = Number(response.headers.get('content-length') || 0);
+
+      if (!response.ok || !contentType.startsWith('image/')) {
+        return res.status(404).json({ error: 'Artwork unavailable' });
+      }
+      if (contentLength > ACTIVITY_ARTWORK_MAX_BYTES) {
+        return res.status(413).json({ error: 'Artwork is too large' });
+      }
+
+      const payload = Buffer.from(await response.arrayBuffer());
+      if (payload.length > ACTIVITY_ARTWORK_MAX_BYTES) {
+        return res.status(413).json({ error: 'Artwork is too large' });
+      }
+
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      res.setHeader('Content-Type', contentType);
+      return res.send(payload);
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        console.warn('Activity artwork proxy failed:', error.message);
+      }
+      return res.status(502).json({ error: 'Could not load artwork' });
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  app.post('/api/activity/token', async (req, res) => {
+    if (process.env.ACTIVITY_ENABLED === 'false') {
+      return res.status(404).json({ error: 'Activity is disabled' });
+    }
+
+    const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+    if (!code || code.length > 512) {
+      return res.status(400).json({ error: 'Activity authorization code is required' });
+    }
+
+    try {
+      const tokenRes = await fetch(`${DISCORD_API}/oauth2/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: process.env.DISCORD_CLIENT_ID,
+          client_secret: process.env.DISCORD_CLIENT_SECRET,
+          grant_type: 'authorization_code',
+          code,
+        }),
+      });
+      const payload = await tokenRes.json().catch(() => ({}));
+      if (!tokenRes.ok || !payload.access_token) {
+        return res.status(401).json({ error: 'Activity authorization failed' });
+      }
+
+      return res.json({
+        access_token: payload.access_token,
+        expires_in: payload.expires_in || 604800,
+      });
+    } catch (error) {
+      console.error('Activity token exchange failed:', error.message);
+      return res.status(502).json({ error: 'Could not reach Discord authorization service' });
+    }
+  });
+
   app.get('/api/uploads/:guildId/:fileId/:fileName', async (req, res) => {
     const { guildId, fileId, fileName } = req.params;
     if (!isSafeId(guildId) || !isSafeId(fileId)) {
@@ -164,9 +270,19 @@ function createApiServer(client) {
     });
   }, 60 * 60 * 1000);
 
-  function requireAuth(req, res, next) {
+  async function requireAuth(req, res, next) {
     if (!req.session?.user) {
-      return res.status(401).json({ error: 'Not authenticated' });
+      const activityToken = readBearerToken(req);
+      if (!activityToken) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
+
+      const activityUser = await resolveActivityUser(activityToken);
+      if (!activityUser) {
+        return res.status(401).json({ error: 'Activity authentication expired' });
+      }
+
+      req.activityUser = activityUser;
     }
     next();
   }
@@ -192,10 +308,16 @@ function createApiServer(client) {
       return null;
     }
 
-    let member = guild.members.cache.get(req.session.user.id);
+    const requestUser = getRequestUser(req);
+    if (!requestUser?.id) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return null;
+    }
+
+    let member = guild.members.cache.get(requestUser.id);
     if (!member) {
       try {
-        member = await guild.members.fetch(req.session.user.id);
+        member = await guild.members.fetch(requestUser.id);
       } catch {
         res.status(403).json({ error: 'You are not in this guild' });
         return null;
@@ -214,6 +336,19 @@ function createApiServer(client) {
   async function requireGuildAccess(req, res, next) {
     const access = await loadGuildAccess(req, res);
     if (!access) return;
+    if (!access.capabilities.canAccess) {
+      return res.status(403).json({ error: 'Dashboard access is not enabled for your role' });
+    }
+    next();
+  }
+
+  async function requirePlayerAccess(req, res, next) {
+    const access = await loadGuildAccess(req, res);
+    if (!access) return;
+    if (req.activityUser) {
+      req.dashboardCapabilities = resolveActivityCapabilities(access.member, access.config);
+      return next();
+    }
     if (!access.capabilities.canAccess) {
       return res.status(403).json({ error: 'Dashboard access is not enabled for your role' });
     }
@@ -239,6 +374,8 @@ function createApiServer(client) {
   }
 
   function requireTrustedOrigin(req, res, next) {
+    if (req.activityUser) return next();
+
     const origin = req.get('origin');
     const referer = req.get('referer');
     const requestOrigin = normalizeOrigin(origin) || normalizeOrigin(referer);
@@ -251,7 +388,7 @@ function createApiServer(client) {
   }
 
   function requireDashboardActionRateLimit(req, res, next) {
-    const userId = req.session?.user?.id;
+    const userId = getRequestUser(req)?.id;
     const guildId = req.params.guildId;
     if (!userId || !guildId) return next();
 
@@ -453,8 +590,8 @@ function createApiServer(client) {
           };
 
           if (guild) {
-            let member = guild.members.cache.get(req.session.user.id);
-            if (!member) member = await guild.members.fetch(req.session.user.id).catch(() => null);
+            let member = guild.members.cache.get(getRequestUser(req).id);
+            if (!member) member = await guild.members.fetch(getRequestUser(req).id).catch(() => null);
             if (member) capabilities = resolveDashboardCapabilities(member, getConfig(g.id));
           }
 
@@ -510,7 +647,7 @@ function createApiServer(client) {
 
   // ---- Guild Config ----
 
-  app.get('/api/guilds/:guildId/access', requireAuth, requireGuildAccess, (req, res) => {
+  app.get('/api/guilds/:guildId/access', requireAuth, requirePlayerAccess, (req, res) => {
     res.json(req.dashboardCapabilities);
   });
 
@@ -628,11 +765,11 @@ function createApiServer(client) {
 
   // ---- Guild Status / Player ----
 
-  app.get('/api/guilds/:guildId/status', requireAuth, requireGuildAccess, (req, res) => {
+  app.get('/api/guilds/:guildId/status', requireAuth, requirePlayerAccess, (req, res) => {
     res.json(buildPlayerStatusSnapshot(client, req.params.guildId));
   });
 
-  app.get('/api/guilds/:guildId/player/events', requireAuth, requireGuildAccess, (req, res) => {
+  app.get('/api/guilds/:guildId/player/events', requireAuth, requirePlayerAccess, (req, res) => {
     const guildId = req.params.guildId;
     const page = parseQueuePage(req.query.page);
 
@@ -667,7 +804,7 @@ function createApiServer(client) {
     });
   });
 
-  app.get('/api/guilds/:guildId/player/filters', requireAuth, requireGuildAccess, (_req, res) => {
+  app.get('/api/guilds/:guildId/player/filters', requireAuth, requirePlayerAccess, (_req, res) => {
     res.json({ presets: FILTER_PRESET_CHOICES });
   });
 
@@ -861,7 +998,7 @@ function createApiServer(client) {
     res.json(getGuildInsights(guildId, { limit, range }));
   });
 
-  app.get('/api/guilds/:guildId/queue', requireAuth, requireGuildAccess, (req, res) => {
+  app.get('/api/guilds/:guildId/queue', requireAuth, requirePlayerAccess, (req, res) => {
     res.json(buildQueueSnapshot(client, req.params.guildId, parseQueuePage(req.query.page)));
   });
 
@@ -872,7 +1009,7 @@ function createApiServer(client) {
     }));
   });
 
-  app.get('/api/guilds/:guildId/lyrics', requireAuth, requireGuildAccess, async (req, res) => {
+  app.get('/api/guilds/:guildId/lyrics', requireAuth, requirePlayerAccess, async (req, res) => {
     try {
       const player = client.lavalink?.players?.get(req.params.guildId);
       const requestedTitle = typeof req.query.title === 'string' ? req.query.title.trim() : '';
@@ -1009,7 +1146,7 @@ function createApiServer(client) {
 
   // ---- Player Controls ----
 
-  app.post('/api/guilds/:guildId/player/:action', requireAuth, requireGuildAccess, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
+  app.post('/api/guilds/:guildId/player/:action', requireAuth, requirePlayerAccess, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
     const guildId = req.params.guildId;
     const action = req.params.action;
     let player = client.lavalink?.players?.get(guildId);
@@ -1020,11 +1157,56 @@ function createApiServer(client) {
       const member = req.guildMember;
       const capabilities = req.dashboardCapabilities;
       const memberVoiceChannelId = member?.voice?.channelId || null;
-      const botVoiceChannelId = guild?.members?.me?.voice?.channelId || player?.voiceChannelId || null;
+      const connectedBotVoiceChannelId = guild?.members?.me?.voice?.channelId || null;
+      const botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
       const privileged = capabilities.accessLevel === 'admin' || capabilities.accessLevel === 'dj';
       if (!capabilities.canControlPlayer) {
         return res.status(403).json({ error: 'Player control is not enabled for your role' });
       }
+
+      if (action === 'join') {
+        const activityChannelId = req.body?.channelId || null;
+        if (!memberVoiceChannelId || activityChannelId !== memberVoiceChannelId) {
+          return res.status(403).json({ error: 'Open the Activity from the voice channel you are currently in' });
+        }
+
+        const channel = guild?.channels?.cache?.get(memberVoiceChannelId);
+        if (!channel?.isVoiceBased()) {
+          return res.status(400).json({ error: 'The Activity channel is not a voice channel' });
+        }
+        if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== memberVoiceChannelId) {
+          return res.status(409).json({ error: 'Bread is already active in another voice channel' });
+        }
+
+        const preferredTextChannelId = resolvePlayerTextChannelId(
+          guild,
+          guildConfig.playerTextChannelId,
+          player?.textChannelId ?? null,
+        );
+        if (!player) {
+          player = client.lavalink.createPlayer({
+            guildId,
+            voiceChannelId: memberVoiceChannelId,
+            textChannelId: preferredTextChannelId,
+            selfDeaf: true,
+            volume: guildConfig.defaultVolume ?? 60,
+          });
+          await player.node.updatePlayer({
+            guildId,
+            playerOptions: { track: { encoded: null }, paused: false },
+          });
+          player.queue.current = null;
+          player.playing = false;
+          player.paused = false;
+        } else {
+          player.voiceChannelId = memberVoiceChannelId;
+          player.textChannelId = preferredTextChannelId;
+        }
+
+        if (!connectedBotVoiceChannelId) await player.connect();
+        return res.json({ success: true, channelId: memberVoiceChannelId, channelName: channel.name });
+      }
+
       if (!privileged && (!memberVoiceChannelId || memberVoiceChannelId !== botVoiceChannelId)) {
         return res.status(403).json({ error: 'Join the same voice channel as the bot to control playback' });
       }
@@ -1040,6 +1222,7 @@ function createApiServer(client) {
         'remove',
         'seek',
         'move',
+        'playnow',
       ]);
       if (!privileged && djOnlyActions.has(action)) {
         return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
@@ -1101,7 +1284,7 @@ function createApiServer(client) {
               const result = await handleSkipRequest({
                 member,
                 guild,
-                user: { id: req.session.user.id },
+                user: { id: getRequestUser(req).id },
               }, player, guildConfig, client);
               return res.json({ success: true, skipped: result.skipped, message: result.message });
             }
@@ -1110,6 +1293,7 @@ function createApiServer(client) {
 
         case 'stop':
           if (player) {
+            clearAutoplayState(guildId);
             await player.stopPlaying(true);
             player.queue.tracks.splice(0, player.queue.tracks.length);
             await player.destroy('Stopped via dashboard', true);
@@ -1201,6 +1385,7 @@ function createApiServer(client) {
             });
           }
           const tracks = (result?.tracks || []).slice(0, 10).map((t) => ({
+            encoded: t.encoded,
             title: t.info.title,
             author: t.info.author,
             uri: t.info.uri,
@@ -1210,21 +1395,24 @@ function createApiServer(client) {
           return res.json({ success: true, tracks });
         }
 
+        case 'playnow':
         case 'play': {
           const { encoded, query } = req.body;
-          const startedFromIdle = !player.playing && !player.paused;
+          const playImmediately = action === 'playnow';
           const requester = getDashboardRequester(req, client);
 
           if (encoded) {
             const track = { encoded, info: {}, requester };
-            await addManualTrackToQueue(player, track);
-            if (startedFromIdle) {
+            await addRequestedTrackToQueue(player, track, playImmediately);
+            if (playImmediately && player.queue.current) {
+              await player.skip();
+            } else if (!player.queue.current || (!player.playing && !player.paused)) {
               await player.play();
-              await client.musicUI?.refresh(player).catch(() => {});
             }
+            await client.musicUI?.refresh(player).catch(() => {});
             const { savePlayerState } = require('./state/queueStore');
             await savePlayerState(player).catch(() => {});
-            return res.json({ success: true });
+            return res.json({ success: true, mode: playImmediately ? 'now' : 'queue' });
           }
 
           if (query) {
@@ -1261,14 +1449,16 @@ function createApiServer(client) {
                 sourceName: track.info.sourceName,
               });
             }
-            await addManualTrackToQueue(player, track);
-            if (startedFromIdle) {
+            await addRequestedTrackToQueue(player, track, playImmediately);
+            if (playImmediately && player.queue.current) {
+              await player.skip();
+            } else if (!player.queue.current || (!player.playing && !player.paused)) {
               await player.play();
-              await client.musicUI?.refresh(player).catch(() => {});
             }
+            await client.musicUI?.refresh(player).catch(() => {});
             const { savePlayerState } = require('./state/queueStore');
             await savePlayerState(player).catch(() => {});
-            return res.json({ success: true, title: track.info.title });
+            return res.json({ success: true, title: track.info.title, mode: playImmediately ? 'now' : 'queue' });
           }
 
           return res.status(400).json({ error: 'Provide encoded track or query' });
@@ -1534,6 +1724,7 @@ function createApiServer(client) {
       } else if (type === 'leave') {
         const player = client.lavalink.players.get(guild.id);
         if (player) {
+           clearAutoplayState(guild.id);
            await player.destroy('Remote leave', true);
         } else {
            if (guild.members.me?.voice?.disconnect) {
@@ -1597,11 +1788,24 @@ function createApiServer(client) {
 
   app.get('/api/invite', (_req, res) => {
     const clientId = process.env.DISCORD_CLIENT_ID;
-    const permissions = 3145728 + 36700160;
+    const permissions = [
+      1n << 10n, // View channels
+      1n << 11n, // Send messages
+      1n << 14n, // Embed links
+      1n << 15n, // Attach files
+      1n << 16n, // Read message history
+      1n << 17n, // Mention everyone
+      1n << 18n, // Use external emojis
+      1n << 20n, // Connect
+      1n << 21n, // Speak
+      1n << 25n, // Use voice activity
+      1n << 48n, // Set voice channel status
+    ].reduce((combined, permission) => combined | permission, 0n);
     const params = new URLSearchParams({
       client_id: clientId,
       permissions: String(permissions),
       scope: 'bot applications.commands',
+      integration_type: '0',
     });
     res.redirect(`https://discord.com/oauth2/authorize?${params}`);
   });
@@ -1748,6 +1952,14 @@ async function addManualTrackToQueue(player, track) {
   }
 
   await player.queue.add(track);
+}
+
+async function addRequestedTrackToQueue(player, track, playImmediately) {
+  if (playImmediately && player.queue.current) {
+    player.queue.tracks.unshift(track);
+    return;
+  }
+  await addManualTrackToQueue(player, track);
 }
 
 function sanitizeUploadName(fileName) {
@@ -1940,6 +2152,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
       duration: info.duration || 0,
       position: player.position || 0,
       artwork: extractArtwork(info),
+      requester: formatRequester(player.queue.current.requester),
     };
   }
 
@@ -2048,13 +2261,18 @@ function writeSseEvent(res, event, data) {
 function extractArtwork(info) {
   if (info.artworkUrl) return info.artworkUrl;
   if (info.uri && (info.uri.includes('youtube.com') || info.uri.includes('youtu.be')) && info.identifier) {
-    return `https://img.youtube.com/vi/${info.identifier}/mqdefault.jpg`;
+    return `https://i.ytimg.com/vi/${info.identifier}/mqdefault.jpg`;
   }
   return null;
 }
 
+function isAllowedActivityArtworkHost(hostname) {
+  const normalized = String(hostname || '').toLowerCase();
+  return ACTIVITY_ARTWORK_HOSTS.some((allowed) => normalized === allowed || normalized.endsWith(`.${allowed}`));
+}
+
 function getDashboardRequester(req, client) {
-  const user = req.session?.user;
+  const user = getRequestUser(req);
   if (user?.id) {
     return {
       id: user.id,
@@ -2066,6 +2284,48 @@ function getDashboardRequester(req, client) {
   }
 
   return client.user ?? { id: '0', username: 'Bot', bot: true };
+}
+
+function getRequestUser(req) {
+  return req.activityUser || req.session?.user || null;
+}
+
+function readBearerToken(req) {
+  const header = req.get('authorization') || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+}
+
+async function resolveActivityUser(accessToken) {
+  const cached = activityAuthCache.get(accessToken);
+  if (cached && cached.expiresAt > Date.now()) return cached.user;
+  if (cached) activityAuthCache.delete(accessToken);
+
+  try {
+    const response = await fetch(`${DISCORD_API}/users/@me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) return null;
+
+    const profile = await response.json();
+    if (!profile?.id) return null;
+
+    const user = {
+      id: profile.id,
+      username: profile.username,
+      discriminator: profile.discriminator,
+      avatar: profile.avatar,
+      global_name: profile.global_name || null,
+      accessToken,
+    };
+    activityAuthCache.set(accessToken, {
+      user,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+    return user;
+  } catch {
+    return null;
+  }
 }
 
 function getUsableNode(client) {

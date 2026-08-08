@@ -9,6 +9,7 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@discord/embedded-app-sdk": "^2.5.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.511.0",
     "next": "^15.3.3",

@@ -89,15 +89,24 @@ const activityRotation = [
   { type: ActivityType.Watching,  name: "/play • soundcheck" },
   { type: ActivityType.Playing,   name: "/play • beats" },
 
+  { type: ActivityType.Watching,  name: "/help • all commands" },
   { type: ActivityType.Listening, name: "/play • your excuses" },
   { type: ActivityType.Playing,   name: "/play • pretending to be a DJ" },
   { type: ActivityType.Watching,  name: "/play • the queue that never ends" },
+  { type: ActivityType.Playing,   name: "/dashboard • live controls" },
 
   { type: ActivityType.Listening, name: "/play • memes being uploaded" },
+  { type: ActivityType.Watching,  name: "/dashboard • live player" },
   { type: ActivityType.Playing,   name: "/play • teaching cats to DJ" },
   { type: ActivityType.Watching,  name: "/play • debugging in production" },
+  { type: ActivityType.Listening, name: "/help • need a hand?" },
+  { type: ActivityType.Watching,  name: "/dashboard • your queue" },
 
   { type: ActivityType.Listening, name: "/play • buffering... forever" },
+  { type: ActivityType.Playing,   name: "/help • no manual required" },
+  { type: ActivityType.Watching,  name: "/dashboard • take the wheel" },
+  { type: ActivityType.Listening, name: "/help • commands, no ceremony" },
+  { type: ActivityType.Playing,   name: "/play • finding your next song" },
 ];
 
 let activityIntervalId;
@@ -820,6 +829,7 @@ async function stopPlayback(interaction) {
   const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
   assertDJ(interaction, config);
   await interaction.deferUpdate();
+  clearAutoplayState(player.guildId);
   await player.stopPlaying(true);
   player.queue.tracks.splice(0, player.queue.tracks.length);
   await player.destroy('Stopped via UI', true);

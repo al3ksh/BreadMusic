@@ -1,20 +1,29 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 
 const CONSENT_KEY = 'bread_cookie_notice_v1';
 
 export function CookieNotice() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const isActivityFrame = Boolean(params.get('frame_id') && params.get('instance_id') && params.get('platform'));
+    if (isActivityFrame || pathname?.startsWith('/activity')) {
+      setOpen(false);
+      return;
+    }
+
     try {
       const consent = window.localStorage.getItem(CONSENT_KEY);
       setOpen(!consent);
     } catch {
       setOpen(true);
     }
-  }, []);
+  }, [pathname]);
 
   const accept = () => {
     try {
@@ -25,7 +34,7 @@ export function CookieNotice() {
     setOpen(false);
   };
 
-  if (!open) return null;
+  if (!open || pathname?.startsWith('/activity')) return null;
 
   return (
     <div className="fixed left-4 bottom-4 z-[210] w-[min(92vw,360px)] rounded-lg border border-border bg-bg-card/95 backdrop-blur-md p-3 shadow-2xl animate-slide-up">

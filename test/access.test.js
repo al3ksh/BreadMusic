@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { resolveDashboardCapabilities } = require('../src/dashboard/access');
+const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('../src/dashboard/access');
 
 function memberWith({ permissions = [], roles = [] } = {}) {
   return {
@@ -46,4 +46,24 @@ test('member access remains read/control only', () => {
   assert.equal(access.canUpload, false);
   assert.equal(access.canManageConfig, false);
   assert.equal(access.canUseRemoteControl, false);
+});
+
+test('activity is viewable without granting dashboard player controls', () => {
+  const access = resolveActivityCapabilities(memberWith(), {
+    dashboardAccess: 'dj',
+    djRoleId: 'dj-role',
+  });
+  assert.equal(access.canAccess, true);
+  assert.equal(access.canView, true);
+  assert.equal(access.canControlPlayer, false);
+  assert.equal(access.canUpload, false);
+});
+
+test('activity respects all-members player access', () => {
+  const access = resolveActivityCapabilities(memberWith(), {
+    dashboardAccess: 'members',
+    djRoleId: 'dj-role',
+  });
+  assert.equal(access.canAccess, true);
+  assert.equal(access.canControlPlayer, true);
 });

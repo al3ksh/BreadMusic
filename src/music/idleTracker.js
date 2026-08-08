@@ -1,5 +1,6 @@
 const { clearStoredQueue } = require('../state/queueStore');
 const { getConfig } = require('../state/guildConfig');
+const { clearAutoplayState } = require('./autoplay');
 
 const emptyChannelTimers = new Map();
 const idleTimers = new Map();
@@ -34,6 +35,7 @@ function scheduleIdleLeave(player, client) {
       if (latestPlayer.queue.current || latestPlayer.playing) return;
       const latestConfig = getConfig(guildId);
       if (latestConfig.stayInChannel) return;
+      clearAutoplayState(guildId);
       await latestPlayer.destroy('idle-timeout', true);
     } catch (error) {
       console.error('Idle leave failed:', error);
@@ -72,6 +74,7 @@ function scheduleEmptyChannelLeave(player, client) {
         latestPlayer.queue.tracks.splice(0, latestPlayer.queue.tracks.length);
         clearStoredQueue(guildId);
       }
+      clearAutoplayState(guildId);
       await latestPlayer.destroy('empty-channel', true);
     } catch (error) {
       console.error('Empty channel leave failed:', error);

@@ -134,6 +134,7 @@ export interface PlayerStatus {
     duration: number;
     position: number;
     artwork?: string;
+    requester: string;
   } | null;
   queueLength: number;
   repeatMode: string;

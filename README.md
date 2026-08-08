@@ -1,14 +1,6 @@
 <div align="center">
 
-```text
- ____   ____   _____    _    ____
-| __ ) |  _ \ | ____|  / \  |  _ \
-|  _ \ | |_) ||  _|   / _ \ | | | |
-| |_) ||  _ < | |___ / ___ \| |_| |
-|____/ |_| \_\|_____/_/   \_\____/
-
-             DISCORD MUSIC SYSTEM
-```
+<img src="docs/readme-banner.png" alt="Bread Music banner" width="100%">
 
 Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
 
@@ -83,7 +75,23 @@ Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
 - Stored separately for every Discord server.
 - Includes track metadata, requester, source and autoplay state.
 - Retained for 35 days with a limit of 40,000 events per guild.
-- Survives bot and container restarts through `data/analytics.json`.
+- Survives bot and container restarts through data/analytics.json.
+
+### Discord Activity
+
+- Opens from a voice channel and joins that channel automatically.
+- Shows the live player, queue, artwork, requester, seek position and volume.
+- Provides a compact mini-player with queue, search and lyrics drawers.
+- Searches while typing after a one-second pause; YouTube, Spotify, SoundCloud and other supported URLs can be pasted directly.
+- Separates play-now from add-to-queue actions and supports local audio uploads.
+- Includes synced lyrics, autoscroll and karaoke mode when synchronized lyrics are available.
+- Respects the guild Dashboard Access and DJ role settings. Members without control access can still use the read-only view.
+
+### Playback Feedback
+
+- Playback failures are classified and reported with actionable messages.
+- Voice channel status can show the current track and is configurable per guild.
+- Local uploads are deduplicated and retained according to the upload store policy.
 
 ---
 

@@ -40,10 +40,20 @@ function resolveDashboardCapabilities(member, config) {
   };
 }
 
+function resolveActivityCapabilities(member, config) {
+  const capabilities = resolveDashboardCapabilities(member, config);
+  return {
+    ...capabilities,
+    canAccess: true,
+    canView: true,
+  };
+}
+
 module.exports = {
   DASHBOARD_ACCESS_LEVELS,
   normalizeDashboardAccess,
   isGuildAdmin,
   isGuildDJ,
+  resolveActivityCapabilities,
   resolveDashboardCapabilities,
 };

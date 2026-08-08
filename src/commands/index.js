@@ -59,7 +59,7 @@ const {
 const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
 const { deleteInteractionReply } = require('../utils/interactions');
-const { isAutoplayEnabled, toggleAutoplay, resetSeed } = require('../music/autoplay');
+const { isAutoplayEnabled, toggleAutoplay, resetSeed, clearAutoplayState } = require('../music/autoplay');
 const { classifyPlaybackError, describeSearchFailure } = require('../music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('../music/voiceStatus');
 const { findLyrics, trackToLyricsQuery, LyricsProviderError } = require('../music/lyrics');
@@ -268,7 +268,7 @@ const commands = [
         .setTitle('Bread Dashboard')
         .setColor(BRAND_COLORS.primary)
         .setDescription('Manage playback, queue, lyrics, history, uploads, economy, and server settings from the web dashboard.')
-        .setFooter({ text: 'Only you can see this message.' });
+        .setFooter({ text: 'Dashboard link for this server.' });
 
       if (botAvatar) {
         embed.setThumbnail(botAvatar);
@@ -281,7 +281,7 @@ const commands = [
           .setURL(dashboardUrl),
       );
 
-      await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+      await interaction.reply({ embeds: [embed], components: [row] });
     },
   },
   {
@@ -465,6 +465,7 @@ const commands = [
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       assertDJ(interaction, config);
+      clearAutoplayState(player.guildId);
       await player.stopPlaying(true);
       player.queue.tracks.splice(0, player.queue.tracks.length);
       await player.destroy('Stopped via command', true);
@@ -503,6 +504,7 @@ const commands = [
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction);
       assertDJ(interaction, config);
+      clearAutoplayState(player.guildId);
       await player.destroy('manual-leave', true);
       await interaction.client.musicUI.clear(interaction.guildId);
       await deleteInteractionReply(interaction);
