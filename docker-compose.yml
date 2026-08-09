@@ -53,6 +53,7 @@ services:
       - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS:-}
       - PRIVATE_ACCESS_CONTACT=${PRIVATE_ACCESS_CONTACT:-aleksh8}
       - ACTIVITY_ENABLED=${ACTIVITY_ENABLED:-true}
+      - PLAYER_EMOJI_IDS=${PLAYER_EMOJI_IDS:-}
       - NODE_ENV=production
     ports:
       - "3001:3001"

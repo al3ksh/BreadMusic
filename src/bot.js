@@ -49,6 +49,12 @@ const {
 } = require('./music/voiceStatus');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 const {
+  CLOSE_LYRICS_BUTTON_PREFIX,
+  LyricsUI,
+  LIVE_LYRICS_BUTTON_PREFIX,
+  PAGE_LYRICS_BUTTON_PREFIX,
+} = require('./music/lyricsUi');
+const {
   RPS_BUTTON_PREFIX,
   RPS_CHOICES,
   createChallenge,
@@ -144,6 +150,7 @@ for (const command of commands) {
 }
 
 client.musicUI = new MusicUI(client);
+client.lyricsUI = new LyricsUI(client);
 client.behavior = config.behavior;
 client.guildAccess = config.guildAccess;
 
@@ -235,6 +242,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isButton()) {
+      if (interaction.customId.startsWith(PAGE_LYRICS_BUTTON_PREFIX)) {
+        await client.lyricsUI.changePage(interaction);
+        return;
+      }
+
+      if (interaction.customId.startsWith(CLOSE_LYRICS_BUTTON_PREFIX)) {
+        await client.lyricsUI.close(interaction);
+        return;
+      }
+
+      if (interaction.customId.startsWith(LIVE_LYRICS_BUTTON_PREFIX)) {
+        await client.lyricsUI.toggle(interaction);
+        return;
+      }
+
       if (interaction.customId.startsWith(BUTTON_PREFIX)) {
         await handleMusicButton(interaction);
         return;
@@ -416,6 +438,7 @@ async function handleMusicButton(interaction) {
     [BUTTONS.BACK]: playPrevious,
     [BUTTONS.LOOP]: toggleLoop,
     [BUTTONS.SHUFFLE]: shuffleQueue,
+    [BUTTONS.LYRICS]: showLyrics,
   };
 
   const handler = handlers[action];
@@ -889,6 +912,15 @@ async function shuffleQueue(interaction) {
   await client.musicUI.refresh(player);
 }
 
+async function showLyrics(interaction) {
+  const { player } = await ensurePlayer(interaction, { allowCreate: false });
+  const track = player.queue.current;
+  if (!track) {
+    throw new CommandError('Nothing is playing.');
+  }
+  await client.lyricsUI.send(interaction, player, track);
+}
+
 async function restartCurrent(player) {
   const current = player.queue.current;
   if (!current) return false;
@@ -1090,6 +1122,7 @@ async function gracefulShutdown(signal) {
   for (const guildId of client.musicUI?.messages?.keys() ?? []) {
     await client.musicUI.clear(guildId).catch(() => {});
   }
+  client.lyricsUI?.clearAll();
 
   try {
     client.destroy();

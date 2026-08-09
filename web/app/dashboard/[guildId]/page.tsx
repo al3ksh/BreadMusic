@@ -1568,7 +1568,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
         credentials: 'include',
         headers: {
           'Content-Type': uploadFile.type || 'application/octet-stream',
-          'X-File-Name': uploadFile.name,
+          // HTTP header values are ASCII-only in browsers; keep the original name encoded.
+          'X-File-Name': encodeURIComponent(uploadFile.name),
         },
         body: uploadFile,
       });

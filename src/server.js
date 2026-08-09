@@ -845,7 +845,7 @@ function createApiServer(client) {
           return res.status(400).json({ error: 'Upload body is empty' });
         }
 
-        const originalName = sanitizeUploadName(req.get('x-file-name') || 'upload');
+        const originalName = sanitizeUploadName(decodeUploadHeader(req.get('x-file-name')) || 'upload');
         const ext = path.extname(originalName).toLowerCase();
         const mimeType = String(req.get('content-type') || '').split(';')[0].toLowerCase();
 
@@ -1974,6 +1974,16 @@ function sanitizeUploadName(fileName) {
   const ext = path.extname(normalized);
   const base = path.basename(normalized, ext).slice(0, Math.max(1, 120 - ext.length));
   return `${base || 'upload'}${ext}`;
+}
+
+function decodeUploadHeader(value) {
+  const encoded = String(value || '');
+  if (!encoded) return '';
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return encoded;
+  }
 }
 
 function isAllowedAudioUpload(ext, mimeType) {

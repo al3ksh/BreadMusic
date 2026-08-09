@@ -18,8 +18,8 @@ const features = [
   },
   {
     icon: <Headphones size={22} />,
-    title: 'Web Player',
-    description: 'Control playback, browse queue, and search tracks right from your browser.',
+    title: 'Web Player + Activity',
+    description: 'Control playback from your browser or launch a shared player directly inside a Discord voice channel.',
   },
   {
     icon: <Users size={22} />,

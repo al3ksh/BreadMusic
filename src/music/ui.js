@@ -1,6 +1,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { buildNowPlayingEmbed } = require('./embeds');
 const { buildPlaybackErrorEmbed } = require('./playbackErrors');
+const { buildDashboardUrl } = require('../dashboard/url');
 
 const BUTTON_PREFIX = 'music';
 const PLAYBACK_ERROR_TTL_MS = 30_000;
@@ -11,16 +12,31 @@ const BUTTONS = {
   LOOP: 'loop',
   SHUFFLE: 'shuffle',
   BACK: 'back',
+  LYRICS: 'lyrics',
 };
 
+const applicationEmojiIds = new Map(
+  String(process.env.PLAYER_EMOJI_IDS || '')
+    .split(',')
+    .map((entry) => entry.trim().split(':'))
+    .filter(([name, id]) => name && /^\d{17,20}$/.test(id)),
+);
+
+function playerEmoji(name, fallback) {
+  const id = applicationEmojiIds.get(name);
+  return id ? { name, id } : fallback;
+}
+
 const EMOJI = {
-  PLAY: '\u25B6\uFE0F',
-  PAUSE: '\u23F8\uFE0F',
-  SKIP: '\u23ED\uFE0F',
-  STOP: '\u23F9\uFE0F',
-  PREVIOUS: '\u23EE\uFE0F',
-  LOOP: '\uD83D\uDD01',
-  SHUFFLE: '\uD83D\uDD00',
+  PLAY: playerEmoji('play', '\u25B6\uFE0F'),
+  PAUSE: playerEmoji('pause', '\u23F8\uFE0F'),
+  SKIP: playerEmoji('skip', '\u23ED\uFE0F'),
+  STOP: playerEmoji('stop', '\u23F9\uFE0F'),
+  PREVIOUS: playerEmoji('previous', '\u23EE\uFE0F'),
+  LOOP: playerEmoji('loop', '\uD83D\uDD01'),
+  SHUFFLE: playerEmoji('shuffle', '\uD83D\uDD00'),
+  LYRICS: playerEmoji('lyrics', '\uD83D\uDCD6'),
+  DASHBOARD: playerEmoji('dashboard', '\uD83D\uDDA5\uFE0F'),
 };
 
 class MusicUI {
@@ -39,53 +55,56 @@ class MusicUI {
 
   buildControlRows(player) {
     const disabled = !player.queue.current;
-    const pauseLabel = player.paused ? 'Resume' : 'Pause';
     const pauseEmoji = player.paused ? EMOJI.PLAY : EMOJI.PAUSE;
+    const pauseStyle = player.paused ? ButtonStyle.Success : ButtonStyle.Danger;
     const loopStyle =
       player.repeatMode && player.repeatMode !== 'off'
-        ? ButtonStyle.Success
+        ? ButtonStyle.Primary
         : ButtonStyle.Secondary;
 
     const rowOne = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
+        .setCustomId(this.buildCustomId(BUTTONS.BACK, player.guildId))
+        .setEmoji(EMOJI.PREVIOUS)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(disabled),
+      new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.PLAY_PAUSE, player.guildId))
         .setEmoji(pauseEmoji)
-        .setLabel(pauseLabel)
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(pauseStyle)
         .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.SKIP, player.guildId))
         .setEmoji(EMOJI.SKIP)
-        .setLabel('Skip')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.STOP, player.guildId))
         .setEmoji(EMOJI.STOP)
-        .setLabel('Stop')
         .setStyle(ButtonStyle.Danger)
         .setDisabled(disabled),
     );
 
     const rowTwo = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(this.buildCustomId(BUTTONS.BACK, player.guildId))
-        .setEmoji(EMOJI.PREVIOUS)
-        .setLabel('Previous')
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(disabled),
-      new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.LOOP, player.guildId))
         .setEmoji(EMOJI.LOOP)
-        .setLabel('Loop')
         .setStyle(loopStyle)
         .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.SHUFFLE, player.guildId))
         .setEmoji(EMOJI.SHUFFLE)
-        .setLabel('Shuffle')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(disabled || player.queue.tracks.length === 0),
+      new ButtonBuilder()
+        .setCustomId(this.buildCustomId(BUTTONS.LYRICS, player.guildId))
+        .setEmoji(EMOJI.LYRICS)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(disabled),
+      new ButtonBuilder()
+        .setURL(buildDashboardUrl(player.guildId, 'player'))
+        .setEmoji(EMOJI.DASHBOARD)
+        .setStyle(ButtonStyle.Link),
     );
 
     return [rowOne, rowTwo];

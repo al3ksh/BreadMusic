@@ -5,7 +5,9 @@ const {
   cleanTrackTitle,
   trackToLyricsQuery,
   fetchJson,
+  findActiveLyricIndex,
   LyricsProviderError,
+  parseSyncedLyrics,
 } = require('../src/music/lyrics');
 
 test('lyrics query removes common YouTube metadata', () => {
@@ -26,6 +28,19 @@ test('track metadata maps to lyrics query', () => {
     }),
     { artist: 'Artist', title: 'Track', duration: 123000, album: 'Album' },
   );
+});
+
+test('synced lyrics parse timestamps and resolve the active line', () => {
+  const lines = parseSyncedLyrics('[00:01.00]First\n[00:03.50]Second\n[00:08.00]Third');
+  assert.deepEqual(lines, [
+    { time: 1000, text: 'First' },
+    { time: 3500, text: 'Second' },
+    { time: 8000, text: 'Third' },
+  ]);
+  assert.equal(findActiveLyricIndex(lines, 500), -1);
+  assert.equal(findActiveLyricIndex(lines, 3499), 0);
+  assert.equal(findActiveLyricIndex(lines, 3500), 1);
+  assert.equal(findActiveLyricIndex(lines, 12000), 2);
 });
 
 test('lyrics requests retry transient aborts', async () => {

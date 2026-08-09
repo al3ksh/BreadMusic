@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
 import {
   Activity as ActivityIcon,
+  AlertTriangle,
   AudioLines,
   BookOpenText,
+  CheckCircle2,
   ChevronDown,
   Disc3,
   FileAudio,
   GripVertical,
+  Info,
   ListMusic,
   ListPlus,
   Mic2,
@@ -41,6 +44,8 @@ type ActivitySdk = {
 
 type ActivityPhase = 'starting' | 'ready' | 'error' | 'unsupported';
 type ActivityPanel = 'queue' | 'search' | 'lyrics' | null;
+type ActivityNoticeTone = 'success' | 'error' | 'warning' | 'info';
+type ActivityNotice = { id: number; message: string; tone: ActivityNoticeTone };
 type QueueSnapshot = {
   current: QueueTrack | null;
   tracks: QueueTrack[];
@@ -124,11 +129,18 @@ export default function ActivityPage() {
   const sdkRef = useRef<ActivitySdk | null>(null);
   const activityTokenRef = useRef<string | null>(null);
   const drawerCloseTimerRef = useRef<number | null>(null);
+  const controlFeedbackFrameRef = useRef<number | null>(null);
+  const controlFeedbackTimerRef = useRef<number | null>(null);
+  const volumeCommitTimerRef = useRef<number | null>(null);
+  const volumeDraggingRef = useRef(false);
+  const volumePendingRef = useRef<number | null>(null);
+  const noticeIdRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
   const clockRef = useRef<PlayerClock>({ trackKey: '', base: 0, startedAt: Date.now(), paused: true });
   const lyricsListRef = useRef<HTMLDivElement | null>(null);
   const activeLyricRef = useRef<HTMLParagraphElement | null>(null);
   const [phase, setPhase] = useState<ActivityPhase>('starting');
+  const [introExiting, setIntroExiting] = useState(false);
   const [message, setMessage] = useState('Connecting to Discord...');
   const [guildId, setGuildId] = useState<string | null>(null);
   const [channelId, setChannelId] = useState<string | null>(null);
@@ -152,7 +164,24 @@ export default function ActivityPage() {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState('');
+  const [controlFeedback, setControlFeedback] = useState<string | null>(null);
+  const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
+  const [notice, setNotice] = useState<ActivityNotice | null>(null);
+  const [noticeClosing, setNoticeClosing] = useState(false);
+  const noticeQueueRef = useRef<ActivityNotice[]>([]);
+
+  const notify = useCallback((value: string, tone: ActivityNoticeTone = 'info') => {
+    const message = value.trim();
+    if (!message) return;
+    const next = { id: ++noticeIdRef.current, message, tone };
+
+    setNotice((current) => {
+      if (!current) return next;
+      if (current.message === message || noticeQueueRef.current.some((entry) => entry.message === message)) return current;
+      noticeQueueRef.current = [...noticeQueueRef.current, next].slice(-4);
+      return current;
+    });
+  }, []);
 
   const getClockPosition = useCallback(() => {
     const clock = clockRef.current;
@@ -228,6 +257,7 @@ export default function ActivityPage() {
 
     async function initialize() {
       try {
+        setMessage('Preparing Bread...');
         const config = await fetch('/api/activity/config').then(async (response) => {
           if (!response.ok) throw new Error('Activity is not configured');
           return response.json() as Promise<{ enabled: boolean; clientId: string | null }>;
@@ -244,11 +274,13 @@ export default function ActivityPage() {
           return;
         }
 
+        setMessage('Connecting to Discord...');
         const { DiscordSDK } = await import('@discord/embedded-app-sdk');
         const sdk = new DiscordSDK(config.clientId) as unknown as ActivitySdk;
         sdkRef.current = sdk;
         await sdk.ready();
 
+        setMessage('Authorizing session...');
         const { code } = await sdk.commands.authorize({
           client_id: config.clientId,
           response_type: 'code',
@@ -268,6 +300,7 @@ export default function ActivityPage() {
         const auth = await sdk.commands.authenticate({ access_token: tokenResponse.access_token });
         if (!auth) throw new Error('Discord Activity authentication failed');
 
+        setMessage('Loading your server...');
         activityTokenRef.current = auth.access_token || tokenResponse.access_token;
         if (!sdk.guildId) throw new Error('Open the Activity from a server voice channel');
         if (!sdk.channelId) throw new Error('Open the Activity from a voice channel');
@@ -275,9 +308,11 @@ export default function ActivityPage() {
 
         setGuildId(sdk.guildId);
         setChannelId(sdk.channelId);
+        setMessage('Checking server access...');
         const access = await activityFetch<DashboardCapabilities>(`/api/guilds/${sdk.guildId}/access`);
         if (!access.canAccess) throw new Error('You do not have access to Bread on this server');
         if (access.canControlPlayer) {
+          setMessage('Joining voice channel...');
           await activityFetch(`/api/guilds/${sdk.guildId}/player/join`, {
             method: 'POST',
             body: JSON.stringify({ channelId: sdk.channelId }),
@@ -285,6 +320,11 @@ export default function ActivityPage() {
         }
         if (cancelled) return;
         setCapabilities(access);
+        setMessage('Player ready');
+        setIntroExiting(true);
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (!reduceMotion) await new Promise((resolve) => window.setTimeout(resolve, 360));
+        if (cancelled) return;
         setPhase('ready');
         setMessage('');
       } catch (error) {
@@ -329,6 +369,9 @@ export default function ActivityPage() {
 
   useEffect(() => () => {
     if (drawerCloseTimerRef.current) window.clearTimeout(drawerCloseTimerRef.current);
+    if (controlFeedbackFrameRef.current) window.cancelAnimationFrame(controlFeedbackFrameRef.current);
+    if (controlFeedbackTimerRef.current) window.clearTimeout(controlFeedbackTimerRef.current);
+    if (volumeCommitTimerRef.current) window.clearTimeout(volumeCommitTimerRef.current);
   }, []);
 
   const openExternalUrl = useCallback(async (url: string) => {
@@ -336,9 +379,9 @@ export default function ActivityPage() {
     try {
       await sdkRef.current?.commands.openExternalLink({ url });
     } catch {
-      setNotice('Could not open the link in your browser');
+      notify('Could not open the link in your browser', 'error');
     }
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     if (phase !== 'ready' || !guildId) return;
@@ -371,9 +414,9 @@ export default function ActivityPage() {
               // The next snapshot repairs malformed or incomplete data.
             }
           }
-        }
+          }
       } catch (error) {
-        if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : 'Live player connection lost');
+        if (!controller.signal.aborted) notify(error instanceof Error ? error.message : 'Live player connection lost', 'error');
       }
     }
 
@@ -382,7 +425,7 @@ export default function ActivityPage() {
       active = false;
       controller.abort();
     };
-  }, [applySnapshot, guildId, phase]);
+  }, [applySnapshot, guildId, notify, phase]);
 
   useEffect(() => {
     if (phase !== 'ready') return;
@@ -409,7 +452,6 @@ export default function ActivityPage() {
     }
 
     setActionBusy(action);
-    setNotice('');
     try {
       await activityFetch(`/api/guilds/${guildId}/player/${action}`, {
         method: 'POST',
@@ -422,12 +464,61 @@ export default function ActivityPage() {
         setStatus(previousStatus);
         setPosition(previousClock.base);
       }
-      setNotice(error instanceof Error ? error.message : 'Player action failed');
+      notify(error instanceof Error ? error.message : 'Player action failed', 'error');
       return false;
     } finally {
       setActionBusy(null);
     }
-  }, [activityFetch, getClockPosition, guildId, status]);
+  }, [activityFetch, getClockPosition, guildId, notify, status]);
+
+  const flashControl = useCallback((action: string) => {
+    if (controlFeedbackFrameRef.current) window.cancelAnimationFrame(controlFeedbackFrameRef.current);
+    if (controlFeedbackTimerRef.current) window.clearTimeout(controlFeedbackTimerRef.current);
+    setControlFeedback(null);
+    controlFeedbackFrameRef.current = window.requestAnimationFrame(() => {
+      setControlFeedback(action);
+      controlFeedbackFrameRef.current = null;
+      controlFeedbackTimerRef.current = window.setTimeout(() => {
+        setControlFeedback(null);
+        controlFeedbackTimerRef.current = null;
+      }, 680);
+    });
+  }, []);
+
+  const runControlAction = useCallback(async (action: string) => {
+    const applied = await playerAction(action);
+    if (applied) flashControl(action);
+  }, [flashControl, playerAction]);
+
+  const commitVolume = useCallback(async (value: number) => {
+    const normalized = Math.max(0, Math.min(100, Math.round(value)));
+    volumeDraggingRef.current = false;
+    if (volumePendingRef.current === normalized) return;
+    volumePendingRef.current = normalized;
+
+    const applied = await playerAction('volume', { volume: normalized });
+    if (!applied) {
+      volumePendingRef.current = null;
+      setVolumeDraft(null);
+      return;
+    }
+
+    if (volumeCommitTimerRef.current) window.clearTimeout(volumeCommitTimerRef.current);
+    volumeCommitTimerRef.current = window.setTimeout(() => {
+      volumePendingRef.current = null;
+      setVolumeDraft(null);
+      volumeCommitTimerRef.current = null;
+    }, 1800);
+  }, [playerAction]);
+
+  useEffect(() => {
+    if (volumeDraft === null || volumeDraggingRef.current || volumePendingRef.current === null) return;
+    if (status.volume !== volumePendingRef.current) return;
+    if (volumeCommitTimerRef.current) window.clearTimeout(volumeCommitTimerRef.current);
+    volumePendingRef.current = null;
+    volumeCommitTimerRef.current = null;
+    setVolumeDraft(null);
+  }, [status.volume, volumeDraft]);
 
   const handleSearch = useCallback(async (queryOverride?: string) => {
     const query = (queryOverride ?? searchQuery).trim();
@@ -436,7 +527,6 @@ export default function ActivityPage() {
     const controller = new AbortController();
     searchAbortRef.current = controller;
     setSearching(true);
-    setNotice('');
     try {
       const result = await activityFetch<{ tracks: SearchTrack[] }>(`/api/guilds/${guildId}/player/search`, {
         method: 'POST',
@@ -447,14 +537,14 @@ export default function ActivityPage() {
     } catch (error) {
       if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
       setSearchResults([]);
-      setNotice(error instanceof Error ? error.message : 'Search failed');
+      notify(error instanceof Error ? error.message : 'Search failed', 'error');
     } finally {
       if (searchAbortRef.current === controller) {
         searchAbortRef.current = null;
         setSearching(false);
       }
     }
-  }, [activityFetch, guildId, searchQuery]);
+  }, [activityFetch, guildId, notify, searchQuery]);
 
   useEffect(() => {
     if (activePanel !== 'search') return;
@@ -505,67 +595,88 @@ export default function ActivityPage() {
 
   useEffect(() => {
     if (!notice) return;
-    const timeout = window.setTimeout(() => setNotice(''), 4500);
-    return () => window.clearTimeout(timeout);
+    setNoticeClosing(false);
+    const closeTimeout = window.setTimeout(() => setNoticeClosing(true), 4200);
+    const removeTimeout = window.setTimeout(() => {
+      const next = noticeQueueRef.current.shift() || null;
+      setNoticeClosing(false);
+      setNotice(next);
+    }, 4480);
+    return () => {
+      window.clearTimeout(closeTimeout);
+      window.clearTimeout(removeTimeout);
+    };
   }, [notice]);
+
+  const dismissNotice = useCallback(() => {
+    if (!notice || noticeClosing) return;
+    setNoticeClosing(true);
+    window.setTimeout(() => {
+      noticeQueueRef.current = [];
+      setNotice(null);
+      setNoticeClosing(false);
+    }, 180);
+  }, [notice, noticeClosing]);
 
   const handleUploadSelection = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] || null;
     if (!file) return;
     if (!/\.(mp3|flac|wav|ogg|m4a|aac|opus|webm)$/i.test(file.name)) {
-      setNotice('Unsupported audio file type');
+      notify('Unsupported audio file type', 'warning');
       event.target.value = '';
       return;
     }
     if (file.size > 256 * 1024 * 1024) {
-      setNotice('Maximum audio upload size is 256 MB');
+      notify('Maximum audio upload size is 256 MB', 'warning');
       event.target.value = '';
       return;
     }
     setUploadFile(file);
-  }, []);
+  }, [notify]);
 
   const handleUpload = useCallback(async () => {
     if (!guildId || !uploadFile || !activityTokenRef.current) return;
     setUploading(true);
-    setNotice('');
     try {
       const response = await fetch(`/api/guilds/${guildId}/player/upload`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${activityTokenRef.current}`,
           'Content-Type': uploadFile.type || 'application/octet-stream',
-          'X-File-Name': uploadFile.name,
+          // HTTP header values are ASCII-only in browsers; keep the original name encoded.
+          'X-File-Name': encodeURIComponent(uploadFile.name),
         },
         body: uploadFile,
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || `Upload failed: ${response.status}`);
-      setNotice(`Queued: ${body.title || uploadFile.name}`);
+      notify(`Queued: ${body.title || uploadFile.name}`, 'success');
       setUploadFile(null);
       setActivePanel('queue');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Upload failed');
+      notify(error instanceof Error ? error.message : 'Upload failed', 'error');
     } finally {
       setUploading(false);
     }
-  }, [guildId, uploadFile]);
+  }, [guildId, notify, uploadFile]);
 
   const playSearchResult = useCallback(async (track: SearchTrack, mode: 'queue' | 'now') => {
     const startsPlayback = !status.currentTrack;
     const action = mode === 'now' ? 'playnow' : 'play';
     const queued = await playerAction(action, { query: track.uri || `${track.author} ${track.title}` });
     if (!queued) return;
-    setNotice(mode === 'now' || startsPlayback ? `Playing now: ${track.title}` : `Added to queue: ${track.title}`);
+    notify(mode === 'now' || startsPlayback ? `Playing now: ${track.title}` : `Added to queue: ${track.title}`, 'success');
     if (mode === 'now' || startsPlayback) {
       setSearchResults([]);
       setSearchQuery('');
       closePanel();
     }
-  }, [closePanel, playerAction, status.currentTrack]);
+  }, [closePanel, notify, playerAction, status.currentTrack]);
 
   const canDj = capabilities?.canControlPlayer === true;
   const hasTrack = Boolean(status.connected && status.currentTrack);
+  const loopActive = !['off', 'none', 'false'].includes(String(status.repeatMode || '').toLowerCase());
+  const displayedVolume = volumeDraft ?? status.volume;
   const currentDuration = status.currentTrack?.duration || 0;
   const currentTrackLink = /^https?:\/\//i.test(status.currentTrack?.uri || '') ? status.currentTrack?.uri || '' : '';
   const percent = currentDuration ? Math.min(100, (position / currentDuration) * 100) : 0;
@@ -574,6 +685,11 @@ export default function ActivityPage() {
   const activeLyric = syncedLyrics[activeLyricIndex]?.text || '';
   const previousLyric = syncedLyrics[activeLyricIndex - 1]?.text || '';
   const nextLyric = syncedLyrics[activeLyricIndex + 1]?.text || '';
+  const NoticeIcon = notice?.tone === 'success'
+    ? CheckCircle2
+    : notice?.tone === 'error' || notice?.tone === 'warning'
+      ? AlertTriangle
+      : Info;
 
   useEffect(() => {
     if (!lyricsSyncEnabled || activePanel !== 'lyrics' || activeLyricIndex < 0) return;
@@ -590,8 +706,8 @@ export default function ActivityPage() {
     if (!lyricsResolved || syncedLyrics.length > 0) return;
     setKaraokeEnabled(false);
     setLyricsSyncEnabled(false);
-    setNotice('Synced lyrics are unavailable for this track. Karaoke was closed.');
-  }, [karaokeEnabled, lyrics, lyricsError, lyricsLoading, syncedLyrics.length]);
+    notify('Synced lyrics are unavailable for this track. Karaoke was closed.', 'warning');
+  }, [karaokeEnabled, lyrics, lyricsError, lyricsLoading, notify, syncedLyrics.length]);
 
   const handleQueueDrop = useCallback(async (targetIndex: number) => {
     if (!canDj || dragIndex === null || dragIndex === targetIndex) {
@@ -610,16 +726,21 @@ export default function ActivityPage() {
 
   if (phase === 'starting') {
     return (
-      <main className="activity-shell activity-intro">
-        <div className="activity-intro-visual" aria-hidden="true">
-          <span className="activity-intro-ring" />
-          <img src="/assets/breadicon.png?v=3" alt="" />
-          <div className="activity-intro-wave">
-            <i /><i /><i /><i /><i />
+      <main className={'activity-shell activity-intro' + (introExiting ? ' is-leaving' : '')}>
+        <div className="activity-intro-backdrop" aria-hidden="true" />
+        <div className="activity-intro-content">
+          <p className="activity-intro-eyebrow"><span>Bread</span>Music Activity</p>
+          <div className="activity-intro-visual" aria-hidden="true">
+            <span className="activity-intro-ring" />
+            <img src="/assets/breadicon.png?v=3" alt="" />
+            <div className="activity-intro-wave">
+              <i /><i /><i /><i /><i />
+            </div>
           </div>
+          <h1>Opening player</h1>
+          <p className="activity-intro-message" key={message}>{message}</p>
+          <div className="activity-intro-progress" aria-hidden="true"><i /></div>
         </div>
-        <h1>Opening Bread</h1>
-        <p>{message}</p>
       </main>
     );
   }
@@ -652,9 +773,14 @@ export default function ActivityPage() {
       </header>
 
       {notice && (
-        <div className="activity-notice" role="status">
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss message"><X size={16} /></button>
+        <div
+          key={notice.id}
+          className={`activity-notice tone-${notice.tone}${noticeClosing ? ' is-closing' : ''}`}
+          role={notice.tone === 'error' ? 'alert' : 'status'}
+        >
+          <NoticeIcon className="activity-notice-icon" size={17} aria-hidden="true" />
+          <span>{notice.message}</span>
+          <button type="button" onClick={dismissNotice} aria-label="Dismiss message"><X size={16} /></button>
         </div>
       )}
 
@@ -755,31 +881,52 @@ export default function ActivityPage() {
 
             <div className="activity-controls-panel">
               <div className="activity-primary-controls">
-                <ControlButton label="Previous" disabled={!canDj || !hasTrack} onClick={() => playerAction('back')}><SkipBack size={18} /></ControlButton>
+                <ControlButton label="Previous" feedback={controlFeedback === 'back'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('back')}><SkipBack size={18} /></ControlButton>
                 <ControlButton label={status.paused ? 'Resume' : 'Pause'} primary disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => playerAction('toggle')}>
                   {actionBusy === 'toggle' ? <ActivitySpinner /> : status.paused ? <Play size={20} /> : <Pause size={20} />}
                 </ControlButton>
-                <ControlButton label="Skip" disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => playerAction('skip')}><SkipForward size={18} /></ControlButton>
-                <ControlButton label="Stop" disabled={!canDj || !hasTrack} onClick={() => playerAction('stop')}><Square size={16} /></ControlButton>
+                <ControlButton label="Skip" feedback={controlFeedback === 'skip'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('skip')}><SkipForward size={18} /></ControlButton>
+                <ControlButton label="Stop" feedback={controlFeedback === 'stop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('stop')}><Square size={16} /></ControlButton>
               </div>
               <div className="activity-secondary-controls">
-                <ControlButton label="Shuffle" disabled={!canDj || !queue?.total} onClick={() => playerAction('shuffle')}><Shuffle size={16} /></ControlButton>
-                <ControlButton label={`Loop ${status.repeatMode}`} disabled={!canDj || !hasTrack} onClick={() => playerAction('loop')}><Repeat size={16} /></ControlButton>
+                <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queue?.total || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
+                <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
                 <label className="activity-volume">
                   <Volume2 size={16} />
                   <input
                     type="range"
                     min={0}
                     max={100}
-                    value={status.volume}
+                    value={displayedVolume}
                     disabled={!canDj || !status.connected}
-                    onChange={(event) => setStatus((current) => ({ ...current, volume: Number(event.target.value) }))}
-                    onMouseUp={(event) => playerAction('volume', { volume: Number(event.currentTarget.value) })}
-                    onTouchEnd={(event) => playerAction('volume', { volume: Number(event.currentTarget.value) })}
-                    style={{ '--range-progress': `${status.volume}%` } as CSSProperties}
+                    onPointerDown={(event) => {
+                      if (volumeCommitTimerRef.current) window.clearTimeout(volumeCommitTimerRef.current);
+                      volumeCommitTimerRef.current = null;
+                      volumePendingRef.current = null;
+                      volumeDraggingRef.current = true;
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      setVolumeDraft(Number(event.currentTarget.value));
+                    }}
+                    onChange={(event) => setVolumeDraft(Number(event.target.value))}
+                    onPointerUp={(event) => commitVolume(Number(event.currentTarget.value))}
+                    onPointerCancel={() => {
+                      volumeDraggingRef.current = false;
+                      volumePendingRef.current = null;
+                      setVolumeDraft(null);
+                    }}
+                    onKeyUp={(event) => {
+                      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
+                        commitVolume(Number(event.currentTarget.value));
+                      }
+                    }}
+                    onBlur={(event) => {
+                      if (volumeDraft !== null && volumePendingRef.current === null) commitVolume(Number(event.currentTarget.value));
+                    }}
+                    style={{ '--range-progress': `${displayedVolume}%` } as CSSProperties}
                     aria-label="Volume"
+                    aria-valuetext={`${displayedVolume}%`}
                   />
-                  <span>{status.volume}%</span>
+                  <span>{displayedVolume}%</span>
                 </label>
               </div>
             </div>
@@ -788,13 +935,13 @@ export default function ActivityPage() {
         )}
 
         <nav className="activity-panel-nav" aria-label="Player panels">
-          <button type="button" className={activePanel === 'queue' ? 'active' : ''} onClick={() => togglePanel('queue')}>
+          <button type="button" className={activePanel === 'queue' ? 'active' : ''} aria-pressed={activePanel === 'queue'} onClick={() => togglePanel('queue')}>
             <ListMusic size={18} /><span>Queue</span><em>{queue?.total || 0}</em>
           </button>
-          <button type="button" className={activePanel === 'search' ? 'active' : ''} disabled={!canDj} onClick={() => togglePanel('search')}>
+          <button type="button" className={activePanel === 'search' ? 'active' : ''} aria-pressed={activePanel === 'search'} disabled={!canDj} onClick={() => togglePanel('search')}>
             <Search size={18} /><span>Add music</span>
           </button>
-          <button type="button" className={activePanel === 'lyrics' ? 'active' : ''} disabled={!hasTrack} onClick={() => togglePanel('lyrics')}>
+          <button type="button" className={activePanel === 'lyrics' ? 'active' : ''} aria-pressed={activePanel === 'lyrics'} disabled={!hasTrack} onClick={() => togglePanel('lyrics')}>
             <BookOpenText size={18} /><span>Lyrics</span>
           </button>
         </nav>
@@ -802,7 +949,7 @@ export default function ActivityPage() {
         {activePanel && (
           <>
             <button type="button" className={`activity-drawer-backdrop ${drawerClosing ? 'is-closing' : ''}`} onClick={closePanel} aria-label="Close panel" />
-            <aside className={`activity-drawer ${drawerClosing ? 'is-closing' : ''}`} aria-label={`${activePanel} panel`}>
+            <aside key={activePanel} className={`activity-drawer ${drawerClosing ? 'is-closing' : ''}`} aria-label={`${activePanel} panel`}>
               <div className="activity-drawer-header">
                 <div>
                   <strong>{activePanel === 'queue' ? 'Queue' : activePanel === 'search' ? 'Add music' : 'Live lyrics'}</strong>
@@ -958,23 +1105,28 @@ function ControlButton({
   label,
   disabled,
   primary,
+  active,
+  feedback,
   onClick,
   children,
 }: {
   label: string;
   disabled?: boolean;
   primary?: boolean;
+  active?: boolean;
+  feedback?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      className={`activity-control-button ${primary ? 'primary' : ''}`}
+      className={`activity-control-button${primary ? ' primary' : ''}${active ? ' is-active' : ''}${feedback ? ' is-feedback' : ''}`}
       disabled={disabled}
       onClick={onClick}
       title={label}
       aria-label={label}
+      aria-pressed={active === undefined ? undefined : active}
     >
       {children}
       <span>{label}</span>

@@ -64,6 +64,7 @@ const { classifyPlaybackError, describeSearchFailure } = require('../music/playb
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('../music/voiceStatus');
 const { findLyrics, trackToLyricsQuery, LyricsProviderError } = require('../music/lyrics');
 const { BRAND_COLORS } = require('../theme');
+const { buildDashboardUrl } = require('../dashboard/url');
 
 const FILTER_PRESET_CHOICES = [
   { value: 'bassboost', label: 'Bassboost', description: 'Deep, punchy bass boost.' },
@@ -130,24 +131,6 @@ const FILTER_PRESETS = {
 
 async function queuePersist(player) {
   await savePlayerState(player).catch(() => {});
-}
-
-const DASHBOARD_FALLBACK_BASE_URL = 'https://breadmusic.aleksh.xyz';
-
-function getDashboardBaseUrl() {
-  const candidate = process.env.DASHBOARD_URL || DASHBOARD_FALLBACK_BASE_URL;
-  try {
-    return new URL(candidate).origin;
-  } catch {
-    return DASHBOARD_FALLBACK_BASE_URL;
-  }
-}
-
-function buildDashboardUrl(guildId, view = 'settings') {
-  const baseUrl = getDashboardBaseUrl();
-  if (!guildId) return `${baseUrl}/dashboard`;
-  const viewParam = view && view !== 'settings' ? `?view=${encodeURIComponent(view)}` : '';
-  return `${baseUrl}/dashboard/${guildId}${viewParam}`;
 }
 
 const HELP_CATEGORIES = [
@@ -705,6 +688,7 @@ const commands = [
       await interaction.deferReply();
       const rawQuery = interaction.options.getString('query')?.trim();
       let query;
+      let sourceTrack = null;
 
       if (rawQuery) {
         const separator = rawQuery.indexOf(' - ');
@@ -721,7 +705,8 @@ const commands = [
         if (!player?.queue?.current) {
           throw new CommandError('Nothing is playing. Provide a query in `artist - title` format.');
         }
-        query = trackToLyricsQuery(player.queue.current);
+        sourceTrack = player.queue.current;
+        query = trackToLyricsQuery(sourceTrack);
       }
 
       let lyrics;
@@ -737,19 +722,10 @@ const commands = [
         throw new CommandError(`Lyrics were not found for **${query.artist} - ${query.title}**.`);
       }
 
-      const body = lyrics.instrumental
-        ? '*This track is marked as instrumental.*'
-        : lyrics.plainLyrics || lyrics.syncedLyrics.replace(/^\[[^\]]+]\s*/gm, '');
-      const maxLength = 3900;
-      const truncated = body.length > maxLength;
-      const description = truncated ? `${body.slice(0, maxLength)}\n\n*Lyrics truncated.*` : body;
-      const embed = new EmbedBuilder()
-        .setTitle(lyrics.title)
-        .setAuthor({ name: lyrics.artist })
-        .setDescription(description)
-        .setColor(BRAND_COLORS.primary)
-        .setFooter({ text: `Lyrics provided by ${lyrics.provider}` });
-      await interaction.editReply({ embeds: [embed] });
+      await interaction.client.lyricsUI.present(interaction, lyrics, {
+        guildId: interaction.guildId,
+        track: sourceTrack,
+      });
     },
   },
   {

@@ -179,11 +179,48 @@ function trackToLyricsQuery(track) {
   };
 }
 
+function parseSyncedLyrics(value) {
+  if (!value) return [];
+  return String(value)
+    .split('\n')
+    .map((line) => {
+      const match = line.match(/^\[(\d+):(\d+(?:\.\d+)?)\](.*)$/);
+      if (!match) return null;
+      return {
+        time: (Number(match[1]) * 60 + Number(match[2])) * 1000,
+        text: match[3].trim() || '...',
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.time - b.time);
+}
+
+function findActiveLyricIndex(lines, position) {
+  if (!lines.length) return -1;
+  let low = 0;
+  let high = lines.length - 1;
+  let active = -1;
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    if (lines[middle].time <= position) {
+      active = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  return active;
+}
+
 module.exports = {
   cleanTrackTitle,
   cleanArtist,
   findLyrics,
   trackToLyricsQuery,
+  parseSyncedLyrics,
+  findActiveLyricIndex,
   LyricsProviderError,
   fetchJson,
 };
