@@ -15,10 +15,12 @@ export async function apiFetch<T>(
   });
 
   if (res.status === 401) {
-    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/dashboard')) {
-      window.location.href = '/dashboard';
+    const body = await res.json().catch(() => ({})) as { reauth?: boolean; error?: string };
+    if (typeof window !== 'undefined') {
+      if (body.reauth) window.location.href = '/api/auth/discord';
+      else if (!window.location.pathname.startsWith('/dashboard')) window.location.href = '/dashboard';
     }
-    throw new Error('Unauthorized');
+    throw new Error(body.error || 'Unauthorized');
   }
 
   if (!res.ok) {

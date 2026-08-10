@@ -58,6 +58,7 @@ const {
 } = require('../games/fun');
 const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
+const { markPlayerStopping } = require('../music/playerLifecycle');
 const { deleteInteractionReply } = require('../utils/interactions');
 const { isAutoplayEnabled, toggleAutoplay, resetSeed, clearAutoplayState } = require('../music/autoplay');
 const { classifyPlaybackError, describeSearchFailure } = require('../music/playbackErrors');
@@ -449,6 +450,7 @@ const commands = [
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       assertDJ(interaction, config);
       clearAutoplayState(player.guildId);
+      markPlayerStopping(player);
       await player.stopPlaying(true);
       player.queue.tracks.splice(0, player.queue.tracks.length);
       await player.destroy('Stopped via command', true);

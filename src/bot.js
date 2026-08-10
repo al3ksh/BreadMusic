@@ -16,6 +16,7 @@ const {
 } = require('./commands');
 const { MusicUI, BUTTON_PREFIX, BUTTONS } = require('./music/ui');
 const { handleSkipRequest } = require('./music/skipManager');
+const { isPlayerStopping, markPlayerStopping } = require('./music/playerLifecycle');
 const { buildTrackEmbed } = require('./music/embeds');
 const { savePlayerState, hydratePlayer } = require('./state/queueStore');
 const { recordTrackPlay } = require('./state/analyticsStore');
@@ -362,6 +363,8 @@ client.lavalink.on('trackStuck', async (player, track, payload) => {
 
 client.lavalink.on('queueEnd', async (player, track) => {
   await savePlayerState(player).catch(() => {});
+
+  if (isPlayerStopping(player)) return;
   
   const autoplayTriggered = await handleAutoplay(player, track, client);
   if (!autoplayTriggered) {
@@ -853,6 +856,7 @@ async function stopPlayback(interaction) {
   assertDJ(interaction, config);
   await interaction.deferUpdate();
   clearAutoplayState(player.guildId);
+  markPlayerStopping(player);
   await player.stopPlaying(true);
   player.queue.tracks.splice(0, player.queue.tracks.length);
   await player.destroy('Stopped via UI', true);

@@ -15,6 +15,7 @@ const { createFileSessionStore } = require('./state/sessionStore');
 const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
 const { handleSkipRequest } = require('./music/skipManager');
+const { markPlayerStopping } = require('./music/playerLifecycle');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -95,7 +96,9 @@ const FILTER_PRESETS = {
   },
 };
 
-const DASHBOARD_ACTION_INTERVAL_MS = 500;
+const DASHBOARD_ACTION_INTERVAL_MS = 250;
+const DASHBOARD_SEARCH_INTERVAL_MS = 750;
+const DASHBOARD_JOIN_INTERVAL_MS = 750;
 const dashboardActionTimestamps = new Map();
 const AUDIO_UPLOAD_MAX_BYTES = 256 * 1024 * 1024;
 const AUDIO_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
@@ -393,12 +396,19 @@ function createApiServer(client) {
     if (!userId || !guildId) return next();
 
     const now = Date.now();
-    const key = `${userId}:${guildId}`;
+    const action = req.params.action || '';
+    const scope = action === 'search' ? 'search' : action === 'join' ? 'join' : 'action';
+    const intervalMs = scope === 'search'
+      ? DASHBOARD_SEARCH_INTERVAL_MS
+      : scope === 'join'
+        ? DASHBOARD_JOIN_INTERVAL_MS
+        : DASHBOARD_ACTION_INTERVAL_MS;
+    const key = `${userId}:${guildId}:${scope}`;
     const last = dashboardActionTimestamps.get(key) || 0;
     const diff = now - last;
 
-    if (diff < DASHBOARD_ACTION_INTERVAL_MS) {
-      const retryAfterMs = DASHBOARD_ACTION_INTERVAL_MS - diff;
+    if (diff < intervalMs) {
+      const retryAfterMs = intervalMs - diff;
       res.set('Retry-After', (retryAfterMs / 1000).toFixed(2));
       return res.status(429).json({ error: 'Too many dashboard actions. Slow down a little.' });
     }
@@ -563,14 +573,24 @@ function createApiServer(client) {
     try {
       let accessToken = req.session.user.accessToken;
 
-      if (Date.now() > (req.session.user.tokenExpires || 0)) {
+      const refreshSessionToken = async () => {
         const refreshed = await refreshAccessToken(req.session.user.refreshToken);
-        if (refreshed) {
-          accessToken = refreshed.access_token;
-          req.session.user.accessToken = refreshed.access_token;
-          req.session.user.tokenExpires = Date.now() + refreshed.expires_in * 1000;
-          req.session.save(() => {});
-        }
+        if (!refreshed) return null;
+
+        req.session.user = {
+          ...req.session.user,
+          accessToken: refreshed.access_token,
+          refreshToken: refreshed.refresh_token || req.session.user.refreshToken,
+          tokenExpires: Date.now() + refreshed.expires_in * 1000,
+        };
+        await new Promise((resolve, reject) => {
+          req.session.save((error) => (error ? reject(error) : resolve()));
+        });
+        return refreshed.access_token;
+      };
+
+      if (Date.now() > (req.session.user.tokenExpires || 0)) {
+        accessToken = await refreshSessionToken() || accessToken;
       }
 
       const MANAGE_GUILD = BigInt(0x20);
@@ -615,18 +635,30 @@ function createApiServer(client) {
           .sort((a, b) => b.bot_present - a.bot_present);
       }
 
-      const guildsRes = await fetch(`${DISCORD_API}/users/@me/guilds?with_counts=true`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+      const fetchGuilds = (token) => fetch(`${DISCORD_API}/users/@me/guilds?with_counts=true`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
+
+      let guildsRes = await fetchGuilds(accessToken);
+
+      if (guildsRes.status === 401) {
+        const refreshedAccessToken = await refreshSessionToken();
+        if (!refreshedAccessToken) {
+          console.warn('Guilds fetch rejected the access token and session refresh failed');
+          await new Promise((resolve) => req.session.destroy(() => resolve()));
+          res.clearCookie('bread.sid');
+          return res.status(401).json({ error: 'Discord session expired', reauth: true });
+        }
+        accessToken = refreshedAccessToken;
+        guildsRes = await fetchGuilds(accessToken);
+      }
 
       if (!guildsRes.ok) {
         if (guildsRes.status === 429) {
           const body = await guildsRes.json().catch(() => ({}));
           const retryMs = Math.ceil((body.retry_after || 1) * 1000) + 500;
           await new Promise((r) => setTimeout(r, retryMs));
-          const retryRes = await fetch(`${DISCORD_API}/users/@me/guilds?with_counts=true`, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
+          const retryRes = await fetchGuilds(accessToken);
           if (retryRes.ok) {
             return res.json(await mapGuilds(await retryRes.json()));
           }
@@ -1158,10 +1190,52 @@ function createApiServer(client) {
       const capabilities = req.dashboardCapabilities;
       const memberVoiceChannelId = member?.voice?.channelId || null;
       const connectedBotVoiceChannelId = guild?.members?.me?.voice?.channelId || null;
-      const botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
+      let botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
       const privileged = capabilities.accessLevel === 'admin' || capabilities.accessLevel === 'dj';
       if (!capabilities.canControlPlayer) {
         return res.status(403).json({ error: 'Player control is not enabled for your role' });
+      }
+
+      // Searching does not require an active voice connection. Activity playback
+      // creates and connects the player only after the user chooses a result.
+      if (action === 'search') {
+        const query = req.body.query;
+        if (!query || typeof query !== 'string') {
+          return res.status(400).json({ error: 'Query is required' });
+        }
+        const node = getUsableNode(client);
+        if (!node) {
+          return res.status(503).json({ error: 'No Lavalink node available' });
+        }
+        const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform || 'ytsearch';
+        const preparedQuery = applyPreferredSource(query, guildConfig, defaultSource);
+        const requester = getDashboardRequester(req, client);
+        let result;
+        try {
+          result = await node.search({ query: preparedQuery }, requester);
+        } catch (error) {
+          const failure = classifyPlaybackError(error);
+          return res.status(502).json({
+            error: failure.description,
+            code: failure.code,
+          });
+        }
+        if (result?.loadType === 'error' || result?.exception) {
+          const failure = describeSearchFailure(result);
+          return res.status(502).json({
+            error: failure.description,
+            code: failure.code,
+          });
+        }
+        const tracks = (result?.tracks || []).slice(0, 10).map((track) => ({
+          encoded: track.encoded,
+          title: track.info.title,
+          author: track.info.author,
+          uri: track.info.uri,
+          duration: track.info.duration,
+          artwork: extractArtwork(track.info),
+        }));
+        return res.json({ success: true, tracks });
       }
 
       if (action === 'join') {
@@ -1205,6 +1279,35 @@ function createApiServer(client) {
 
         if (!connectedBotVoiceChannelId) await player.connect();
         return res.json({ success: true, channelId: memberVoiceChannelId, channelName: channel.name });
+      }
+
+      const activityPlaybackChannelId = ['play', 'playnow'].includes(action) ? req.body?.channelId || null : null;
+      if (activityPlaybackChannelId) {
+        if (!memberVoiceChannelId || activityPlaybackChannelId !== memberVoiceChannelId) {
+          return res.status(403).json({ error: 'Open the Activity from the voice channel you are currently in' });
+        }
+        const channel = guild?.channels?.cache?.get(activityPlaybackChannelId);
+        if (!channel?.isVoiceBased()) {
+          return res.status(400).json({ error: 'The Activity channel is not a voice channel' });
+        }
+        if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== activityPlaybackChannelId) {
+          return res.status(409).json({ error: 'Bread is already active in another voice channel' });
+        }
+
+        if (!player) {
+          player = client.lavalink.createPlayer({
+            guildId,
+            voiceChannelId: activityPlaybackChannelId,
+            textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, null),
+            selfDeaf: true,
+            volume: guildConfig.defaultVolume ?? 60,
+          });
+        } else {
+          player.voiceChannelId = activityPlaybackChannelId;
+          player.textChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player.textChannelId ?? null);
+        }
+        if (!connectedBotVoiceChannelId) await player.connect();
+        botVoiceChannelId = activityPlaybackChannelId;
       }
 
       if (!privileged && (!memberVoiceChannelId || memberVoiceChannelId !== botVoiceChannelId)) {
@@ -1294,6 +1397,7 @@ function createApiServer(client) {
         case 'stop':
           if (player) {
             clearAutoplayState(guildId);
+            markPlayerStopping(player);
             await player.stopPlaying(true);
             player.queue.tracks.splice(0, player.queue.tracks.length);
             await player.destroy('Stopped via dashboard', true);
@@ -1350,49 +1454,6 @@ function createApiServer(client) {
             await client.musicUI?.refresh(player).catch(() => {});
           }
           return res.json({ success: true, volume: clamped });
-        }
-
-        case 'search': {
-          const query = req.body.query;
-          if (!query || typeof query !== 'string') {
-            return res.status(400).json({ error: 'Query is required' });
-          }
-          if (!player) {
-            return res.status(404).json({ error: 'No active player in this guild' });
-          }
-          const node = getUsableNode(client);
-          if (!node) {
-            return res.status(503).json({ error: 'No Lavalink node available' });
-          }
-          const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform || 'ytsearch';
-          const preparedQuery = applyPreferredSource(query, guildConfig, defaultSource);
-          const requester = getDashboardRequester(req, client);
-          let result;
-          try {
-            result = await node.search({ query: preparedQuery }, requester);
-          } catch (error) {
-            const failure = classifyPlaybackError(error);
-            return res.status(502).json({
-              error: failure.description,
-              code: failure.code,
-            });
-          }
-          if (result?.loadType === 'error' || result?.exception) {
-            const failure = describeSearchFailure(result);
-            return res.status(502).json({
-              error: failure.description,
-              code: failure.code,
-            });
-          }
-          const tracks = (result?.tracks || []).slice(0, 10).map((t) => ({
-            encoded: t.encoded,
-            title: t.info.title,
-            author: t.info.author,
-            uri: t.info.uri,
-            duration: t.info.duration,
-            artwork: extractArtwork(t.info),
-          }));
-          return res.json({ success: true, tracks });
         }
 
         case 'playnow':

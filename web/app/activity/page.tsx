@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
-  Activity as ActivityIcon,
   AlertTriangle,
   AudioLines,
   BookOpenText,
@@ -18,6 +17,7 @@ import {
   Music2,
   Pause,
   Play,
+  Radio,
   Repeat,
   Search,
   Shuffle,
@@ -134,8 +134,16 @@ export default function ActivityPage() {
   const volumeCommitTimerRef = useRef<number | null>(null);
   const volumeDraggingRef = useRef(false);
   const volumePendingRef = useRef<number | null>(null);
+  const volumeControlRef = useRef<HTMLDivElement | null>(null);
+  const seekCommitTimerRef = useRef<number | null>(null);
+  const seekDraggingRef = useRef(false);
+  const seekPendingRef = useRef<number | null>(null);
   const noticeIdRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
+  const searchDebounceTimerRef = useRef<number | null>(null);
+  const lastSearchRef = useRef<{ query: string; at: number } | null>(null);
+  const lyricsRequestRef = useRef(0);
+  const drawerGestureRef = useRef<{ pointerId: number; startY: number; lastY: number; lastAt: number; velocity: number } | null>(null);
   const clockRef = useRef<PlayerClock>({ trackKey: '', base: 0, startedAt: Date.now(), paused: true });
   const lyricsListRef = useRef<HTMLDivElement | null>(null);
   const activeLyricRef = useRef<HTMLParagraphElement | null>(null);
@@ -150,6 +158,8 @@ export default function ActivityPage() {
   const [position, setPosition] = useState(0);
   const [activePanel, setActivePanel] = useState<ActivityPanel>(null);
   const [drawerClosing, setDrawerClosing] = useState(false);
+  const [drawerDragY, setDrawerDragY] = useState<number | null>(null);
+  const [drawerDragging, setDrawerDragging] = useState(false);
   const [seekPreview, setSeekPreview] = useState<{ position: number; percent: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchTrack[]>([]);
@@ -159,6 +169,7 @@ export default function ActivityPage() {
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricsError, setLyricsError] = useState('');
+  const [lyricsTrackUri, setLyricsTrackUri] = useState('');
   const [lyricsSyncEnabled, setLyricsSyncEnabled] = useState(false);
   const [karaokeEnabled, setKaraokeEnabled] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -166,6 +177,8 @@ export default function ActivityPage() {
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [controlFeedback, setControlFeedback] = useState<string | null>(null);
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
+  const [volumeOpen, setVolumeOpen] = useState(false);
+  const [seekDraft, setSeekDraft] = useState<number | null>(null);
   const [notice, setNotice] = useState<ActivityNotice | null>(null);
   const [noticeClosing, setNoticeClosing] = useState(false);
   const noticeQueueRef = useRef<ActivityNotice[]>([]);
@@ -225,7 +238,28 @@ export default function ActivityPage() {
         const incoming = track.position || 0;
         let stablePosition = incoming;
 
-        if (previous.trackKey === trackKey) {
+        if (previous.trackKey && previous.trackKey !== trackKey && (seekDraggingRef.current || seekPendingRef.current !== null)) {
+          seekDraggingRef.current = false;
+          seekPendingRef.current = null;
+          setSeekDraft(null);
+          if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
+          seekCommitTimerRef.current = null;
+        }
+
+        if (seekDraggingRef.current || seekPendingRef.current !== null) {
+          const target = seekPendingRef.current;
+          const confirmed = target !== null && Math.abs(incoming - target) <= 1800;
+          if (!confirmed) {
+            stablePosition = previous.base;
+          } else {
+            seekPendingRef.current = null;
+            setSeekDraft(null);
+            if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
+            seekCommitTimerRef.current = null;
+          }
+        }
+
+        if (previous.trackKey === trackKey && !seekDraggingRef.current && seekPendingRef.current === null) {
           const estimated = previous.base + (previous.paused ? 0 : now - previous.startedAt);
           const intentionalBackwardsMove = incoming < estimated - 5000;
 
@@ -367,12 +401,85 @@ export default function ActivityPage() {
     setActivePanel(panel);
   }, [activePanel, drawerClosing]);
 
+  const finishDrawerGesture = useCallback((shouldClose: boolean) => {
+    setDrawerDragging(false);
+    drawerGestureRef.current = null;
+
+    if (shouldClose) {
+      setDrawerClosing(true);
+      setDrawerDragY(window.innerHeight);
+      if (drawerCloseTimerRef.current) window.clearTimeout(drawerCloseTimerRef.current);
+      drawerCloseTimerRef.current = window.setTimeout(() => {
+        setActivePanel(null);
+        setDrawerClosing(false);
+        setDrawerDragY(null);
+        drawerCloseTimerRef.current = null;
+      }, 220);
+      return;
+    }
+
+    setDrawerDragY(0);
+    window.setTimeout(() => setDrawerDragY(null), 220);
+  }, []);
+
+  const handleDrawerPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!window.matchMedia('(max-width: 700px)').matches || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest('button')) return;
+    const now = performance.now();
+    drawerGestureRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      lastY: event.clientY,
+      lastAt: now,
+      velocity: 0,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDrawerDragging(true);
+    setDrawerDragY(0);
+  }, []);
+
+  const handleDrawerPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const gesture = drawerGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const now = performance.now();
+    const elapsed = Math.max(1, now - gesture.lastAt);
+    gesture.velocity = ((event.clientY - gesture.lastY) / elapsed) * 1000;
+    gesture.lastY = event.clientY;
+    gesture.lastAt = now;
+    setDrawerDragY(Math.max(0, event.clientY - gesture.startY));
+  }, []);
+
+  const handleDrawerPointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const gesture = drawerGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const distance = Math.max(0, event.clientY - gesture.startY);
+    finishDrawerGesture(distance > 96 || gesture.velocity > 700);
+  }, [finishDrawerGesture]);
+
   useEffect(() => () => {
     if (drawerCloseTimerRef.current) window.clearTimeout(drawerCloseTimerRef.current);
     if (controlFeedbackFrameRef.current) window.cancelAnimationFrame(controlFeedbackFrameRef.current);
     if (controlFeedbackTimerRef.current) window.clearTimeout(controlFeedbackTimerRef.current);
     if (volumeCommitTimerRef.current) window.clearTimeout(volumeCommitTimerRef.current);
+    if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
+    if (searchDebounceTimerRef.current) window.clearTimeout(searchDebounceTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!volumeOpen) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!volumeControlRef.current?.contains(event.target as Node)) setVolumeOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setVolumeOpen(false);
+    };
+    window.addEventListener('pointerdown', closeOnPointerDown);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeOnPointerDown);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [volumeOpen]);
 
   const openExternalUrl = useCallback(async (url: string) => {
     if (!/^https?:\/\//i.test(url)) return;
@@ -431,12 +538,14 @@ export default function ActivityPage() {
     if (phase !== 'ready') return;
     const tick = () => {
       const duration = status.currentTrack?.duration || Infinity;
-      setPosition(Math.min(duration, getClockPosition()));
+      if (!seekDraggingRef.current && seekDraft === null) {
+        setPosition(Math.min(duration, getClockPosition()));
+      }
     };
     tick();
     const timer = setInterval(tick, 250);
     return () => clearInterval(timer);
-  }, [getClockPosition, phase, status.currentTrack?.duration]);
+  }, [getClockPosition, phase, seekDraft, status.currentTrack?.duration]);
 
   const playerAction = useCallback(async (action: string, body?: Record<string, unknown>) => {
     if (!guildId) return false;
@@ -450,6 +559,10 @@ export default function ActivityPage() {
       setPosition(frozenPosition);
       setStatus((current) => ({ ...current, paused: nextPaused, playing: true }));
     }
+    if (action === 'autoplay') {
+      const nextAutoplay = typeof body?.enabled === 'boolean' ? body.enabled : !status.autoplay;
+      setStatus((current) => ({ ...current, autoplay: nextAutoplay }));
+    }
 
     setActionBusy(action);
     try {
@@ -459,7 +572,7 @@ export default function ActivityPage() {
       });
       return true;
     } catch (error) {
-      if (action === 'toggle') {
+      if (action === 'toggle' || action === 'autoplay') {
         clockRef.current = previousClock;
         setStatus(previousStatus);
         setPosition(previousClock.base);
@@ -485,10 +598,34 @@ export default function ActivityPage() {
     });
   }, []);
 
-  const runControlAction = useCallback(async (action: string) => {
-    const applied = await playerAction(action);
+  const runControlAction = useCallback(async (action: string, body?: Record<string, unknown>) => {
+    const applied = await playerAction(action, body);
     if (applied) flashControl(action);
   }, [flashControl, playerAction]);
+
+  const commitSeek = useCallback(async (value: number) => {
+    const duration = status.currentTrack?.duration || 0;
+    const normalized = Math.max(0, Math.min(duration, Math.round(value)));
+    seekDraggingRef.current = false;
+    if (seekPendingRef.current === normalized) return;
+    seekPendingRef.current = normalized;
+    setClockPosition(normalized);
+    setSeekDraft(normalized);
+
+    const applied = await playerAction('seek', { position: normalized });
+    if (!applied) {
+      seekPendingRef.current = null;
+      setSeekDraft(null);
+      return;
+    }
+
+    if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
+    seekCommitTimerRef.current = window.setTimeout(() => {
+      seekPendingRef.current = null;
+      setSeekDraft(null);
+      seekCommitTimerRef.current = null;
+    }, 1800);
+  }, [playerAction, setClockPosition, status.currentTrack?.duration]);
 
   const commitVolume = useCallback(async (value: number) => {
     const normalized = Math.max(0, Math.min(100, Math.round(value)));
@@ -523,6 +660,9 @@ export default function ActivityPage() {
   const handleSearch = useCallback(async (queryOverride?: string) => {
     const query = (queryOverride ?? searchQuery).trim();
     if (!query || !guildId) return;
+    const now = Date.now();
+    if (lastSearchRef.current?.query === query && now - lastSearchRef.current.at < 900) return;
+    lastSearchRef.current = { query, at: now };
     searchAbortRef.current?.abort();
     const controller = new AbortController();
     searchAbortRef.current = controller;
@@ -546,6 +686,14 @@ export default function ActivityPage() {
     }
   }, [activityFetch, guildId, notify, searchQuery]);
 
+  const submitSearch = useCallback(() => {
+    if (searchDebounceTimerRef.current) {
+      window.clearTimeout(searchDebounceTimerRef.current);
+      searchDebounceTimerRef.current = null;
+    }
+    if (!searching) handleSearch();
+  }, [handleSearch, searching]);
+
   useEffect(() => {
     if (activePanel !== 'search') return;
     const query = searchQuery.trim();
@@ -556,9 +704,13 @@ export default function ActivityPage() {
       setSearching(false);
       return;
     }
-    const timer = window.setTimeout(() => handleSearch(query), 1000);
+    searchDebounceTimerRef.current = window.setTimeout(() => {
+      searchDebounceTimerRef.current = null;
+      handleSearch(query);
+    }, 1000);
     return () => {
-      window.clearTimeout(timer);
+      if (searchDebounceTimerRef.current) window.clearTimeout(searchDebounceTimerRef.current);
+      searchDebounceTimerRef.current = null;
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
     };
@@ -567,15 +719,24 @@ export default function ActivityPage() {
   const currentTrackUri = status.currentTrack?.uri || '';
   const loadLyrics = useCallback(async () => {
     if (!guildId || !currentTrackUri) return;
+    const requestId = ++lyricsRequestRef.current;
+    const requestedTrackUri = currentTrackUri;
     setLyricsLoading(true);
+    setLyrics(null);
     setLyricsError('');
+    setLyricsTrackUri('');
     try {
-      setLyrics(await activityFetch<LyricsResult>(`/api/guilds/${guildId}/lyrics`));
+      const result = await activityFetch<LyricsResult>(`/api/guilds/${guildId}/lyrics`);
+      if (requestId !== lyricsRequestRef.current) return;
+      setLyrics(result);
+      setLyricsTrackUri(requestedTrackUri);
     } catch (error) {
+      if (requestId !== lyricsRequestRef.current) return;
       setLyrics(null);
       setLyricsError(error instanceof Error ? error.message : 'Lyrics are unavailable');
+      setLyricsTrackUri(requestedTrackUri);
     } finally {
-      setLyricsLoading(false);
+      if (requestId === lyricsRequestRef.current) setLyricsLoading(false);
     }
   }, [activityFetch, currentTrackUri, guildId]);
 
@@ -663,7 +824,10 @@ export default function ActivityPage() {
   const playSearchResult = useCallback(async (track: SearchTrack, mode: 'queue' | 'now') => {
     const startsPlayback = !status.currentTrack;
     const action = mode === 'now' ? 'playnow' : 'play';
-    const queued = await playerAction(action, { query: track.uri || `${track.author} ${track.title}` });
+    const queued = await playerAction(action, {
+      query: track.uri || `${track.author} ${track.title}`,
+      channelId,
+    });
     if (!queued) return;
     notify(mode === 'now' || startsPlayback ? `Playing now: ${track.title}` : `Added to queue: ${track.title}`, 'success');
     if (mode === 'now' || startsPlayback) {
@@ -671,17 +835,24 @@ export default function ActivityPage() {
       setSearchQuery('');
       closePanel();
     }
-  }, [closePanel, notify, playerAction, status.currentTrack]);
+  }, [channelId, closePanel, notify, playerAction, status.currentTrack]);
 
   const canDj = capabilities?.canControlPlayer === true;
   const hasTrack = Boolean(status.connected && status.currentTrack);
-  const loopActive = !['off', 'none', 'false'].includes(String(status.repeatMode || '').toLowerCase());
+  const normalizedRepeatMode = String(status.repeatMode || 'off').toLowerCase();
+  const loopActive = !['off', 'none', 'false'].includes(normalizedRepeatMode);
+  const loopLabel = normalizedRepeatMode === 'track'
+    ? 'Loop track'
+    : normalizedRepeatMode === 'queue'
+      ? 'Loop queue'
+      : 'Loop on';
   const displayedVolume = volumeDraft ?? status.volume;
   const currentDuration = status.currentTrack?.duration || 0;
+  const displayedPosition = seekDraft ?? position;
   const currentTrackLink = /^https?:\/\//i.test(status.currentTrack?.uri || '') ? status.currentTrack?.uri || '' : '';
-  const percent = currentDuration ? Math.min(100, (position / currentDuration) * 100) : 0;
+  const percent = currentDuration ? Math.min(100, (displayedPosition / currentDuration) * 100) : 0;
   const syncedLyrics = parseSyncedLyrics(lyrics?.syncedLyrics);
-  const activeLyricIndex = syncedLyrics.reduce((current, line, index) => (line.time <= position ? index : current), -1);
+  const activeLyricIndex = syncedLyrics.reduce((current, line, index) => (line.time <= displayedPosition ? index : current), -1);
   const activeLyric = syncedLyrics[activeLyricIndex]?.text || '';
   const previousLyric = syncedLyrics[activeLyricIndex - 1]?.text || '';
   const nextLyric = syncedLyrics[activeLyricIndex + 1]?.text || '';
@@ -702,12 +873,11 @@ export default function ActivityPage() {
 
   useEffect(() => {
     if (!karaokeEnabled || lyricsLoading) return;
-    const lyricsResolved = Boolean(lyrics || lyricsError);
-    if (!lyricsResolved || syncedLyrics.length > 0) return;
+    if (lyricsTrackUri !== currentTrackUri || syncedLyrics.length > 0) return;
     setKaraokeEnabled(false);
     setLyricsSyncEnabled(false);
     notify('Synced lyrics are unavailable for this track. Karaoke was closed.', 'warning');
-  }, [karaokeEnabled, lyrics, lyricsError, lyricsLoading, notify, syncedLyrics.length]);
+  }, [currentTrackUri, karaokeEnabled, lyricsLoading, lyricsTrackUri, notify, syncedLyrics.length]);
 
   const handleQueueDrop = useCallback(async (targetIndex: number) => {
     if (!canDj || dragIndex === null || dragIndex === targetIndex) {
@@ -723,6 +893,136 @@ export default function ActivityPage() {
   const handleQueueRemove = useCallback((index: number) => {
     if (canDj) playerAction('remove', { start: index });
   }, [canDj, playerAction]);
+
+  const renderSeek = (variant: 'player' | 'karaoke' = 'player') => !hasTrack ? null : (
+    <div className={`activity-seek-group activity-seek-group-${variant}`}>
+      <div
+        className="activity-seek"
+        onPointerMove={(event) => {
+          if (!canDj || !currentDuration) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          const previewPercent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+          setSeekPreview({ position: previewPercent * currentDuration, percent: previewPercent * 100 });
+        }}
+        onPointerLeave={() => setSeekPreview(null)}
+      >
+        {seekPreview && canDj && (
+          <output className="activity-seek-preview" style={{ '--seek-preview': `${seekPreview.percent}%` } as CSSProperties}>
+            {formatMs(seekPreview.position)}
+          </output>
+        )}
+        <input
+          className="activity-range"
+          type="range"
+          min={0}
+          max={currentDuration || 1}
+          value={Math.min(displayedPosition, currentDuration || 1)}
+          disabled={!canDj}
+          onPointerDown={(event) => {
+            if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
+            seekCommitTimerRef.current = null;
+            seekPendingRef.current = null;
+            seekDraggingRef.current = true;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setSeekDraft(Number(event.currentTarget.value));
+          }}
+          onChange={(event) => setSeekDraft(Number(event.target.value))}
+          onPointerUp={(event) => commitSeek(Number(event.currentTarget.value))}
+          onPointerCancel={() => {
+            seekDraggingRef.current = false;
+            seekPendingRef.current = null;
+            setSeekDraft(null);
+          }}
+          onKeyUp={(event) => {
+            if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
+              commitSeek(Number(event.currentTarget.value));
+            }
+          }}
+          onBlur={(event) => {
+            if (seekDraft !== null && seekPendingRef.current === null) commitSeek(Number(event.currentTarget.value));
+          }}
+          style={{ '--range-progress': `${percent}%` } as CSSProperties}
+          aria-label="Track position"
+          aria-valuetext={`${formatMs(displayedPosition)} of ${formatMs(currentDuration)}`}
+        />
+      </div>
+      <div className="activity-time-row"><span>{formatMs(displayedPosition)}</span><span>{formatMs(currentDuration)}</span></div>
+    </div>
+  );
+
+  const renderPlayerControls = (iconOnly = false) => (
+    <div className={`activity-controls-panel${iconOnly ? ' activity-icon-controls' : ''}`}>
+      <div className="activity-primary-controls">
+        <ControlButton label="Previous" feedback={controlFeedback === 'back'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('back')}><SkipBack size={18} /></ControlButton>
+        <ControlButton label={status.paused ? 'Resume' : 'Pause'} primary disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => playerAction('toggle')}>
+          {actionBusy === 'toggle' ? <ActivitySpinner /> : status.paused ? <Play size={20} /> : <Pause size={20} />}
+        </ControlButton>
+        <ControlButton label="Skip" feedback={controlFeedback === 'skip'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('skip')}><SkipForward size={18} /></ControlButton>
+        <ControlButton label="Stop" feedback={controlFeedback === 'stop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('stop')}><Square size={16} /></ControlButton>
+      </div>
+      <div className="activity-secondary-controls">
+        <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queue?.total || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
+        <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
+        {iconOnly && <ControlButton label={`Autoplay ${status.autoplay ? 'on' : 'off'}`} active={status.autoplay} feedback={controlFeedback === 'autoplay'} disabled={!canDj || Boolean(actionBusy)} onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}><Radio size={16} /></ControlButton>}
+        <div className={`activity-volume-control ${volumeOpen ? 'is-open' : ''}`} ref={volumeControlRef}>
+          <button
+            type="button"
+            className="activity-volume-trigger"
+            disabled={!canDj || !status.connected}
+            onClick={() => setVolumeOpen((open) => !open)}
+            aria-label={`Volume ${displayedVolume}%`}
+            aria-expanded={volumeOpen}
+            title={`Volume ${displayedVolume}%`}
+          >
+            <Volume2 size={17} />
+            <i style={{ transform: `scaleX(${displayedVolume / 100})` }} />
+          </button>
+          {volumeOpen && (
+            <div className="activity-volume-popover" role="group" aria-label="Volume control">
+              <div className="activity-volume-popover-header">
+                <span><Volume2 size={16} /> Volume</span>
+                <output>{displayedVolume}%</output>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={displayedVolume}
+                disabled={!canDj || !status.connected}
+                onPointerDown={(event) => {
+                  if (volumeCommitTimerRef.current) window.clearTimeout(volumeCommitTimerRef.current);
+                  volumeCommitTimerRef.current = null;
+                  volumePendingRef.current = null;
+                  volumeDraggingRef.current = true;
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  setVolumeDraft(Number(event.currentTarget.value));
+                }}
+                onChange={(event) => setVolumeDraft(Number(event.target.value))}
+                onPointerUp={(event) => commitVolume(Number(event.currentTarget.value))}
+                onPointerCancel={() => {
+                  volumeDraggingRef.current = false;
+                  volumePendingRef.current = null;
+                  setVolumeDraft(null);
+                }}
+                onKeyUp={(event) => {
+                  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
+                    commitVolume(Number(event.currentTarget.value));
+                  }
+                }}
+                onBlur={(event) => {
+                  if (volumeDraft !== null && volumePendingRef.current === null) commitVolume(Number(event.currentTarget.value));
+                }}
+                style={{ '--range-progress': `${displayedVolume}%` } as CSSProperties}
+                aria-label="Volume"
+                aria-valuetext={`${displayedVolume}%`}
+              />
+              <div className="activity-volume-scale" aria-hidden="true"><span>0</span><span>100</span></div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 
   if (phase === 'starting') {
     return (
@@ -786,7 +1086,7 @@ export default function ActivityPage() {
 
       <div className="activity-workspace">
         {karaokeEnabled ? (
-          <section className="activity-karaoke-stage">
+          <section className={`activity-karaoke-stage ${status.paused ? 'is-paused' : 'is-playing'}`}>
             <div className="activity-karaoke-track">
               <ActivityArtwork src={status.currentTrack?.artwork} />
               <div>
@@ -794,39 +1094,40 @@ export default function ActivityPage() {
                 <strong>{status.currentTrack?.title || 'Nothing is playing'}</strong>
                 <span className="activity-karaoke-author">{status.currentTrack?.author || 'Bread'}</span>
               </div>
-              <button type="button" onClick={() => setKaraokeEnabled(false)}><X size={16} /><span>Exit karaoke</span></button>
+              <button type="button" onClick={() => setKaraokeEnabled(false)} title="Exit karaoke" aria-label="Exit karaoke"><X size={16} /></button>
             </div>
-            <div className="activity-karaoke-lines" aria-live="polite">
+            <div className="activity-karaoke-lines" aria-live="polite" aria-atomic="true">
               {lyricsLoading ? (
                 <div className="activity-karaoke-empty"><ActivitySpinner /> Loading lyrics</div>
               ) : lyricsError ? (
                 <div className="activity-karaoke-empty">{lyricsError}</div>
               ) : (
                 <>
-                  <p>{previousLyric}</p>
-                  <strong>{activeLyric || 'Instrumental'}</strong>
-                  <p>{nextLyric}</p>
+                  <p key={`previous-${activeLyricIndex}`} className="is-previous">{previousLyric}</p>
+                  <strong key={`current-${activeLyricIndex}`} className="is-current">{activeLyric || 'Instrumental'}</strong>
+                  <p key={`next-${activeLyricIndex}`} className="is-next">{nextLyric}</p>
                 </>
               )}
             </div>
-            <div className="activity-karaoke-progress">
-              <span><i style={{ width: `${percent}%` }} /></span>
-              <time>{formatMs(position)} / {formatMs(currentDuration)}</time>
+            <div className="activity-karaoke-player">
+              {renderSeek('karaoke')}
+              {renderPlayerControls(true)}
             </div>
           </section>
         ) : (
         <section className={`activity-player-stage ${status.paused ? 'is-paused' : 'is-playing'}`}>
           <div className="activity-track-art">
             <ActivityArtwork src={status.currentTrack?.artwork} large />
-            <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />
+            {hasTrack && <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />}
           </div>
 
           <div className="activity-player-main">
             <div className="activity-track-copy">
               <div className="activity-mini-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{status.paused ? 'Paused' : 'Playing'}</span></div>
               <div className="activity-playback-state">
-                <span className={status.paused ? 'paused' : ''}>{status.connected ? (status.paused ? 'Paused' : 'Now playing') : 'Player idle'}</span>
+                <span className={hasTrack && status.paused ? 'paused' : ''}>{hasTrack ? (status.paused ? 'Paused' : 'Now playing') : status.connected ? 'Player idle' : 'Player offline'}</span>
                 {status.autoplay && <span>Autoplay</span>}
+                {loopActive && <span className="loop">{loopLabel}</span>}
               </div>
               <h1>
                 {currentTrackLink ? (
@@ -839,97 +1140,14 @@ export default function ActivityPage() {
               {hasTrack && <small className="activity-track-requester">Requested by <strong>{status.currentTrack?.requester || 'Unknown'}</strong></small>}
               {hasTrack && (
                 <div className="activity-mini-progress" aria-hidden="true">
-                  <span><i style={{ width: `${percent}%` }} /></span>
-                  <time>{formatMs(position)} / {formatMs(currentDuration)}</time>
+                  <span><i style={{ transform: `scaleX(${percent / 100})` }} /></span>
+                  <time>{formatMs(displayedPosition)} / {formatMs(currentDuration)}</time>
                 </div>
               )}
-              {hasTrack && (
-                <>
-                  <div
-                    className="activity-seek"
-                    onPointerMove={(event) => {
-                      if (!canDj || !currentDuration) return;
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const previewPercent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-                      setSeekPreview({ position: previewPercent * currentDuration, percent: previewPercent * 100 });
-                    }}
-                    onPointerLeave={() => setSeekPreview(null)}
-                  >
-                    {seekPreview && canDj && (
-                      <output className="activity-seek-preview" style={{ '--seek-preview': `${seekPreview.percent}%` } as CSSProperties}>
-                        {formatMs(seekPreview.position)}
-                      </output>
-                    )}
-                    <input
-                      className="activity-range"
-                      type="range"
-                      min={0}
-                      max={currentDuration || 1}
-                      value={Math.min(position, currentDuration || 1)}
-                      disabled={!canDj}
-                      onChange={(event) => setClockPosition(Number(event.target.value))}
-                      onMouseUp={(event) => playerAction('seek', { position: Number(event.currentTarget.value) })}
-                      onTouchEnd={(event) => playerAction('seek', { position: Number(event.currentTarget.value) })}
-                      style={{ '--range-progress': `${percent}%` } as CSSProperties}
-                      aria-label="Track position"
-                    />
-                  </div>
-                  <div className="activity-time-row"><span>{formatMs(position)}</span><span>{formatMs(currentDuration)}</span></div>
-                </>
-              )}
+              {renderSeek()}
             </div>
 
-            <div className="activity-controls-panel">
-              <div className="activity-primary-controls">
-                <ControlButton label="Previous" feedback={controlFeedback === 'back'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('back')}><SkipBack size={18} /></ControlButton>
-                <ControlButton label={status.paused ? 'Resume' : 'Pause'} primary disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => playerAction('toggle')}>
-                  {actionBusy === 'toggle' ? <ActivitySpinner /> : status.paused ? <Play size={20} /> : <Pause size={20} />}
-                </ControlButton>
-                <ControlButton label="Skip" feedback={controlFeedback === 'skip'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('skip')}><SkipForward size={18} /></ControlButton>
-                <ControlButton label="Stop" feedback={controlFeedback === 'stop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('stop')}><Square size={16} /></ControlButton>
-              </div>
-              <div className="activity-secondary-controls">
-                <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queue?.total || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
-                <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
-                <label className="activity-volume">
-                  <Volume2 size={16} />
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={displayedVolume}
-                    disabled={!canDj || !status.connected}
-                    onPointerDown={(event) => {
-                      if (volumeCommitTimerRef.current) window.clearTimeout(volumeCommitTimerRef.current);
-                      volumeCommitTimerRef.current = null;
-                      volumePendingRef.current = null;
-                      volumeDraggingRef.current = true;
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                      setVolumeDraft(Number(event.currentTarget.value));
-                    }}
-                    onChange={(event) => setVolumeDraft(Number(event.target.value))}
-                    onPointerUp={(event) => commitVolume(Number(event.currentTarget.value))}
-                    onPointerCancel={() => {
-                      volumeDraggingRef.current = false;
-                      volumePendingRef.current = null;
-                      setVolumeDraft(null);
-                    }}
-                    onKeyUp={(event) => {
-                      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
-                        commitVolume(Number(event.currentTarget.value));
-                      }
-                    }}
-                    onBlur={(event) => {
-                      if (volumeDraft !== null && volumePendingRef.current === null) commitVolume(Number(event.currentTarget.value));
-                    }}
-                    style={{ '--range-progress': `${displayedVolume}%` } as CSSProperties}
-                    aria-label="Volume"
-                    aria-valuetext={`${displayedVolume}%`}
-                  />
-                  <span>{displayedVolume}%</span>
-                </label>
-              </div>
-            </div>
+            {hasTrack && renderPlayerControls(true)}
           </div>
         </section>
         )}
@@ -949,8 +1167,22 @@ export default function ActivityPage() {
         {activePanel && (
           <>
             <button type="button" className={`activity-drawer-backdrop ${drawerClosing ? 'is-closing' : ''}`} onClick={closePanel} aria-label="Close panel" />
-            <aside key={activePanel} className={`activity-drawer ${drawerClosing ? 'is-closing' : ''}`} aria-label={`${activePanel} panel`}>
-              <div className="activity-drawer-header">
+            <aside
+              key={activePanel}
+              className={`activity-drawer ${drawerClosing ? 'is-closing' : ''}${drawerDragging ? ' is-dragging' : ''}${drawerClosing && drawerDragY !== null ? ' is-gesture-closing' : ''}`}
+              aria-label={`${activePanel} panel`}
+              style={drawerDragY === null ? undefined : {
+                transform: `translateY(${drawerDragY}px)`,
+                transition: drawerDragging ? 'none' : 'transform 220ms cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+            >
+              <div
+                className="activity-drawer-header"
+                onPointerDown={handleDrawerPointerDown}
+                onPointerMove={handleDrawerPointerMove}
+                onPointerUp={handleDrawerPointerEnd}
+                onPointerCancel={() => finishDrawerGesture(false)}
+              >
                 <div>
                   <strong>{activePanel === 'queue' ? 'Queue' : activePanel === 'search' ? 'Add music' : 'Live lyrics'}</strong>
                   <span>
@@ -967,7 +1199,15 @@ export default function ActivityPage() {
               <div className="activity-drawer-body">
                 {activePanel === 'queue' && (
                   <div className="activity-queue-list">
-                    <div className="activity-queue-state"><ActivityIcon size={15} /> Autoplay {status.autoplay ? 'on' : 'off'}</div>
+                    <button
+                      type="button"
+                      className={`activity-queue-state activity-autoplay-toggle ${status.autoplay ? 'active' : ''}`}
+                      disabled={!canDj || Boolean(actionBusy)}
+                      aria-pressed={status.autoplay}
+                      onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}
+                    >
+                      <Radio size={15} /> Autoplay {status.autoplay ? 'on' : 'off'}
+                    </button>
                     {!queue?.tracks.length ? (
                       <div className="activity-empty"><Disc3 size={20} /><span>Queue is empty</span></div>
                     ) : queue.tracks.map((track, index) => (
@@ -998,11 +1238,15 @@ export default function ActivityPage() {
                       <input
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
-                        onKeyDown={(event) => { if (event.key === 'Enter') handleSearch(); }}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter') return;
+                          event.preventDefault();
+                          submitSearch();
+                        }}
                         placeholder="Search YouTube or paste a link"
                         aria-label="Search for a track"
                       />
-                      <button type="button" onClick={() => handleSearch()} disabled={searching || !searchQuery.trim()} aria-label="Search">
+                      <button type="button" onClick={submitSearch} disabled={searching || !searchQuery.trim()} aria-label="Search">
                         {searching ? <ActivitySpinner /> : <ChevronDown size={17} className="activity-search-arrow" />}
                       </button>
                     </div>
