@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { withGuildMutex } = require('../src/music/guildMutex');
-const { registerVote, resetVotes } = require('../src/music/voteManager');
+const { registerVote, resetVotes, getVoteState } = require('../src/music/voteManager');
 const { isTrackSeekable, isUnseekableTrackError } = require('../src/music/trackCapabilities');
 
 test('guild mutex serializes concurrent player operations', async () => {
@@ -34,7 +34,9 @@ test('vote state is pruned for listeners and isolated per track', () => {
   assert.equal(registerVote('reliability-test', 'alice', listeners, 'track-a'), 1);
   assert.equal(registerVote('reliability-test', 'bob', listeners, 'track-a'), 2);
   assert.equal(registerVote('reliability-test', 'alice', new Set(['alice']), 'track-a'), 1);
+  assert.deepEqual([...getVoteState('reliability-test', new Set(['alice']), 'track-a').userIds], ['alice']);
   assert.equal(registerVote('reliability-test', 'bob', listeners, 'track-b'), 1);
+  assert.equal(getVoteState('reliability-test', listeners, 'track-a'), null);
 
   resetVotes('reliability-test');
 });

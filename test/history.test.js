@@ -11,7 +11,7 @@ test('play events are exposed as paginated history', async () => {
   process.chdir(tempDir);
 
   try {
-    const { recordTrackPlay, getGuildHistory } = require('../src/state/analyticsStore');
+    const { recordTrackPlay, getGuildHistory, getGuildInsights, getUserInsights } = require('../src/state/analyticsStore');
     ({ closeDatabases } = require('../src/state/sqliteStore'));
     recordTrackPlay('guild-1', {
       info: {
@@ -37,6 +37,17 @@ test('play events are exposed as paginated history', async () => {
     assert.equal(history.items[0].track.source, 'youtube');
     assert.equal(history.items[0].requester.displayName, 'Listener');
     assert.equal(history.items[0].autoplay, true);
+    const userInsights = getUserInsights('guild-1', 'user-1', { range: 'all', limit: 5 });
+    assert.equal(userInsights.totalRequests, 1);
+    assert.equal(userInsights.topTracks[0].title, 'Test Track');
+    assert.equal(userInsights.details.estimatedDuration, 180000);
+    assert.equal(userInsights.details.topArtists[0].name, 'Test Artist');
+    assert.equal(userInsights.details.topSources[0].name, 'youtube');
+    assert.equal(userInsights.details.activeDays, 1);
+    const guildInsights = getGuildInsights('guild-1', { range: 'all', limit: 5 });
+    assert.equal(guildInsights.details.estimatedDuration, 180000);
+    assert.equal(guildInsights.details.autoplayPlays, 1);
+    assert.equal(guildInsights.details.topSources[0].name, 'youtube');
     await new Promise((resolve) => setTimeout(resolve, 1100));
   } finally {
     closeDatabases();

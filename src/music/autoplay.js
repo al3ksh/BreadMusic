@@ -2,7 +2,8 @@ const { getConfig, setConfig } = require('../state/guildConfig');
 
 const recentTracks = new Map();
 const skippedAutoplayTracks = new Map();
-const preferredSeed = new Map();
+const manualSeedPools = new Map();
+const manualSeedCursors = new Map();
 const currentAutoplaySeed = new Map();
 const autoplayInProgress = new Set();
 const autoplayEpoch = new Map();
@@ -11,6 +12,8 @@ const autoplayPrefetch = new Map();
 
 const MAX_RECENT_TRACKS = 40;
 const MAX_SKIPPED_TRACKS = 40;
+const MAX_MANUAL_SEEDS = 40;
+const ACTIVE_MANUAL_SEEDS = 3;
 const MAX_SAME_ARTIST_IN_ROW = 2;
 const SEARCH_TIMEOUT = 8000;
 const SKIP_MEMORY_TTL = 2 * 60 * 60 * 1000;
@@ -112,7 +115,8 @@ function setAutoplay(guildId, enabled) {
     clearAutoplayPrefetch(guildId);
     recentTracks.delete(guildId);
     skippedAutoplayTracks.delete(guildId);
-    preferredSeed.delete(guildId);
+    manualSeedPools.delete(guildId);
+    manualSeedCursors.delete(guildId);
     currentAutoplaySeed.delete(guildId);
   }
 }
@@ -419,6 +423,55 @@ function isLocalUploadTrack(trackOrInfo) {
   );
 }
 
+function addManualSeed(guildId, trackOrInfo, options = {}) {
+  if (!guildId || !trackOrInfo || isLocalUploadTrack(trackOrInfo)) return false;
+
+  const info = snapshotTrackInfo(trackOrInfo);
+  const normalized = info ? normalizeTrack({ info }) : null;
+  if (!info || !normalized) return false;
+
+  const existing = manualSeedPools.get(guildId) ?? [];
+  const next = existing.filter((entry) => entry.key !== normalized.key);
+  next.push({
+    ...info,
+    key: normalized.key,
+    addedAt: Date.now(),
+  });
+
+  if (next.length > MAX_MANUAL_SEEDS) {
+    next.splice(0, next.length - MAX_MANUAL_SEEDS);
+  }
+
+  manualSeedPools.set(guildId, next);
+  manualSeedCursors.set(guildId, 0);
+  currentAutoplaySeed.delete(guildId);
+  autoplayBlockedUntil.delete(guildId);
+  if (options.invalidatePrefetch !== false) clearAutoplayPrefetch(guildId);
+  logAutoplay('debug', `Manual seed added (${next.length}/${MAX_MANUAL_SEEDS}): "${info.title}" by ${info.author || 'unknown'}`);
+  return true;
+}
+
+function getManualSeedPool(guildId) {
+  return manualSeedPools.get(guildId) ?? [];
+}
+
+function selectManualSeeds(guildId, limit = ACTIVE_MANUAL_SEEDS) {
+  const pool = getManualSeedPool(guildId);
+  if (!pool.length || limit <= 0) return [];
+
+  const count = Math.min(limit, pool.length);
+  const cursor = manualSeedCursors.get(guildId) ?? 0;
+  const selected = [];
+
+  for (let offset = 0; offset < count; offset += 1) {
+    const reverseIndex = (cursor + offset) % pool.length;
+    selected.push(pool[pool.length - 1 - reverseIndex]);
+  }
+
+  manualSeedCursors.set(guildId, (cursor + 1) % pool.length);
+  return selected;
+}
+
 function isArtistOverplayed(guildId, artistName) {
   if (!artistName) return false;
 
@@ -429,12 +482,18 @@ function isArtistOverplayed(guildId, artistName) {
   return sameArtistCount >= MAX_SAME_ARTIST_IN_ROW;
 }
 
-function buildContext(guildId, seedTrack, lastTrack) {
+function buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds = []) {
   const seed = normalizeTrack(seedTrack);
   const last = normalizeTrack(lastTrack);
-  const root = preferredSeed.has(guildId) ? normalizeTrack({ info: preferredSeed.get(guildId) }) : null;
+  const manualSeeds = getManualSeedPool(guildId)
+    .map((entry) => normalizeTrack({ info: entry }))
+    .filter(Boolean);
+  const activeSeeds = selectedManualSeeds
+    .map((entry) => normalizeTrack({ info: entry }))
+    .filter(Boolean);
+  const root = manualSeeds.at(-1) ?? null;
   const current = currentAutoplaySeed.has(guildId) ? normalizeTrack({ info: currentAutoplaySeed.get(guildId) }) : null;
-  const primary = current || seed || root || last;
+  const primary = activeSeeds[0] || (manualSeeds.length ? root : current) || seed || last;
   const recent = recentTracks.get(guildId) ?? [];
   const skipped = getSkippedEntries(guildId);
 
@@ -445,6 +504,8 @@ function buildContext(guildId, seedTrack, lastTrack) {
     root,
     current,
     primary,
+    manualSeeds,
+    activeSeeds: activeSeeds.length ? activeSeeds : [primary].filter(Boolean),
     recent,
     skipped,
     seedArtist: primary?.artist || last?.artist || '',
@@ -454,39 +515,43 @@ function buildContext(guildId, seedTrack, lastTrack) {
 }
 
 function buildSearchQueries(context) {
-  const artist = context.seedArtist;
-  const title = cleanTitle(context.seedTitle);
-  const rootArtist = context.root?.artist || '';
+  const anchors = context.activeSeeds.length ? context.activeSeeds : [context.primary].filter(Boolean);
+  const primaryArtist = context.seedArtist;
   const recentArtists = [...new Set(
     context.recent
       .slice(-8)
       .map((entry) => entry.artist)
       .filter(Boolean)
-      .filter((entry) => entry !== artist),
+      .filter((entry) => entry !== primaryArtist),
   )];
 
   const queries = [];
-  const add = (query) => {
+  const add = (query, anchor = null, anchorRank = 0) => {
     const normalized = query.replace(/\s+/g, ' ').trim();
-    if (normalized && !queries.includes(normalized)) queries.push(normalized);
+    if (normalized && !queries.some((entry) => entry.query === normalized)) {
+      queries.push({
+        query: normalized,
+        anchorKey: anchor?.key || null,
+        anchorRank,
+      });
+    }
   };
 
-  if (artist && title) {
-    add(`${artist} ${title} radio`);
-  }
-  if (artist) {
-    add(`${artist} radio mix`);
-    add(`${artist} official audio`);
-    add(`${artist} topic`);
-    add(`${artist} music`);
-  }
-  if (rootArtist && rootArtist !== artist) {
-    if (artist) add(`${artist} ${rootArtist} mix`);
-    add(`${rootArtist} radio mix`);
+  anchors.forEach((anchor, index) => {
+    const artist = anchor.artist;
+    const title = cleanTitle(anchor.cleanTitle || anchor.title);
+    if (artist && title) add(`${artist} ${title} radio`, anchor, index);
+    if (artist) add(`${artist} radio mix`, anchor, index);
+  });
+
+  for (const [index, anchor] of anchors.entries()) {
+    if (queries.length >= MAX_SEARCH_QUERIES) break;
+    if (anchor.artist) add(`${anchor.artist} official audio`, anchor, index);
   }
 
   for (const recentArtist of recentArtists.slice(0, 2)) {
-    add(`${recentArtist} ${artist} mix`);
+    if (queries.length >= MAX_SEARCH_QUERIES) break;
+    add(`${recentArtist} ${primaryArtist} mix`);
   }
 
   return queries.slice(0, MAX_SEARCH_QUERIES);
@@ -564,20 +629,27 @@ async function resolveYouTubeId(node, track, client) {
   return null;
 }
 
-function addCandidate(candidates, track, source, index = 0) {
+function addCandidate(candidates, track, source, index = 0, anchorKey = null, anchorRank = 0) {
   const normalized = normalizeTrack(track);
   if (!normalized) return;
 
   const existing = candidates.get(normalized.key);
+  const anchorKeys = new Set(existing?.anchorKeys ?? []);
+  if (anchorKey) anchorKeys.add(anchorKey);
   const candidate = {
     track,
     normalized,
     source,
     sourceIndex: index,
+    anchorKeys,
+    anchorRank: Math.min(existing?.anchorRank ?? anchorRank, anchorRank),
   };
 
   if (!existing || sourcePriority(source) > sourcePriority(existing.source)) {
     candidates.set(normalized.key, candidate);
+  } else {
+    existing.anchorKeys = anchorKeys;
+    existing.anchorRank = Math.min(existing.anchorRank ?? anchorRank, anchorRank);
   }
 }
 
@@ -600,8 +672,11 @@ function scoreCandidate(candidate, context) {
     return { score: -Infinity, rejected: true, reason: 'same as last track' };
   }
 
-  if (context.seed && track.key === context.seed.key) {
-    return { score: -Infinity, rejected: true, reason: 'same as seed track' };
+  const profileSeeds = context.manualSeeds.length
+    ? context.manualSeeds
+    : [context.seed, context.primary].filter(Boolean);
+  if (profileSeeds.some((seed) => seed.key === track.key)) {
+    return { score: -Infinity, rejected: true, reason: 'same as manual seed track' };
   }
 
   if (isTrackRecent(context.guildId, candidate.track)) {
@@ -627,6 +702,18 @@ function scoreCandidate(candidate, context) {
     score += 6;
   }
 
+  const anchorMatches = candidate.anchorKeys?.size ?? 0;
+  if (anchorMatches > 1) {
+    const consensusBoost = Math.min(18, (anchorMatches - 1) * 9);
+    score += consensusBoost;
+    reasons.push(`profile-consensus:${anchorMatches}`);
+  }
+  if (Number.isFinite(candidate.anchorRank)) {
+    const anchorBoost = Math.max(0, 6 - (candidate.anchorRank * 2));
+    score += anchorBoost;
+    if (anchorBoost) reasons.push(`anchor:${candidate.anchorRank + 1}`);
+  }
+
   const positive = getPositiveTermScore(track);
   if (positive) {
     score += positive;
@@ -639,13 +726,17 @@ function scoreCandidate(candidate, context) {
     reasons.push(`soft-penalty:${penalty}`);
   }
 
-  if (context.seedArtist && track.artist) {
-    if (track.artist === context.seedArtist) {
+  if (track.artist) {
+    const matchesManualArtist = context.manualSeeds.some((seed) => seed.artist === track.artist);
+    if (matchesManualArtist) {
+      score += 4;
+      reasons.push('manual-artist');
+    } else if (context.manualSeeds.length > 0) {
       score += 8;
-      reasons.push('same-artist');
-    } else {
-      score += 10;
-      reasons.push('artist-variety');
+      reasons.push('profile-variety');
+    } else if (context.seedArtist) {
+      score += track.artist === context.seedArtist ? 8 : 10;
+      reasons.push(track.artist === context.seedArtist ? 'same-artist' : 'artist-variety');
     }
   }
 
@@ -655,13 +746,18 @@ function scoreCandidate(candidate, context) {
     reasons.push(`recent-artist:${recentSameArtist}`);
   }
 
-  if (isArtistOverplayed(context.guildId, context.seedArtist) && track.artist === context.seedArtist) {
+  if (isArtistOverplayed(context.guildId, track.artist)) {
     score -= 45;
     reasons.push('loop-guard');
   }
 
-  if (context.seedDuration > 0 && track.duration > 0) {
-    const ratio = track.duration / context.seedDuration;
+  const seedDurations = context.activeSeeds
+    .map((seed) => seed.duration)
+    .filter((duration) => duration > 0);
+  if (seedDurations.length > 0 && track.duration > 0) {
+    const ratio = seedDurations
+      .map((duration) => track.duration / duration)
+      .sort((left, right) => Math.abs(Math.log(left)) - Math.abs(Math.log(right)))[0];
     if (ratio >= 0.65 && ratio <= 1.55) {
       score += 10;
       reasons.push('duration-match');
@@ -673,10 +769,17 @@ function scoreCandidate(candidate, context) {
     }
   }
 
-  const overlap = tokenOverlap(track.cleanTitle || track.title, context.seedTitle);
-  if (overlap >= 0.82 && track.artist === context.seedArtist) {
+  const titleComparisons = profileSeeds.map((seed) => ({
+    seed,
+    overlap: tokenOverlap(track.cleanTitle || track.title, seed.cleanTitle || seed.title),
+  }));
+  const sameSongVariant = titleComparisons.some(({ seed, overlap }) => (
+    overlap >= 0.82 && track.artist && seed.artist === track.artist
+  ));
+  if (sameSongVariant) {
     return { score: -Infinity, rejected: true, reason: 'same song variant' };
   }
+  const overlap = titleComparisons.reduce((maximum, entry) => Math.max(maximum, entry.overlap), 0);
   if (overlap >= 0.55) {
     score -= 14;
     reasons.push('title-overlap');
@@ -781,30 +884,30 @@ async function findNextTrack(player, lastTrack, client) {
       const acceptedSeed = snapshotTrackInfo(lastTrack);
       if (acceptedSeed) {
         currentAutoplaySeed.set(guildId, acceptedSeed);
-        logAutoplay('debug', `Accepted autoplay seed promoted: "${acceptedSeed.title}"`);
+        logAutoplay('debug', `Accepted autoplay track remembered as fallback: "${acceptedSeed.title}"`);
       }
     }
   } else if (isLocalUploadTrack(lastTrack)) {
-    logAutoplay('debug', `Local upload finished; keeping previous autoplay seed instead of using "${lastTrack.info.title}"`);
+    logAutoplay('debug', `Local upload finished; keeping the manual seed profile instead of using "${lastTrack.info.title}"`);
   } else {
-    const manualSeed = snapshotTrackInfo(lastTrack);
-    if (manualSeed) {
-      preferredSeed.set(guildId, manualSeed);
-      currentAutoplaySeed.delete(guildId);
-      skippedAutoplayTracks.delete(guildId);
-      logAutoplay('debug', `New manual seed detected: "${manualSeed.title}"`);
+    if (!getManualSeedPool(guildId).length) {
+      addManualSeed(guildId, lastTrack, { invalidatePrefetch: false });
+      logAutoplay('debug', `Recovered missing manual seed from the current track: "${lastTrack.info.title}"`);
     }
-    recentTracks.delete(guildId);
   }
 
-  const activeSeed = currentAutoplaySeed.get(guildId) || preferredSeed.get(guildId) || (
+  const selectedManualSeeds = selectManualSeeds(guildId);
+  const activeSeed = selectedManualSeeds[0] || currentAutoplaySeed.get(guildId) || (
     isLocalUploadTrack(lastTrack) ? null : snapshotTrackInfo(lastTrack)
   );
   if (!activeSeed) {
-    logAutoplay('debug', 'No previous seed available after local upload; not queueing autoplay');
+    logAutoplay('debug', 'No manual seed profile available after local upload; not queueing autoplay');
     return null;
   }
   const seedTrack = activeSeed ? { info: activeSeed } : lastTrack;
+  if (selectedManualSeeds.length) {
+    logAutoplay('debug', `Active manual seeds: ${selectedManualSeeds.map((entry) => `"${entry.title}"`).join(', ')}`);
+  }
   if (activeSeed && activeSeed.title !== lastTrack.info.title) {
     logAutoplay('debug', `Using active seed: "${activeSeed.title}" instead of "${lastTrack.info.title}"`);
   }
@@ -816,7 +919,7 @@ async function findNextTrack(player, lastTrack, client) {
     return null;
   }
 
-  const context = buildContext(guildId, seedTrack, lastTrack);
+  const context = buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds);
   if (!context.seedArtist && !context.seedTitle) {
     logAutoplay('debug', 'Could not build seed context');
     return null;
@@ -832,17 +935,25 @@ async function findNextTrack(player, lastTrack, client) {
 
   if (videoId) {
     const radioTracks = await getYouTubeRadioMix(node, videoId, client);
-    radioTracks.forEach((track, index) => addCandidate(candidates, track, 'radio', index));
+    radioTracks.forEach((track, index) => addCandidate(candidates, track, 'radio', index, context.primary?.key, 0));
   }
 
   const queries = buildSearchQueries(context);
-  logAutoplay('debug', `Search queries: ${queries.join(' | ') || 'none'}`);
+  logAutoplay('debug', `Search queries: ${queries.map((entry) => entry.query).join(' | ') || 'none'}`);
 
   for (let offset = 0; offset < queries.length; offset += 3) {
     const batch = queries.slice(offset, offset + 3);
-    const results = await Promise.all(batch.map((query) => searchTracks(node, query, client)));
-    results.forEach((tracks) => {
-      tracks.forEach((track, index) => addCandidate(candidates, track, 'search', index));
+    const results = await Promise.all(batch.map((entry) => searchTracks(node, entry.query, client)));
+    results.forEach((tracks, batchIndex) => {
+      const query = batch[batchIndex];
+      tracks.forEach((track, index) => addCandidate(
+        candidates,
+        track,
+        'search',
+        index,
+        query.anchorKey,
+        query.anchorRank,
+      ));
     });
   }
 
@@ -967,23 +1078,9 @@ function clearAutoplayState(guildId) {
   clearAutoplayPrefetch(guildId);
   recentTracks.delete(guildId);
   skippedAutoplayTracks.delete(guildId);
-  preferredSeed.delete(guildId);
+  manualSeedPools.delete(guildId);
+  manualSeedCursors.delete(guildId);
   currentAutoplaySeed.delete(guildId);
-}
-
-function resetSeed(guildId, trackInfo = null) {
-  logAutoplay('debug', `Seed reset for guild ${guildId} - manual track added`);
-  clearAutoplayPrefetch(guildId);
-  recentTracks.delete(guildId);
-  skippedAutoplayTracks.delete(guildId);
-  currentAutoplaySeed.delete(guildId);
-  autoplayBlockedUntil.delete(guildId);
-  if (trackInfo) {
-    const seedInfo = snapshotTrackInfo(trackInfo);
-    if (!seedInfo) return;
-    preferredSeed.set(guildId, seedInfo);
-    logAutoplay('debug', `Preferred seed set: "${seedInfo.title}" by ${seedInfo.author}`);
-  }
 }
 
 const cleanupTimer = setInterval(() => {
@@ -1008,5 +1105,12 @@ module.exports = {
   clearAutoplayState,
   addToRecentTracks,
   recordAutoplaySkip,
-  resetSeed,
+  addManualSeed,
+  __testing: {
+    buildContext,
+    buildSearchQueries,
+    getManualSeedPool,
+    selectManualSeeds,
+    wasRecentlySkipped,
+  },
 };

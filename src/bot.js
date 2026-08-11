@@ -15,16 +15,23 @@ const {
   buildHelpComponents,
 } = require('./commands');
 const { MusicUI, BUTTON_PREFIX, BUTTONS } = require('./music/ui');
-const { handleSkipRequest } = require('./music/skipManager');
+const {
+  handleSkipRequest,
+  clearVoteSkip,
+  getTrackKey,
+  getTrackToken,
+  VOTE_SKIP_BUTTON_PREFIX,
+} = require('./music/skipManager');
 const { isPlayerStopping, markPlayerStopping } = require('./music/playerLifecycle');
 const { buildTrackEmbed } = require('./music/embeds');
 const { savePlayerState, hydratePlayer, flushQueueStore } = require('./state/queueStore');
 const { recordTrackPlay } = require('./state/analyticsStore');
+const { withGuildMutex } = require('./music/guildMutex');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
-const { resetVotes } = require('./music/voteManager');
 const { getConfig, listConfigs, assertDJ, hasDJPermissions } = require('./state/guildConfig');
 const { createSelection } = require('./state/searchCache');
 const { deleteInteractionReply } = require('./utils/interactions');
+const { buildDashboardUrl } = require('./dashboard/url');
 const {
   buildQueueEmbed,
   buildQueueComponents,
@@ -252,6 +259,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isButton()) {
+      if (interaction.customId.startsWith(`${VOTE_SKIP_BUTTON_PREFIX}:`)) {
+        await handleVoteSkipButton(interaction);
+        return;
+      }
+
       if (interaction.customId.startsWith(PAGE_LYRICS_BUTTON_PREFIX)) {
         await client.lyricsUI.changePage(interaction);
         return;
@@ -334,7 +346,7 @@ client.on(Events.VoiceStateUpdate, safeEventHandler('VoiceStateUpdate', async (o
 }));
 
 client.lavalink.on('trackStart', safeEventHandler('trackStart', async (player, track) => {
-  resetVotes(player.guildId);
+  await clearVoteSkip(player.guildId);
   clearIdleTimer(player.guildId);
   addToRecentTracks(player.guildId, track);
   scheduleAutoplayPrefetch(player, track, client);
@@ -413,6 +425,7 @@ client.lavalink.on('queueEnd', safeEventHandler('queueEnd', async (player, track
 client.lavalink.on('playerDestroy', safeEventHandler('playerDestroy', async (player) => {
   clearEmptyChannelTimer(player.guildId);
   clearAutoplayState(player.guildId);
+  await clearVoteSkip(player.guildId);
   await clearVoiceTrackStatus(client, player);
   await client.musicUI.clear(player.guildId);
   broadcastPlayerUpdate(player.guildId);
@@ -567,11 +580,13 @@ async function handleHelpButton(interaction) {
     pageIndex++;
   }
 
-  const { HELP_CATEGORIES } = require('./commands');
-  pageIndex = Math.max(0, Math.min(HELP_CATEGORIES.length - 1, pageIndex));
+  const { HELP_PAGE_COUNT } = require('./commands');
+  pageIndex = Math.max(0, Math.min(HELP_PAGE_COUNT - 1, pageIndex));
 
-  const embed = buildHelpEmbed(pageIndex);
-  const components = buildHelpComponents(pageIndex, userId);
+  const botAvatar = interaction.client.user?.displayAvatarURL({ size: 1024 }) ?? null;
+  const dashboardUrl = buildDashboardUrl(interaction.guildId, 'player');
+  const embed = buildHelpEmbed(pageIndex, { botAvatar });
+  const components = buildHelpComponents(pageIndex, userId, dashboardUrl);
 
   await interaction.update({ embeds: [embed], components }).catch(() => {});
 }
@@ -876,7 +891,10 @@ async function skipTrack(interaction) {
     }
     return;
   }
-  const result = await handleSkipRequest(interaction, player, config, client);
+  const result = await withGuildMutex(interaction.guildId, () =>
+    handleSkipRequest(interaction, player, config, client),
+  );
+  broadcastPlayerUpdate(interaction.guildId);
   if (result.skipped) {
     if (result.needsAutoplay && result.lastTrack) {
       await handleAutoplay(player, result.lastTrack, client);
@@ -950,6 +968,33 @@ async function shuffleQueue(interaction) {
   await player.queue.shuffle();
   await savePlayerState(player).catch(() => {});
   await client.musicUI.refresh(player);
+}
+
+async function handleVoteSkipButton(interaction) {
+  const [, guildId, trackToken] = interaction.customId.split(':');
+  if (!guildId || guildId !== interaction.guildId) {
+    await interaction.reply({ content: 'This vote is no longer valid.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const player = client.lavalink?.getPlayer(guildId);
+  if (!player?.queue?.current || getTrackToken(getTrackKey(player.queue.current)) !== trackToken) {
+    await interaction.reply({ content: 'This track is no longer playing.', flags: MessageFlags.Ephemeral });
+    await clearVoteSkip(guildId);
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const config = getConfig(guildId);
+  const result = await withGuildMutex(guildId, () =>
+    handleSkipRequest(interaction, player, config, client),
+  );
+  broadcastPlayerUpdate(guildId);
+  if (result.needsAutoplay && result.lastTrack) {
+    await handleAutoplay(player, result.lastTrack, client);
+  }
+  if (result.skipped) await savePlayerState(player).catch(() => {});
+  await interaction.editReply(result.message);
 }
 
 async function showLyrics(interaction) {

@@ -1480,6 +1480,7 @@ a { color: inherit; text-decoration: none; }
 .activity-playback-state {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1498,6 +1499,29 @@ a { color: inherit; text-decoration: none; }
 .activity-playback-state span.paused {
   color: #efcb83;
   background: rgba(224, 182, 96, 0.14);
+}
+
+.activity-playback-state span.vote {
+  position: relative;
+  overflow: hidden;
+}
+
+.activity-playback-state span.vote::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 20%, rgba(255, 255, 255, 0.42) 48%, transparent 74%);
+  content: '';
+  transform: translateX(-140%);
+  opacity: 0;
+  animation: activity-vote-shine 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes activity-vote-shine {
+  0%, 64%, 100% { opacity: 0; transform: translateX(-140%); }
+  76% { opacity: 0.2; transform: translateX(-35%); }
+  86% { opacity: 0.55; transform: translateX(140%); }
+  90% { opacity: 0; transform: translateX(140%); }
 }
 
 .activity-track-copy > p:not(.activity-kicker) {
@@ -2652,6 +2676,7 @@ a { color: inherit; text-decoration: none; }
   .activity-drawer-backdrop,
   .activity-notice,
   .activity-notice::after,
+  .activity-playback-state span.vote::after,
   .activity-intro-backdrop,
   .activity-intro-content,
   .activity-intro-message,

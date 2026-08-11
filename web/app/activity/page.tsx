@@ -46,6 +46,7 @@ type ActivityPhase = 'starting' | 'ready' | 'error' | 'unsupported';
 type ActivityPanel = 'queue' | 'search' | 'lyrics' | null;
 type ActivityNoticeTone = 'success' | 'error' | 'warning' | 'info';
 type ActivityNotice = { id: number; message: string; tone: ActivityNoticeTone };
+type ServerNotice = { id: string; message: string; tone: ActivityNoticeTone };
 type QueueSnapshot = {
   current: QueueTrack | null;
   tracks: QueueTrack[];
@@ -74,6 +75,7 @@ const EMPTY_STATUS: PlayerStatus = {
   volume: 100,
   filters: null,
   autoplay: false,
+  voteSkip: null,
   sessionHistory: [],
 };
 
@@ -140,6 +142,7 @@ export default function ActivityPage() {
   const seekPendingRef = useRef<number | null>(null);
   const seekRollbackRef = useRef<PlayerClock | null>(null);
   const noticeIdRef = useRef(0);
+  const lastServerNoticeIdRef = useRef<string | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchDebounceTimerRef = useRef<number | null>(null);
   const lastSearchRef = useRef<{ query: string; at: number } | null>(null);
@@ -556,7 +559,16 @@ export default function ActivityPage() {
               const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
               if (!dataLine) continue;
               try {
-                applySnapshot(JSON.parse(dataLine.slice(5).trim()));
+                const snapshot = JSON.parse(dataLine.slice(5).trim()) as {
+                  status?: PlayerStatus;
+                  queue?: QueueSnapshot;
+                  notice?: ServerNotice | null;
+                };
+                if (snapshot.notice && snapshot.notice.id !== lastServerNoticeIdRef.current) {
+                  lastServerNoticeIdRef.current = snapshot.notice.id;
+                  notify(snapshot.notice.message, snapshot.notice.tone);
+                }
+                applySnapshot(snapshot);
               } catch {
                 // The next snapshot repairs malformed or incomplete data.
               }
@@ -614,10 +626,13 @@ export default function ActivityPage() {
 
     setActionBusy(action);
     try {
-      await activityFetch(`/api/guilds/${guildId}/player/${action}`, {
+      const result = await activityFetch<{ message?: string; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
+      if (action === 'skip' && result.message) {
+        if (result.voteSkip) notify(result.message, 'info');
+      }
       return true;
     } catch (error) {
       if (['toggle', 'autoplay', 'seek', 'volume'].includes(action)) {
@@ -1034,7 +1049,7 @@ export default function ActivityPage() {
         <ControlButton label={status.paused ? 'Resume' : 'Pause'} primary disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => playerAction('toggle')}>
           {actionBusy === 'toggle' ? <ActivitySpinner /> : status.paused ? <Play size={20} /> : <Pause size={20} />}
         </ControlButton>
-        <ControlButton label="Skip" feedback={controlFeedback === 'skip'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('skip')}><SkipForward size={18} /></ControlButton>
+        <ControlButton label={status.voteSkip ? `Skip ${status.voteSkip.votes}/${status.voteSkip.requiredVotes}` : 'Skip'} feedback={controlFeedback === 'skip'} disabled={!hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('skip')}><SkipForward size={18} /></ControlButton>
         <ControlButton label="Stop" feedback={controlFeedback === 'stop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('stop')}><Square size={16} /></ControlButton>
       </div>
       <div className="activity-secondary-controls">
@@ -1205,6 +1220,14 @@ export default function ActivityPage() {
                 <span className={hasTrack && status.paused ? 'paused' : ''}>{hasTrack ? (status.paused ? 'Paused' : 'Now playing') : status.connected ? 'Player idle' : 'Player offline'}</span>
                 {status.autoplay && <span>Autoplay</span>}
                 {loopActive && <span className="loop">{loopLabel}</span>}
+                {status.voteSkip && (
+                  <span
+                    key={`vote-${status.voteSkip.votes}-${status.voteSkip.requiredVotes}`}
+                    className="vote"
+                  >
+                    Skip {status.voteSkip.votes}/{status.voteSkip.requiredVotes}
+                  </span>
+                )}
               </div>
               <h1>
                 {currentTrackLink ? (

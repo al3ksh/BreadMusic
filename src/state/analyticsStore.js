@@ -485,6 +485,89 @@ function sortByCountAndRecent(a, b) {
   return (b.lastPlayedAt || 0) - (a.lastPlayedAt || 0);
 }
 
+function toRankedCounts(counts, limit = DEFAULT_LIMIT) {
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([name, count], index) => ({ rank: index + 1, name, count }));
+}
+
+function getLongestDayStreak(dayKeys) {
+  const days = [...dayKeys]
+    .map((key) => Date.parse(`${key}T00:00:00.000Z`))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  let longest = 0;
+  let current = 0;
+  let previous = null;
+  for (const day of days) {
+    current = previous !== null && day - previous === DAY_MS ? current + 1 : 1;
+    longest = Math.max(longest, current);
+    previous = day;
+  }
+  return longest;
+}
+
+function buildEventDetails(events, tracksMap, limit) {
+  const sourceCounts = {};
+  const artistCounts = {};
+  const hourCounts = Array.from({ length: 24 }, () => 0);
+  const activeDays = new Set();
+  let estimatedDuration = 0;
+  let autoplayPlays = 0;
+
+  for (const event of events) {
+    const track = event.track || tracksMap[event.trackKey] || {};
+    const source = track.source || 'unknown';
+    const artist = track.author || 'Unknown artist';
+    sourceCounts[source] = (sourceCounts[source] || 0) + 1;
+    artistCounts[artist] = (artistCounts[artist] || 0) + 1;
+    estimatedDuration += Number.isFinite(track.duration) ? track.duration : 0;
+    if (event.autoplay) autoplayPlays += 1;
+    if (Number.isFinite(event.ts)) {
+      hourCounts[new Date(event.ts).getUTCHours()] += 1;
+      activeDays.add(toDayKey(event.ts));
+    }
+  }
+
+  const mostActiveHour = hourCounts.reduce((best, count, hour) => (
+    count > best.count ? { hour, count } : best
+  ), { hour: null, count: 0 });
+
+  return {
+    estimatedDuration,
+    autoplayPlays,
+    activeDays: activeDays.size,
+    averagePerActiveDay: activeDays.size ? events.length / activeDays.size : 0,
+    longestStreakDays: getLongestDayStreak(activeDays),
+    mostActiveHour: mostActiveHour.hour,
+    topSources: toRankedCounts(sourceCounts, limit),
+    topArtists: toRankedCounts(artistCounts, limit),
+    retainedEventCount: events.length,
+  };
+}
+
+function buildAllTimeTrackDetails(tracksMap, recentDetails, limit) {
+  const sourceCounts = {};
+  const artistCounts = {};
+  let estimatedDuration = 0;
+  for (const track of Object.values(tracksMap)) {
+    const count = Number.isFinite(track.count) ? track.count : 0;
+    const source = track.source || 'unknown';
+    const artist = track.author || 'Unknown artist';
+    sourceCounts[source] = (sourceCounts[source] || 0) + count;
+    artistCounts[artist] = (artistCounts[artist] || 0) + count;
+    estimatedDuration += (Number.isFinite(track.duration) ? track.duration : 0) * count;
+  }
+  return {
+    ...recentDetails,
+    estimatedDuration,
+    topSources: toRankedCounts(sourceCounts, limit),
+    topArtists: toRankedCounts(artistCounts, limit),
+    historyScoped: true,
+  };
+}
+
 function getGuildInsights(guildId, options = {}) {
   const requestedLimit = Number.parseInt(options.limit, 10);
   const limit = Number.isFinite(requestedLimit)
@@ -507,6 +590,7 @@ function getGuildInsights(guildId, options = {}) {
   let topTracks = [];
   let topUsers = [];
   let summary;
+  let details;
 
   if (range === RANGE_ALL) {
     topTracks = Object.values(tracksMap)
@@ -547,9 +631,11 @@ function getGuildInsights(guildId, options = {}) {
       uniqueUsers: Object.keys(usersMap).length,
       lastPlayAt: Number.isFinite(guild?.summary?.lastPlayAt) ? guild.summary.lastPlayAt : null,
     };
+    details = buildAllTimeTrackDetails(tracksMap, buildEventDetails(events, tracksMap, limit), limit);
   } else {
     const startTimestamp = getRangeStartTimestamp(range, now);
     const aggregates = buildRangeAggregates(events, startTimestamp);
+    const rangeEvents = events.filter((event) => event.ts >= startTimestamp);
 
     topTracks = buildTopTracksFromRange(aggregates.tracks, tracksMap, limit);
     topUsers = buildTopUsersFromRange(aggregates.users, usersMap, limit);
@@ -560,6 +646,7 @@ function getGuildInsights(guildId, options = {}) {
       uniqueUsers: Object.keys(aggregates.users).length,
       lastPlayAt: aggregates.lastPlayAt,
     };
+    details = { ...buildEventDetails(rangeEvents, tracksMap, limit), historyScoped: false };
   }
 
   return {
@@ -567,12 +654,48 @@ function getGuildInsights(guildId, options = {}) {
     summary,
     topTracks,
     topUsers,
+    details,
     trend14d: buildTrend14d(events, now),
+    detailedHistoryDays: EVENT_RETENTION_DAYS,
+  };
+}
+
+function getUserInsights(guildId, userId, options = {}) {
+  const requestedLimit = Number.parseInt(options.limit, 10);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(MAX_LIMIT, requestedLimit))
+    : DEFAULT_LIMIT;
+  const range = normalizeRange(options.range);
+  const now = Date.now();
+  const guild = ensureGuildBucket(guildId);
+  const events = pruneEvents(guild.events, now);
+  if (events.length !== guild.events.length) {
+    guild.events = events;
+    analyticsStore.set(guildId, guild);
+  }
+
+  const startTimestamp = getRangeStartTimestamp(range, now);
+  const userEvents = events.filter((event) => (
+    event?.userId === userId && (startTimestamp === null || event.ts >= startTimestamp)
+  ));
+  const aggregates = buildRangeAggregates(userEvents, null);
+  const storedUser = guild.users?.[userId] || null;
+  const details = buildEventDetails(userEvents, guild.tracks || {}, limit);
+
+  return {
+    range,
+    user: storedUser,
+    totalRequests: range === RANGE_ALL ? (storedUser?.count || 0) : userEvents.length,
+    lastRequestAt: range === RANGE_ALL ? (storedUser?.lastPlayedAt || null) : aggregates.lastPlayAt,
+    topTracks: buildTopTracksFromRange(aggregates.tracks, guild.tracks || {}, limit),
+    details: { ...details, historyScoped: range === RANGE_ALL },
+    detailedHistoryDays: EVENT_RETENTION_DAYS,
   };
 }
 
 module.exports = {
   recordTrackPlay,
   getGuildInsights,
+  getUserInsights,
   getGuildHistory,
 };

@@ -144,6 +144,10 @@ export interface PlayerStatus {
   volume: number;
   filters: string | null;
   autoplay: boolean;
+  voteSkip: {
+    votes: number;
+    requiredVotes: number;
+  } | null;
   sessionHistory: {
     title: string;
     author: string;

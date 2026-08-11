@@ -8,7 +8,7 @@ const { Transform } = require('stream');
 const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
 const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
-const { setAutoplay, resetSeed, recordAutoplaySkip, clearAutoplayState } = require('./music/autoplay');
+const { setAutoplay, addManualSeed, recordAutoplaySkip, clearAutoplayState, handleAutoplay } = require('./music/autoplay');
 const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('./music/voiceStatus');
@@ -16,7 +16,7 @@ const { createFileSessionStore } = require('./state/sessionStore');
 const { hydratePlayer } = require('./state/queueStore');
 const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
-const { handleSkipRequest } = require('./music/skipManager');
+const { handleSkipRequest, clearVoteSkip, getVoteSkipSnapshot } = require('./music/skipManager');
 const { markPlayerStopping } = require('./music/playerLifecycle');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 const { acquireGuildMutex } = require('./music/guildMutex');
@@ -146,6 +146,28 @@ function waitForPlayerVoice(player, timeoutMs = ACTIVITY_VOICE_READY_TIMEOUT_MS)
 }
 const memberSearchCache = new Map();
 const playerEventSubscribers = new Map();
+const playerNotices = new Map();
+
+function publishPlayerNotice(guildId, message, tone = 'info') {
+  if (!guildId || !message) return;
+  playerNotices.set(guildId, {
+    id: crypto.randomUUID(),
+    message,
+    tone,
+    expiresAt: Date.now() + 8000,
+  });
+  broadcastPlayerUpdate(guildId);
+}
+
+function getPlayerNotice(guildId) {
+  const notice = playerNotices.get(guildId);
+  if (!notice) return null;
+  if (notice.expiresAt <= Date.now()) {
+    playerNotices.delete(guildId);
+    return null;
+  }
+  return notice;
+}
 
 function broadcastPlayerUpdate(guildId) {
   const subscribers = playerEventSubscribers.get(guildId);
@@ -161,6 +183,9 @@ function broadcastPlayerUpdate(guildId) {
 
 function createApiServer(client) {
   const app = express();
+  client.on('breadPlayerNotice', ({ guildId, message, tone }) => {
+    publishPlayerNotice(guildId, message, tone);
+  });
   const sessionSecret = process.env.SESSION_SECRET;
   const isProduction = process.env.NODE_ENV === 'production';
   if (!sessionSecret) {
@@ -870,6 +895,7 @@ function createApiServer(client) {
         writeSseEvent(res, 'snapshot', {
           status: buildPlayerStatusSnapshot(client, guildId),
           queue: buildQueueSnapshot(client, guildId, page),
+          notice: getPlayerNotice(guildId),
           timestamp: Date.now(),
         });
       } catch {
@@ -1275,7 +1301,7 @@ function createApiServer(client) {
       const connectedBotVoiceChannelId = guild?.members?.me?.voice?.channelId || null;
       let botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
       const privileged = capabilities.accessLevel === 'admin' || capabilities.accessLevel === 'dj';
-      if (!capabilities.canControlPlayer) {
+      if (!capabilities.canControlPlayer && action !== 'skip') {
         return res.status(403).json({ error: 'Player control is not enabled for your role' });
       }
 
@@ -1510,8 +1536,12 @@ function createApiServer(client) {
             if (privileged) {
               const currentTrack = player.queue.current;
               recordAutoplaySkip(guildId, currentTrack, { position: player.position });
+              await clearVoteSkip(guildId);
               if (player.queue.tracks.length === 0 && player.queue.current) {
                 await player.stopPlaying(false, false);
+                if (guildConfig.autoplay && currentTrack) {
+                  await handleAutoplay(player, currentTrack, client);
+                }
               } else {
                 await player.skip();
               }
@@ -1521,7 +1551,11 @@ function createApiServer(client) {
                 guild,
                 user: { id: getRequestUser(req).id },
               }, player, guildConfig, client);
-              return res.json({ success: true, skipped: result.skipped, message: result.message });
+              if (result.needsAutoplay && result.lastTrack) {
+                await handleAutoplay(player, result.lastTrack, client);
+              }
+              broadcastPlayerUpdate(guildId);
+              return res.json({ success: true, skipped: result.skipped, message: result.message, voteSkip: result.vote || null });
             }
           }
           break;
@@ -1606,6 +1640,7 @@ function createApiServer(client) {
               },
               requester,
             };
+            addManualSeed(guildId, track);
             await addRequestedTrackToQueue(player, track, playImmediately);
             if (playImmediately && player.queue.current) {
               await player.skip();
@@ -1642,16 +1677,7 @@ function createApiServer(client) {
                 code: failure.code,
               });
             }
-            if (track.info) {
-              resetSeed(guildId, {
-                title: track.info.title,
-                author: track.info.author,
-                identifier: track.info.identifier,
-                uri: track.info.uri,
-                duration: track.info.duration ?? track.info.length,
-                sourceName: track.info.sourceName,
-              });
-            }
+            addManualSeed(guildId, track);
             await addRequestedTrackToQueue(player, track, playImmediately);
             if (playImmediately && player.queue.current) {
               await player.skip();
@@ -2445,6 +2471,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
       volume: 100,
       filters: null,
       autoplay: config.autoplay ?? false,
+      voteSkip: null,
       sessionHistory: [],
     };
   }
@@ -2497,6 +2524,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
     volume: player.volume ?? 100,
     filters: player.filterManager?.activePreset || null,
     autoplay: config.autoplay ?? false,
+    voteSkip: getVoteSkipSnapshot(player, config, guild),
     sessionHistory,
   };
 }

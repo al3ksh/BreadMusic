@@ -1304,6 +1304,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [seekPreview, setSeekPreview] = useState<{ value: number; left: number } | null>(null);
+  const [livePosition, setLivePosition] = useState(0);
 
   // Local state for smooth sliders
   const [localVolume, setLocalVolume] = useState<number | null>(null);
@@ -1311,71 +1312,124 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const statusRef = useRef<PlayerStatus | null>(null);
   const lastTrackSeenAtRef = useRef(0);
   const pausedTrackKeyRef = useRef<string | null>(null);
   const pausedTrackPositionRef = useRef<number | null>(null);
+  const playerClockRef = useRef<{
+    trackKey: string;
+    base: number;
+    startedAt: number;
+    duration: number;
+    paused: boolean;
+  }>({ trackKey: '', base: 0, startedAt: Date.now(), duration: 0, paused: true });
 
   const applyIncomingStatus = useCallback((incomingStatus: PlayerStatus) => {
-    setStatus((prev) => {
-      let s = incomingStatus;
+    const previousStatus = statusRef.current;
+    let nextStatus = incomingStatus;
 
-      if (s.currentTrack) {
-        const trackKey = `${s.currentTrack.uri}|${s.currentTrack.title}|${s.currentTrack.author}`;
+    if (nextStatus.currentTrack) {
+      const incomingTrack = nextStatus.currentTrack;
+      const trackKey = `${incomingTrack.uri}|${incomingTrack.title}|${incomingTrack.author}`;
 
-        if (s.paused) {
-          if (pausedTrackKeyRef.current !== trackKey || pausedTrackPositionRef.current === null) {
-            pausedTrackKeyRef.current = trackKey;
-            const previousTrackKey = prev?.currentTrack
-              ? `${prev.currentTrack.uri}|${prev.currentTrack.title}|${prev.currentTrack.author}`
-              : null;
-            pausedTrackPositionRef.current = previousTrackKey === trackKey
-              ? Math.max(prev?.currentTrack?.position || 0, s.currentTrack.position || 0)
-              : s.currentTrack.position || 0;
-          }
-
-          s = {
-            ...s,
-            currentTrack: {
-              ...s.currentTrack,
-              position: pausedTrackPositionRef.current,
-            },
-          };
-        } else {
+      if (nextStatus.paused) {
+        if (pausedTrackKeyRef.current !== trackKey || pausedTrackPositionRef.current === null) {
           pausedTrackKeyRef.current = trackKey;
-          pausedTrackPositionRef.current = null;
-          const previousTrackKey = prev?.currentTrack
-            ? `${prev.currentTrack.uri}|${prev.currentTrack.title}|${prev.currentTrack.author}`
+          const previousTrackKey = previousStatus?.currentTrack
+            ? `${previousStatus.currentTrack.uri}|${previousStatus.currentTrack.title}|${previousStatus.currentTrack.author}`
             : null;
-          if (prev?.paused && previousTrackKey === trackKey) {
-            s = {
-              ...s,
-              currentTrack: {
-                ...s.currentTrack,
-                position: Math.max(prev.currentTrack?.position || 0, s.currentTrack.position || 0),
-              },
-            };
-          }
+          pausedTrackPositionRef.current = previousTrackKey === trackKey
+            ? Math.max(previousStatus?.currentTrack?.position || 0, incomingTrack.position || 0)
+            : incomingTrack.position || 0;
         }
 
-        lastTrackSeenAtRef.current = Date.now();
-        return s;
+        nextStatus = {
+          ...nextStatus,
+          currentTrack: {
+            ...incomingTrack,
+            position: pausedTrackPositionRef.current,
+          },
+        };
+      } else {
+        pausedTrackKeyRef.current = trackKey;
+        pausedTrackPositionRef.current = null;
+        const previousTrackKey = previousStatus?.currentTrack
+          ? `${previousStatus.currentTrack.uri}|${previousStatus.currentTrack.title}|${previousStatus.currentTrack.author}`
+          : null;
+        if (previousStatus?.paused && previousTrackKey === trackKey) {
+          nextStatus = {
+            ...nextStatus,
+            currentTrack: {
+              ...incomingTrack,
+              position: Math.max(previousStatus.currentTrack?.position || 0, incomingTrack.position || 0),
+            },
+          };
+        }
       }
 
-      const withinGraceWindow = Date.now() - lastTrackSeenAtRef.current < TRACK_TRANSITION_GRACE_MS;
-      if (s.connected && withinGraceWindow && prev?.currentTrack) {
-        return { ...s, currentTrack: prev.currentTrack };
+      const now = Date.now();
+      const incomingPosition = nextStatus.currentTrack?.position || 0;
+      const previousClock = playerClockRef.current;
+      let stablePosition = incomingPosition;
+
+      if (previousClock.trackKey === trackKey) {
+        const estimatedPosition = previousClock.base + (previousClock.paused ? 0 : now - previousClock.startedAt);
+        const movedBackwards = incomingPosition < estimatedPosition - 5000;
+
+        if (nextStatus.paused && !previousClock.paused) {
+          stablePosition = Math.max(incomingPosition, estimatedPosition);
+        } else if (nextStatus.paused && previousClock.paused && !movedBackwards) {
+          stablePosition = previousClock.base;
+        } else if (!nextStatus.paused && !movedBackwards) {
+          stablePosition = Math.max(incomingPosition, estimatedPosition);
+        }
       }
 
-      if (!s.connected) {
-        lastTrackSeenAtRef.current = 0;
-      }
+      stablePosition = Math.min(
+        incomingTrack.duration || Infinity,
+        Math.max(0, stablePosition),
+      );
+      nextStatus = {
+        ...nextStatus,
+        currentTrack: { ...incomingTrack, position: stablePosition },
+      };
+      playerClockRef.current = {
+        trackKey,
+        base: stablePosition,
+        startedAt: now,
+        duration: incomingTrack.duration || 0,
+        paused: nextStatus.paused,
+      };
+      setLivePosition(stablePosition);
+      statusRef.current = nextStatus;
+      lastTrackSeenAtRef.current = Date.now();
+      setStatus(nextStatus);
+      return;
+    }
 
-      pausedTrackKeyRef.current = null;
-      pausedTrackPositionRef.current = null;
+    const withinGraceWindow = Date.now() - lastTrackSeenAtRef.current < TRACK_TRANSITION_GRACE_MS;
+    if (nextStatus.connected && withinGraceWindow && previousStatus?.currentTrack) {
+      nextStatus = { ...nextStatus, currentTrack: previousStatus.currentTrack };
+      statusRef.current = nextStatus;
+      setStatus(nextStatus);
+      return;
+    }
 
-      return s;
-    });
+    if (!nextStatus.connected) {
+      lastTrackSeenAtRef.current = 0;
+    }
+
+    pausedTrackKeyRef.current = null;
+    pausedTrackPositionRef.current = null;
+    playerClockRef.current = { trackKey: '', base: 0, startedAt: Date.now(), duration: 0, paused: true };
+    statusRef.current = nextStatus;
+    setLivePosition(0);
+    setStatus(nextStatus);
   }, []);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const fetchData = useCallback(() => {
     apiFetch<PlayerStatus>(`/guilds/${guildId}/status`).then(applyIncomingStatus).catch(() => {});
@@ -1434,6 +1488,18 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   }, [applyIncomingStatus, fetchData, guildId, queuePage]);
 
   useEffect(() => {
+    const updatePosition = () => {
+      const clock = playerClockRef.current;
+      if (!clock.trackKey || clock.paused || localSeek !== null) return;
+      setLivePosition(Math.min(clock.duration || Infinity, clock.base + Date.now() - clock.startedAt));
+    };
+
+    updatePosition();
+    const timer = setInterval(updatePosition, 250);
+    return () => clearInterval(timer);
+  }, [localSeek]);
+
+  useEffect(() => {
     apiFetch<{ presets: FilterPreset[] }>(`/guilds/${guildId}/player/filters`)
       .then((res) => {
         const presets = res.presets || [];
@@ -1469,6 +1535,21 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     if (status) {
       const newStatus = { ...status };
       if (action === 'toggle') newStatus.paused = !newStatus.paused;
+      if (action === 'toggle' && status.currentTrack) {
+        const clock = playerClockRef.current;
+        const position = Math.min(
+          status.currentTrack.duration || Infinity,
+          clock.trackKey ? clock.base + (clock.paused ? 0 : Date.now() - clock.startedAt) : status.currentTrack.position,
+        );
+        playerClockRef.current = {
+          trackKey: clock.trackKey || `${status.currentTrack.uri}|${status.currentTrack.title}|${status.currentTrack.author}`,
+          base: position,
+          startedAt: Date.now(),
+          duration: status.currentTrack.duration || 0,
+          paused: !status.paused,
+        };
+        setLivePosition(position);
+      }
       if (action === 'volume' && body?.volume !== undefined) newStatus.volume = body.volume as number;
       if (action === 'seek' && body?.position !== undefined && newStatus.currentTrack) {
         newStatus.currentTrack = { ...newStatus.currentTrack, position: body.position as number };
@@ -1489,7 +1570,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     }
 
     try {
-      await apiFetch(`/guilds/${guildId}/player/${action}`, {
+      const result = await apiFetch<{ message?: string; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/guilds/${guildId}/player/${action}`, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -1497,7 +1578,10 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       fetchData();
 
       if (!silentActions.has(action)) {
-        toast.success('Action applied', actionDescriptions[action] || 'Player action completed.');
+        const description = action === 'skip' && result.message
+          ? result.message
+          : actionDescriptions[action] || 'Player action completed.';
+        toast.success(result.voteSkip ? 'Vote registered' : 'Action applied', description);
       }
     } catch (err) {
       console.error('Player action failed:', err);
@@ -1636,8 +1720,19 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   };
 
   const handleSeekCommit = (pos: number) => {
-    if (status?.paused && status.currentTrack) {
-      pausedTrackKeyRef.current = `${status.currentTrack.uri}|${status.currentTrack.title}|${status.currentTrack.author}`;
+    const track = status?.currentTrack;
+    if (track) {
+      playerClockRef.current = {
+        trackKey: `${track.uri}|${track.title}|${track.author}`,
+        base: pos,
+        startedAt: Date.now(),
+        duration: track.duration || 0,
+        paused: status.paused,
+      };
+      setLivePosition(pos);
+    }
+    if (status?.paused && track) {
+      pausedTrackKeyRef.current = `${track.uri}|${track.title}|${track.author}`;
       pausedTrackPositionRef.current = pos;
     }
     playerAction('seek', { position: pos });
@@ -1712,7 +1807,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   );
 
   const currentDuration = status.currentTrack?.duration || 0;
-  const currentPos = localSeek !== null ? localSeek : (status.currentTrack?.position || 0);
+  const currentPos = localSeek !== null ? localSeek : livePosition;
   const hasCurrentTrack = Boolean(status.connected && status.currentTrack);
   const canUsePlayerControls = Boolean(status.connected);
   const canControlTrack = Boolean(status.connected && status.currentTrack);
@@ -1828,7 +1923,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
             <CtrlBtn onClick={() => playerAction('toggle')} title={status.paused ? 'Play' : 'Pause'} primary disabled={!canControlTrack}>
               {status.paused ? <Play size={18} /> : <Pause size={18} />}
             </CtrlBtn>
-            <CtrlBtn onClick={() => playerAction('skip')} title="Skip" disabled={!canControlTrack}>
+            <CtrlBtn onClick={() => playerAction('skip')} title={status.voteSkip ? `Vote skip ${status.voteSkip.votes}/${status.voteSkip.requiredVotes}` : 'Skip'} disabled={!canControlTrack}>
               <SkipForward size={16} />
             </CtrlBtn>
             <CtrlBtn onClick={() => playerAction('stop')} title="Stop" disabled={!canUseDJControls || !canControlTrack}>

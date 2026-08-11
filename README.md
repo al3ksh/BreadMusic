@@ -57,6 +57,8 @@ Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
 
 - Prefetches one candidate before the queue ends.
 - Never jumps ahead of tracks manually added to the queue.
+- Builds a rotating session profile from the last 40 manually requested tracks instead of replacing the seed after every request.
+- Searches from up to three manual anchors per cycle and rewards candidates found through multiple anchors.
 - Learns from skipped autoplay tracks during the current bot session.
 - Avoids recent tracks, repeated artists and weak recommendations.
 - Ignores local uploads as recommendation seeds.
@@ -293,6 +295,14 @@ Change access from Dashboard Settings or Discord:
 | `/help` | Show the complete command list |
 
 Economy and game commands are documented by `/help` inside Discord.
+
+Listening statistics are available through `/stats user` and `/stats server`.
+User stats include top tracks and artists, source preference, active days and an
+estimated requested duration. `/stats server detailed:true` adds source ranking,
+requester ranking and retained activity patterns to the server overview.
+When a DJ role is configured, listeners without that role can still use Skip: Bread
+opens one shared vote in the player text channel, lists its voters and synchronizes
+its progress and final result with the dashboard and Discord Activity.
 
 ---
 

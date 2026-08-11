@@ -61,12 +61,14 @@ const { applyPreferredSource } = require('../music/searchUtils');
 const { handleSkipRequest } = require('../music/skipManager');
 const { markPlayerStopping } = require('../music/playerLifecycle');
 const { deleteInteractionReply } = require('../utils/interactions');
-const { isAutoplayEnabled, toggleAutoplay, resetSeed, clearAutoplayState } = require('../music/autoplay');
+const { isAutoplayEnabled, toggleAutoplay, addManualSeed, clearAutoplayState } = require('../music/autoplay');
 const { classifyPlaybackError, describeSearchFailure } = require('../music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('../music/voiceStatus');
 const { findLyrics, trackToLyricsQuery, LyricsProviderError } = require('../music/lyrics');
 const { BRAND_COLORS } = require('../theme');
 const { buildDashboardUrl } = require('../dashboard/url');
+const { getGuildInsights, getUserInsights } = require('../state/analyticsStore');
+const { withGuildMutex } = require('../music/guildMutex');
 
 const FILTER_PRESET_CHOICES = [
   { value: 'bassboost', label: 'Bassboost', description: 'Deep, punchy bass boost.' },
@@ -116,6 +118,59 @@ const RADIO_EQ = [
   { band: 14, gain: -0.25 }, // 16kHz - cut
 ];
 
+function formatStatsDuration(milliseconds) {
+  const minutes = Math.max(0, Math.round((milliseconds || 0) / 60000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = minutes / 60;
+  return `${hours >= 10 ? hours.toFixed(1) : hours.toFixed(2)}h`;
+}
+
+function formatCompactRankedCounts(items, emptyMessage) {
+  if (!items?.length) return emptyMessage;
+  return items.map((item) => {
+    const name = String(item.name || 'Unknown');
+    const label = name.length > 28 ? `${name.slice(0, 25)}...` : name;
+    return `**${item.rank}. ${label}** ${item.count}x`;
+  }).join(' \u2022 ').slice(0, 1024);
+}
+
+function formatSourceLabel(value) {
+  const source = String(value || 'unknown');
+  const normalized = source.replace(/[\s_-]+/g, '').toLowerCase();
+  const labels = {
+    youtube: 'YouTube',
+    spotify: 'Spotify',
+    soundcloud: 'SoundCloud',
+    deezer: 'Deezer',
+    localupload: 'Upload',
+    unknown: 'Unknown',
+  };
+  return labels[normalized] || source.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
+function formatRankedSources(items, emptyMessage) {
+  if (!items?.length) return emptyMessage;
+  return items.map((item) => (
+    `**${item.rank}. ${formatSourceLabel(item.name)}** - ${item.count} plays`
+  )).join('\n').slice(0, 1024);
+}
+
+function formatRankedRequesters(items, emptyMessage) {
+  if (!items?.length) return emptyMessage;
+  return items.map((item) => (
+    `**${item.rank}. ${item.displayName}** - ${item.count} requests`
+  )).join('\n').slice(0, 1024);
+}
+
+function formatRankedTracks(items, emptyMessage) {
+  if (!items?.length) return emptyMessage;
+  return items.map((item) => {
+    const rawTitle = String(item.title || 'Unknown');
+    const title = rawTitle.length > 56 ? `${rawTitle.slice(0, 53)}...` : rawTitle;
+    return `**${item.rank}. ${title} (${item.count}x)**`;
+  }).join('\n').slice(0, 1024);
+}
+
 const FILTER_PRESETS = {
   bassboost: async (manager) => manager.setEQ(BASSBOOST_EQ),
   nightcore: async (manager) => manager.toggleNightcore(1.25, 1.2, 1),
@@ -143,7 +198,7 @@ const HELP_CATEGORIES = [
       { name: '/play', value: 'Play or queue a track/playlist.' },
       { name: '/pause', value: 'Pause playback.' },
       { name: '/resume', value: 'Resume playback.' },
-      { name: '/skip', value: 'Skip the current track.' },
+      { name: '/skip', value: 'Skip the track or start/join a listener vote.' },
       { name: '/stop', value: 'Stop playback and clear queue.' },
       { name: '/queue', value: 'Show the queue.' },
       { name: '/nowplaying', value: 'Show current track info.' },
@@ -170,6 +225,7 @@ const HELP_CATEGORIES = [
       { name: '/help', value: 'Show this help menu.' },
       { name: '/ping', value: 'Check latency.' },
       { name: '/dashboard', value: 'Open the web dashboard for this server.' },
+      { name: '/stats', value: 'Show member or server listening statistics.' },
       { name: '/config', value: 'Manage guild settings (or use the dashboard).' },
     ],
   },
@@ -197,13 +253,42 @@ const HELP_CATEGORIES = [
   },
 ];
 
-function buildHelpEmbed(pageIndex) {
-  const category = HELP_CATEGORIES[pageIndex];
+const HELP_PAGE_COUNT = HELP_CATEGORIES.length + 1;
+
+function buildHelpEmbed(pageIndex, options = {}) {
+  if (pageIndex === 0) {
+    const embed = new EmbedBuilder()
+      .setTitle('Bread is easier to use now')
+      .setDescription('Bread now includes a web dashboard and a Discord Activity for simpler music playback and control.')
+      .setColor(BRAND_COLORS.primary)
+      .addFields(
+        {
+          name: '\u{1F310} Web Dashboard',
+          value: 'Manage the queue, settings, lyrics, uploads, history, and live playback from `/dashboard`.',
+          inline: true,
+        },
+        {
+          name: '\u{1F3AE} Discord Activity',
+          value: 'Open Bread from your voice channel to search, queue, control playback, and use karaoke together.',
+          inline: true,
+        },
+        {
+          name: '\u{1F680} Quick start',
+          value: 'Use `/play` in Discord, `/dashboard` for the full control panel, or press **Next** for the command list.',
+        },
+      )
+      .setFooter({ text: `Page 1/${HELP_PAGE_COUNT} - Use the buttons to browse` });
+
+    if (options.botAvatar) embed.setImage(options.botAvatar);
+    return embed;
+  }
+
+  const category = HELP_CATEGORIES[pageIndex - 1] || HELP_CATEGORIES[0];
   const embed = new EmbedBuilder()
     .setTitle(`Bread - Help (${category.name})`)
     .setDescription(category.description)
     .setColor(BRAND_COLORS.primary)
-    .setFooter({ text: `Page ${pageIndex + 1}/${HELP_CATEGORIES.length}` });
+    .setFooter({ text: `Page ${pageIndex + 1}/${HELP_PAGE_COUNT}` });
 
   for (const cmd of category.commands) {
     embed.addFields({ name: cmd.name, value: cmd.value, inline: true });
@@ -212,7 +297,7 @@ function buildHelpEmbed(pageIndex) {
   return embed;
 }
 
-function buildHelpComponents(pageIndex, userId) {
+function buildHelpComponents(pageIndex, userId, dashboardUrl) {
   const row = new ActionRowBuilder();
 
   const prevButton = new ButtonBuilder()
@@ -225,9 +310,17 @@ function buildHelpComponents(pageIndex, userId) {
     .setCustomId(`help:next:${userId}:${pageIndex}`)
     .setLabel('▶')
     .setStyle(ButtonStyle.Primary)
-    .setDisabled(pageIndex === HELP_CATEGORIES.length - 1);
+    .setDisabled(pageIndex === HELP_PAGE_COUNT - 1);
 
   row.addComponents(prevButton, nextButton);
+  if (pageIndex === 0 && dashboardUrl) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel('Open Dashboard')
+        .setURL(dashboardUrl),
+    );
+  }
   return [row];
 }
 
@@ -236,8 +329,10 @@ const commands = [
     data: new SlashCommandBuilder().setName('help').setDescription('Command list and quick tips.'),
     async execute(interaction) {
       const pageIndex = 0;
-      const embed = buildHelpEmbed(pageIndex);
-      const components = buildHelpComponents(pageIndex, interaction.user.id);
+      const botAvatar = interaction.client.user?.displayAvatarURL({ size: 1024 }) ?? null;
+      const dashboardUrl = buildDashboardUrl(interaction.guildId, 'player');
+      const embed = buildHelpEmbed(pageIndex, { botAvatar });
+      const components = buildHelpComponents(pageIndex, interaction.user.id, dashboardUrl);
       await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
     },
   },
@@ -351,17 +446,7 @@ const commands = [
         tracksToAdd = isPlaylist ? searchResult.tracks : [searchResult.tracks[0]];
       }
 
-      const seedTrack = tracksToAdd[0];
-      if (seedTrack?.info) {
-        resetSeed(player.guildId, {
-          title: seedTrack.info.title,
-          author: seedTrack.info.author,
-          identifier: seedTrack.info.identifier,
-          uri: seedTrack.info.uri,
-          duration: seedTrack.info.duration ?? seedTrack.info.length,
-          sourceName: seedTrack.info.sourceName,
-        });
-      }
+      tracksToAdd.forEach((track) => addManualSeed(player.guildId, track));
       
       const autoplayIndex = player.queue.tracks.findIndex(t => t.isAutoplay);
       if (autoplayIndex !== -1) {
@@ -398,7 +483,9 @@ const commands = [
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
-      const result = await handleSkipRequest(interaction, player, config, interaction.client);
+      const result = await withGuildMutex(interaction.guildId, () =>
+        handleSkipRequest(interaction, player, config, interaction.client),
+      );
       if (result.skipped) {
         if (result.needsAutoplay && result.lastTrack) {
           const { handleAutoplay } = require('../music/autoplay');
@@ -739,6 +826,134 @@ const commands = [
         guildId: interaction.guildId,
         track: sourceTrack,
       });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('stats')
+      .setDescription('Show Bread listening statistics.')
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName('user')
+          .setDescription('Show requests and favorite tracks for a member.')
+          .addUserOption((option) => option.setName('member').setDescription('Member (defaults to you)'))
+          .addStringOption((option) =>
+            option
+              .setName('range')
+              .setDescription('Time range')
+              .addChoices(
+                { name: 'Last 24 hours', value: '24h' },
+                { name: 'Last 7 days', value: '7d' },
+                { name: 'All time', value: 'all' },
+              ),
+          ),
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName('server')
+          .setDescription('Show listening statistics for this server.')
+          .addStringOption((option) =>
+            option
+              .setName('range')
+              .setDescription('Time range')
+              .addChoices(
+                { name: 'Last 24 hours', value: '24h' },
+                { name: 'Last 7 days', value: '7d' },
+                { name: 'All time', value: 'all' },
+              ),
+          )
+          .addBooleanOption((option) =>
+            option
+              .setName('detailed')
+              .setDescription('Include sources, activity patterns and top requesters'),
+          ),
+      ),
+    async execute(interaction) {
+      await interaction.deferReply();
+      const subcommand = interaction.options.getSubcommand();
+      const range = interaction.options.getString('range') || 'all';
+      const rangeLabel = range === '24h' ? 'Last 24 hours' : range === '7d' ? 'Last 7 days' : 'All time';
+
+      if (subcommand === 'server') {
+        const detailed = interaction.options.getBoolean('detailed') || false;
+        const insights = getGuildInsights(interaction.guildId, { range, limit: 5 });
+        const tracks = formatRankedTracks(insights.topTracks, 'No plays recorded in this period.');
+        const users = formatRankedRequesters(insights.topUsers, 'No requesters recorded in this period.');
+        const details = insights.details;
+        const activityHour = details.mostActiveHour === null
+          ? 'No retained activity'
+          : `${String(details.mostActiveHour).padStart(2, '0')}:00-${String((details.mostActiveHour + 1) % 24).padStart(2, '0')}:00 UTC`;
+        const embed = new EmbedBuilder()
+          .setTitle('\u{1F4CA} Playback Stats')
+          .setAuthor({ name: interaction.guild.name, iconURL: interaction.guild.iconURL({ size: 128 }) || undefined })
+          .setDescription(`\u{1F4C5} ${rangeLabel}${detailed ? '  \u2022  detailed' : ''}`)
+          .setColor(BRAND_COLORS.primary)
+          .addFields(
+            {
+              name: '\u{1F3B6} Listening',
+              value: `**${insights.summary.totalPlays}** plays  \u2022  **${formatStatsDuration(details.estimatedDuration)}** listened  \u2022  **${insights.summary.uniqueTracks}** tracks`,
+              inline: true,
+            },
+            {
+              name: '\u{1F465} Community',
+              value: `**${insights.summary.uniqueUsers}** requesters  \u2022  **${details.autoplayPlays}** autoplay  \u2022  **${details.averagePerActiveDay.toFixed(1)}**/active day`,
+              inline: true,
+            },
+            { name: '\u{1F3A7} Top Tracks', value: tracks.slice(0, 1024) },
+          );
+        if (detailed) {
+          embed.addFields(
+            { name: '\u{1F30D} Sources', value: formatRankedSources(details.topSources, 'No source data recorded.'), inline: false },
+            { name: '\u{23F1} Activity', value: `Peak **${activityHour}**  \u2022  **${details.activeDays}** active days  \u2022  **${details.longestStreakDays} days** longest streak`, inline: true },
+            { name: '\u{1F465} Top Requesters', value: users, inline: false },
+          );
+        }
+        if (details.historyScoped) {
+          embed.setFooter({ text: `Activity hour, streak and autoplay use the last ${insights.detailedHistoryDays} days; totals, tracks and sources are all-time.` });
+        }
+        await interaction.editReply({ embeds: [embed] });
+        return;
+      }
+
+      const user = interaction.options.getUser('member') || interaction.user;
+      const insights = getUserInsights(interaction.guildId, user.id, { range, limit: 5 });
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+      const tracks = formatRankedTracks(insights.topTracks, 'No requests recorded in the retained detailed history.');
+      const embed = new EmbedBuilder()
+        .setTitle(`\u{1F3B5} ${user.globalName || user.username}'s Music Wrapped`)
+        .setDescription(`\u{1F4C5} ${rangeLabel}`)
+        .setThumbnail(user.displayAvatarURL({ size: 128 }))
+        .setColor(BRAND_COLORS.primary)
+        .addFields(
+          {
+            name: '\u{1F3B6} Listening',
+            value: `**${insights.totalRequests}** requests  \u2022  **${formatStatsDuration(insights.details.estimatedDuration)}** listened`,
+            inline: true,
+          },
+          {
+            name: '\u{1F4C8} Rhythm',
+            value: `**${insights.details.averagePerActiveDay.toFixed(1)}**/active day  \u2022  **${insights.details.activeDays}** active days  \u2022  **${insights.details.longestStreakDays} days** longest streak`,
+            inline: true,
+          },
+          { name: '\u{1F3A7} Top Tracks', value: tracks.slice(0, 1024) },
+          { name: '\u{1F3A4} Top Artists', value: formatCompactRankedCounts(insights.details.topArtists, 'No artist data recorded.'), inline: true },
+          {
+            name: '\u{1F30D} Favorite Source',
+            value: `**${formatSourceLabel(insights.details.topSources[0]?.name)}**`,
+            inline: true,
+          },
+        );
+      if (member?.joinedTimestamp || insights.lastRequestAt) {
+        const footerParts = [];
+        if (member?.joinedTimestamp) footerParts.push(`Member since ${new Date(member.joinedTimestamp).toISOString().slice(0, 10)}`);
+        if (insights.lastRequestAt) footerParts.push(`Last request ${new Date(insights.lastRequestAt).toISOString().slice(0, 10)}`);
+        embed.setFooter({ text: footerParts.join(' - ') });
+      }
+      if (range === 'all') {
+        const existingFooter = embed.data.footer?.text ? `${embed.data.footer.text} - ` : '';
+        embed.setFooter({ text: `${existingFooter}duration, rankings and patterns use the last ${insights.detailedHistoryDays} days.` });
+      }
+      await interaction.editReply({ embeds: [embed] });
     },
   },
   {
@@ -1438,4 +1653,5 @@ module.exports = {
   buildHelpEmbed,
   buildHelpComponents,
   HELP_CATEGORIES,
+  HELP_PAGE_COUNT,
 };
