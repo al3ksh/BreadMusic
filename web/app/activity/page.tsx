@@ -164,6 +164,7 @@ export default function ActivityPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchTrack[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchCompletedQuery, setSearchCompletedQuery] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
@@ -667,16 +668,21 @@ export default function ActivityPage() {
     const controller = new AbortController();
     searchAbortRef.current = controller;
     setSearching(true);
+    setSearchCompletedQuery('');
     try {
       const result = await activityFetch<{ tracks: SearchTrack[] }>(`/api/guilds/${guildId}/player/search`, {
         method: 'POST',
         body: JSON.stringify({ query }),
         signal: controller.signal,
       });
-      if (!controller.signal.aborted) setSearchResults(result.tracks || []);
+      if (!controller.signal.aborted) {
+        setSearchResults(result.tracks || []);
+        setSearchCompletedQuery(query);
+      }
     } catch (error) {
       if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
       setSearchResults([]);
+      setSearchCompletedQuery('');
       notify(error instanceof Error ? error.message : 'Search failed', 'error');
     } finally {
       if (searchAbortRef.current === controller) {
@@ -702,6 +708,7 @@ export default function ActivityPage() {
       searchAbortRef.current = null;
       setSearchResults([]);
       setSearching(false);
+      setSearchCompletedQuery('');
       return;
     }
     searchDebounceTimerRef.current = window.setTimeout(() => {
@@ -1278,6 +1285,13 @@ export default function ActivityPage() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    )}
+                    {!searching && searchResults.length === 0 && searchCompletedQuery === searchQuery.trim() && searchCompletedQuery && (
+                      <div className="activity-search-empty" role="status">
+                        <span><Search size={21} /></span>
+                        <strong>No results found</strong>
+                        <p>Try another title or artist, or paste a direct track link.</p>
                       </div>
                     )}
                   </div>
