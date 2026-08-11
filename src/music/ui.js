@@ -191,7 +191,8 @@ class MusicUI {
     const channelId = player.textChannelId;
     if (!channelId) return;
 
-    const channel = this.client.channels.cache.get(channelId);
+    const channel = this.client.channels.cache.get(channelId) ??
+      await this.client.channels.fetch(channelId).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
 
     if (existing) {
@@ -214,17 +215,19 @@ class MusicUI {
   }
 
   async clear(guildId) {
-    const record = this.messages.get(guildId);
-    if (record?.message) {
-      try {
-        await record.message.delete();
-      } catch (error) {
-        if (error.code !== 10008) {
-          console.error('Failed to clear now-playing message:', error);
+    await this.withLock(guildId, async () => {
+      const record = this.messages.get(guildId);
+      if (record?.message) {
+        try {
+          await record.message.delete();
+        } catch (error) {
+          if (error.code !== 10008) {
+            console.error('Failed to clear now-playing message:', error);
+          }
         }
       }
-    }
-    this.messages.delete(guildId);
+      this.messages.delete(guildId);
+    });
   }
 }
 

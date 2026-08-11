@@ -1294,7 +1294,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const [status, setStatus] = useState<PlayerStatus | null>(null);
   const [queue, setQueue] = useState<{ current: QueueTrack | null; tracks: QueueTrack[]; total: number; page: number; totalPages: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ title: string; author: string; uri: string; duration: number; artwork?: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string }[]>([]);
+  const [searchedQuery, setSearchedQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [queuePage, setQueuePage] = useState(0);
   const [filterPresets, setFilterPresets] = useState<FilterPreset[]>([]);
@@ -1384,6 +1385,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   useEffect(() => {
     let source: EventSource | null = null;
     let fallbackInterval: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
     let usingFallback = false;
 
     const startFallback = () => {
@@ -1394,7 +1397,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
 
     fetchData();
 
-    if (typeof window !== 'undefined' && 'EventSource' in window) {
+    const connect = () => {
+      if (stopped) return;
       source = new EventSource(`/api/guilds/${guildId}/player/events?page=${queuePage}`);
       source.addEventListener('snapshot', (event) => {
         try {
@@ -1410,14 +1414,21 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       });
       source.onerror = () => {
         source?.close();
-        startFallback();
+        source = null;
+        if (!stopped) reconnectTimer = setTimeout(connect, 1000);
       };
+    };
+
+    if (typeof window !== 'undefined' && 'EventSource' in window) {
+      connect();
     } else {
       startFallback();
     }
 
     return () => {
+      stopped = true;
       source?.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (fallbackInterval) clearInterval(fallbackInterval);
     };
   }, [applyIncomingStatus, fetchData, guildId, queuePage]);
@@ -1501,13 +1512,15 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     if (!query) return;
     setSearching(true);
     try {
-      const res = await apiFetch<{ tracks: { title: string; author: string; uri: string; duration: number; artwork?: string }[] }>(
+      const res = await apiFetch<{ tracks: { encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string }[] }>(
         `/guilds/${guildId}/player/search`,
         { method: 'POST', body: JSON.stringify({ query }) },
       );
       setSearchResults(res.tracks || []);
+      setSearchedQuery(query);
     } catch {
       setSearchResults([]);
+      setSearchedQuery(query);
       toast.error('Search failed', 'Could not load search results for this query.');
     } finally {
       setSearching(false);
@@ -1519,6 +1532,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const handleInputSubmit = useCallback(async () => {
     const query = searchQuery.trim();
     if (!query) return;
+    if (searchedQuery === query) return;
 
     if (isLikelyLink(query)) {
       setSearching(true);
@@ -1526,6 +1540,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
         await playerAction('play', { query });
         setSearchQuery('');
         setSearchResults([]);
+        setSearchedQuery('');
       } finally {
         setSearching(false);
       }
@@ -1533,7 +1548,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     }
 
     await handleSearch(query);
-  }, [handleSearch, playerAction, searchQuery]);
+  }, [handleSearch, playerAction, searchQuery, searchedQuery]);
 
   const handleUploadFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
@@ -1702,9 +1717,10 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const canUsePlayerControls = Boolean(status.connected);
   const canControlTrack = Boolean(status.connected && status.currentTrack);
   const canUseDJControls = capabilities.accessLevel !== 'member';
+  const canSeekTrack = Boolean(canUseDJControls && canControlTrack && status.currentTrack?.seekable);
 
   const updateSeekPreview = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
-    if (!currentDuration) {
+    if (!canSeekTrack || !currentDuration) {
       setSeekPreview(null);
       return;
     }
@@ -1740,7 +1756,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                   <p className="text-sm text-text-secondary truncate mt-0.5">{status.currentTrack.author}</p>
                   <div className="mt-4 group/slider">
                     <div className="relative">
-                      {seekPreview && canUseDJControls && canControlTrack && (
+                      {seekPreview && canSeekTrack && (
                         <div
                           className="pointer-events-none absolute -top-8 z-10 rounded bg-bg-primary border border-border px-1.5 py-0.5 text-[11px] font-medium text-text-primary shadow-lg tabular-nums"
                           style={{ left: `${seekPreview.left}%`, transform: 'translateX(-50%)' }}
@@ -1763,7 +1779,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                           setSeekPreview(null);
                         }}
                         onMouseUp={(e) => handleSeekCommit(Number((e.target as HTMLInputElement).value))}
-                        disabled={!canUseDJControls || !canControlTrack}
+                        disabled={!canSeekTrack}
                         className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-border transition-all duration-200 hover:h-2 disabled:cursor-not-allowed disabled:opacity-60
                           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(90,84,148,0.6)] [&::-webkit-slider-thumb]:opacity-0 hover:[&::-webkit-slider-thumb]:opacity-100 [&::-webkit-slider-thumb]:transition-opacity
                           [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:shadow-[0_0_10px_rgba(90,84,148,0.6)] [&::-moz-range-thumb]:opacity-0 hover:[&::-moz-range-thumb]:opacity-100"
@@ -1948,9 +1964,20 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                   <button
                     key={`${track.uri}-${i}`}
                     onClick={() => {
-                      playerAction('play', { query: track.uri || `${track.author} ${track.title}` });
+                      playerAction('play', {
+                        encoded: track.encoded,
+                        query: track.encoded ? undefined : track.uri || `${track.author} ${track.title}`,
+                        track: {
+                          title: track.title,
+                          author: track.author,
+                          uri: track.uri,
+                          duration: track.duration,
+                          artwork: track.artwork,
+                        },
+                      });
                       setSearchResults([]);
                       setSearchQuery('');
+                      setSearchedQuery('');
                     }}
                     className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-bg-hover transition-colors text-left cursor-pointer border-b border-border/50 last:border-0"
                   >
@@ -1966,6 +1993,11 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                     <span className="text-xs text-text-muted tabular-nums">{formatDuration(track.duration)}</span>
                   </button>
                 ))}
+              </div>
+            )}
+            {!searching && searchedQuery === searchQuery.trim() && searchedQuery && searchResults.length === 0 && (
+              <div className="mt-3 rounded-md border border-border bg-bg-secondary/40 px-4 py-5 text-center text-sm text-text-muted">
+                No results found. Try another title or artist, or paste a direct track link.
               </div>
             )}
           </div>
@@ -2373,32 +2405,69 @@ function ControlTab({ guildId }: { guildId: string }) {
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     const timeout = setTimeout(() => {
-      apiFetch<{ members: DiscordMember[] }>(`/guilds/${guildId}/members?q=${encodeURIComponent(query)}&limit=8`)
+      apiFetch<{ members: DiscordMember[] }>(`/guilds/${guildId}/members?q=${encodeURIComponent(query)}&limit=8`, {
+        signal: controller.signal,
+      })
         .then((res) => {
           if (!cancelled) setMembers(res.members || []);
         })
         .catch(() => {
-          if (!cancelled) setMembers([]);
+          if (!cancelled && !controller.signal.aborted) setMembers([]);
         });
     }, 250);
 
     return () => {
       cancelled = true;
       clearTimeout(timeout);
+      controller.abort();
     };
   }, [guildId, memberMentionQuery]);
 
   useEffect(() => {
     if (!selectedTextId) return;
+    let stopped = false;
+    let controller: AbortController | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
     const fetchMsgs = () => {
-      apiFetch<ChatMessage[]>(`/guilds/${guildId}/control/messages?channelId=${selectedTextId}`)
-        .then(res => setChatMessages(res))
+      controller?.abort();
+      controller = new AbortController();
+      apiFetch<ChatMessage[]>(`/guilds/${guildId}/control/messages?channelId=${selectedTextId}`, {
+        signal: controller.signal,
+      })
+        .then(res => { if (!stopped) setChatMessages(res); })
         .catch(() => {});
     };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    const startPolling = () => {
+      stopPolling();
+      if (!document.hidden) interval = setInterval(fetchMsgs, 10_000);
+    };
+
     fetchMsgs();
-    const interval = setInterval(fetchMsgs, 8000);
-    return () => clearInterval(interval);
+    startPolling();
+    const handleVisibilityChange = () => {
+      if (document.hidden) stopPolling();
+      else {
+        fetchMsgs();
+        startPolling();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      stopped = true;
+      stopPolling();
+      controller?.abort();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [guildId, selectedTextId]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

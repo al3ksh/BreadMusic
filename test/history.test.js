@@ -7,10 +7,12 @@ const path = require('node:path');
 test('play events are exposed as paginated history', async () => {
   const originalCwd = process.cwd();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bread-history-'));
+  let closeDatabases = () => {};
   process.chdir(tempDir);
 
   try {
     const { recordTrackPlay, getGuildHistory } = require('../src/state/analyticsStore');
+    ({ closeDatabases } = require('../src/state/sqliteStore'));
     recordTrackPlay('guild-1', {
       info: {
         identifier: 'track-1',
@@ -37,6 +39,7 @@ test('play events are exposed as paginated history', async () => {
     assert.equal(history.items[0].autoplay, true);
     await new Promise((resolve) => setTimeout(resolve, 1100));
   } finally {
+    closeDatabases();
     process.chdir(originalCwd);
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

@@ -9,6 +9,8 @@ function loadConfig() {
     DISCORD_TOKEN,
     DISCORD_CLIENT_ID,
     DISCORD_GUILD_ID,
+    COMMAND_GUILD_IDS,
+    COMMAND_CLEANUP_GUILD_IDS,
     LAVALINK_HOST,
     LAVALINK_PORT,
     LAVALINK_PASSWORD,
@@ -69,6 +71,14 @@ function loadConfig() {
     token: DISCORD_TOKEN,
     clientId: DISCORD_CLIENT_ID,
     guildId: DISCORD_GUILD_ID,
+    commandGuildIds: String(COMMAND_GUILD_IDS || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^\d{17,20}$/.test(id)),
+    commandCleanupGuildIds: String(COMMAND_CLEANUP_GUILD_IDS || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^\d{17,20}$/.test(id)),
     lavalink: {
       nodes,
       defaultSource: DEFAULT_SOURCE || 'ytsearch',

@@ -8,6 +8,10 @@ function createFileSessionStore(session, options = {}) {
   const Store = session.Store;
   const directory = options.directory || path.join(process.cwd(), 'data', 'sessions');
   const ttlMs = options.ttlMs || DEFAULT_TTL_MS;
+  const configuredSecret = options.secret || process.env.SESSION_SECRET;
+  const encryptionKey = configuredSecret
+    ? crypto.createHash('sha256').update(String(configuredSecret)).digest()
+    : null;
 
   class FileSessionStore extends Store {
     constructor() {
@@ -17,6 +21,12 @@ function createFileSessionStore(session, options = {}) {
       this._pruneExpired().catch((error) => {
         console.warn('Failed to prune expired sessions:', error.message);
       });
+      this.pruneTimer = setInterval(() => {
+        this._pruneExpired().catch((error) => {
+          console.warn('Failed to prune expired sessions:', error.message);
+        });
+      }, 6 * 60 * 60 * 1000);
+      this.pruneTimer.unref?.();
     }
 
     get(sid, callback) {
@@ -91,7 +101,11 @@ function createFileSessionStore(session, options = {}) {
           await fs.promises.unlink(filePath).catch(() => {});
           return null;
         }
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.session === 'string' && encryptionKey) {
+          parsed.session = decryptSession(parsed.session, encryptionKey);
+        }
+        return parsed;
       } catch (error) {
         if (error.code === 'ENOENT') return null;
         if (error instanceof SyntaxError) {
@@ -106,7 +120,10 @@ function createFileSessionStore(session, options = {}) {
       const filePath = this._filePath(sid);
       const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
       try {
-        await fs.promises.writeFile(tmpPath, JSON.stringify(record), 'utf8');
+        const persisted = encryptionKey
+          ? { ...record, session: encryptSession(record.session, encryptionKey) }
+          : record;
+        await fs.promises.writeFile(tmpPath, JSON.stringify(persisted), 'utf8');
         await renameWithRetry(tmpPath, filePath);
       } catch (error) {
         await fs.promises.unlink(tmpPath).catch(() => {});
@@ -160,7 +177,7 @@ async function renameWithRetry(source, destination, attempts = 5) {
       await fs.promises.rename(source, destination);
       return;
     } catch (error) {
-      const retryable = error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY';
+      const retryable = error.code === 'ENOENT' || error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY';
       if (!retryable || attempt === attempts - 1) throw error;
       await delay(25 * (attempt + 1));
     }
@@ -169,6 +186,29 @@ async function renameWithRetry(source, destination, attempts = 5) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function encryptSession(session, key) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(session), 'utf8'),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  return `v1.${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
+}
+
+function decryptSession(value, key) {
+  if (!value.startsWith('v1.')) return value;
+  const [, ivValue, tagValue, ciphertextValue] = value.split('.');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivValue, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(ciphertextValue, 'base64url')),
+    decipher.final(),
+  ]).toString('utf8');
+  return JSON.parse(plaintext);
 }
 
 module.exports = {

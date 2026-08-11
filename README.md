@@ -38,7 +38,7 @@ Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
 | Lavalink | Audio loading, streaming, filters and source plugins |
 | API | OAuth, dashboard data, player actions and live SSE updates |
 | Dashboard | Player, queue, history, lyrics, settings and remote control |
-| JSON stores | Guild configuration, sessions, queues and analytics |
+| SQLite + encrypted sessions | Guild configuration, queues, analytics, economy and OAuth sessions |
 
 ## Features
 
@@ -75,7 +75,7 @@ Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
 - Stored separately for every Discord server.
 - Includes track metadata, requester, source and autoplay state.
 - Retained for 35 days with a limit of 40,000 events per guild.
-- Survives bot and container restarts through data/analytics.json.
+- Survives bot and container restarts through `data/bread.sqlite`.
 
 ### Discord Activity
 
@@ -146,8 +146,14 @@ API        http://localhost:3001
 Lavalink   http://localhost:2333
 ```
 
-> Slash commands are registered globally when `DISCORD_GUILD_ID` is empty.
-> Set it only when immediate registration on one development server is needed.
+> Slash commands are registered globally. Discord can take up to an hour to propagate
+> global command changes. `DISCORD_GUILD_ID`, `COMMAND_GUILD_IDS` and
+> `COMMAND_CLEANUP_GUILD_IDS` are only used to remove legacy guild-scoped commands.
+
+Persistent bot state is stored in `data/bread.sqlite`. Existing `configs.json`,
+`queues.json`, `analytics.json` and `economy.json` files are migrated automatically on
+first startup and renamed with a `.migrated` suffix. OAuth sessions remain encrypted
+and stored separately in `data/sessions`.
 
 ---
 
@@ -343,9 +349,7 @@ docker compose config
 
 ```text
 data/
-|-- analytics.json      playback history and insights
-|-- configs.json        per-guild configuration
-|-- queues.json         persistent player queues
+|-- bread.sqlite        configuration, queues, analytics and economy
 |-- sessions/           OAuth sessions
 `-- uploads/            temporary local audio
 ```
@@ -364,7 +368,7 @@ Bread/
 |   |-- commands/               slash command definitions
 |   |-- dashboard/              access and capability rules
 |   |-- music/                  playback, autoplay, UI and lyrics
-|   |-- state/                  persistent JSON stores
+|   |-- state/                  SQLite-backed state stores
 |   |-- games/                  economy and games
 |   `-- utils/                  shared utilities
 |-- web/

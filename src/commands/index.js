@@ -23,6 +23,7 @@ const {
   buildQueueComponents,
 } = require('../music/queueFormatter');
 const { formatDuration, parseTimecode } = require('../utils/time');
+const { isTrackSeekable, isUnseekableTrackError } = require('../music/trackCapabilities');
 const { getSelection, deleteSelection } = require('../state/searchCache');
 const {
   startGame: startBlackjack,
@@ -444,7 +445,7 @@ const commands = [
     data: new SlashCommandBuilder()
       .setName('stop')
       .setDescription('Stop playback and clear the queue.')
-      .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers),
+      .setDMPermission(false),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
@@ -484,7 +485,7 @@ const commands = [
     data: new SlashCommandBuilder()
       .setName('leave')
       .setDescription('Disconnect the bot from the voice channel.')
-      .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers),
+      .setDMPermission(false),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player, config } = await ensurePlayer(interaction);
@@ -600,8 +601,18 @@ const commands = [
       if (!player.queue.current) {
         throw new CommandError('Nothing is playing.');
       }
+      if (!isTrackSeekable(player.queue.current)) {
+        throw new CommandError('This track cannot be seeked because it is a live stream or has no seekable source.');
+      }
       const targetPosition = parseTimecode(interaction.options.getString('position', true));
-      await player.seek(targetPosition);
+      try {
+        await player.seek(targetPosition);
+      } catch (error) {
+        if (isUnseekableTrackError(error)) {
+          throw new CommandError('This track cannot be seeked because it is a live stream or has no seekable source.');
+        }
+        throw error;
+      }
       await interaction.editReply(`Set position to ${formatDuration(targetPosition)}.`);
     },
   },
@@ -873,10 +884,18 @@ const commands = [
           .setDescription('Set selected options (dashboard available).')
           .addRoleOption((option) => option.setName('dj_role').setDescription('Rola DJ.'))
           .addIntegerOption((option) =>
-            option.setName('max_volume').setDescription('Maximum volume (0-150).'),
+            option
+              .setName('max_volume')
+              .setDescription('Maximum volume (10-500).')
+              .setMinValue(10)
+              .setMaxValue(500),
           )
           .addNumberOption((option) =>
-            option.setName('voteskip_percent').setDescription('Vote skip threshold (0-1).'),
+            option
+              .setName('voteskip_percent')
+              .setDescription('Vote skip threshold as a percentage (10-100).')
+              .setMinValue(10)
+              .setMaxValue(100),
           )
           .addBooleanOption((option) =>
             option.setName('stay_24_7').setDescription('Stay in channel?'),
@@ -914,7 +933,8 @@ const commands = [
               ),
           ),
       )
-      .addSubcommand((sub) => sub.setName('reset').setDescription('Restore default settings (dashboard available).')),
+      .addSubcommand((sub) => sub.setName('reset').setDescription('Restore default settings (dashboard available).'))
+      .setDMPermission(false),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const sub = interaction.options.getSubcommand();
@@ -955,7 +975,7 @@ const commands = [
       const maxVolume = interaction.options.getInteger('max_volume');
       if (maxVolume !== null) updates.maxVolume = Math.max(10, Math.min(500, maxVolume));
       const voteSkip = interaction.options.getNumber('voteskip_percent');
-      if (voteSkip !== null) updates.voteSkipPercent = Math.min(Math.max(voteSkip, 0.1), 1);
+      if (voteSkip !== null) updates.voteSkipPercent = Math.min(Math.max(voteSkip / 100, 0.1), 1);
       const stay = interaction.options.getBoolean('stay_24_7');
       if (stay !== null) updates.stayInChannel = stay;
       const voiceChannel = interaction.options.getChannel('voice_channel');

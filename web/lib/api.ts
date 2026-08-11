@@ -135,6 +135,7 @@ export interface PlayerStatus {
     uri: string;
     duration: number;
     position: number;
+    seekable: boolean;
     artwork?: string;
     requester: string;
   } | null;

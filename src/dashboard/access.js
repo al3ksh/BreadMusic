@@ -32,7 +32,9 @@ function resolveDashboardCapabilities(member, config) {
     dashboardAccess: configuredAccess,
     canAccess,
     canView: canAccess,
-    canControlPlayer: admin || (djAllowed && dj) || memberAllowed,
+    // Visibility and control are separate policies. With no configured DJ
+    // role, isGuildDJ intentionally treats every member as a DJ.
+    canControlPlayer: admin || dj,
     canUpload: admin || (djAllowed && dj),
     canManageConfig: admin,
     canManageEconomy: admin,

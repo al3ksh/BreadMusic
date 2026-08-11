@@ -18,7 +18,7 @@ const { MusicUI, BUTTON_PREFIX, BUTTONS } = require('./music/ui');
 const { handleSkipRequest } = require('./music/skipManager');
 const { isPlayerStopping, markPlayerStopping } = require('./music/playerLifecycle');
 const { buildTrackEmbed } = require('./music/embeds');
-const { savePlayerState, hydratePlayer } = require('./state/queueStore');
+const { savePlayerState, hydratePlayer, flushQueueStore } = require('./state/queueStore');
 const { recordTrackPlay } = require('./state/analyticsStore');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
 const { resetVotes } = require('./music/voteManager');
@@ -81,6 +81,15 @@ const MAX_AUTOCOMPLETE_RESULTS = 5;
 
 const config = loadConfig();
 let isShuttingDown = false;
+const trackErrorRecovery = new Set();
+
+function safeEventHandler(label, handler) {
+  return (...args) => {
+    Promise.resolve()
+      .then(() => handler(...args))
+      .catch((error) => console.error(`[${label}] handler failed:`, error));
+  };
+}
 
 const client = new Client({
   intents: [
@@ -305,7 +314,7 @@ client.on(Events.GuildCreate, async (guild) => {
   }).catch(() => {});
 });
 
-client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+client.on(Events.VoiceStateUpdate, safeEventHandler('VoiceStateUpdate', async (oldState, newState) => {
   const guildId = newState.guild?.id ?? oldState.guild?.id;
   if (!guildId) return;
   if (
@@ -321,10 +330,10 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   const affectedChannels = [oldState.channelId, newState.channelId];
   if (!affectedChannels.includes(player.voiceChannelId)) return;
 
-  handleVoiceStateUpdate(player, client);
-});
+  await handleVoiceStateUpdate(player, client);
+}));
 
-client.lavalink.on('trackStart', async (player, track) => {
+client.lavalink.on('trackStart', safeEventHandler('trackStart', async (player, track) => {
   resetVotes(player.guildId);
   clearIdleTimer(player.guildId);
   addToRecentTracks(player.guildId, track);
@@ -337,21 +346,45 @@ client.lavalink.on('trackStart', async (player, track) => {
     client.musicUI.sendNowPlaying(player, track),
     setVoiceTrackStatus(client, player, track),
   ]);
-});
+  broadcastPlayerUpdate(player.guildId);
+}));
 
-client.lavalink.on('trackEnd', async (player, track, payload) => {
+client.lavalink.on('trackEnd', safeEventHandler('trackEnd', async (player, track, payload) => {
   await savePlayerState(player).catch(() => {});
-});
+  broadcastPlayerUpdate(player.guildId);
+}));
 
-client.lavalink.on('trackError', async (player, track, payload) => {
+client.lavalink.on('trackError', safeEventHandler('trackError', async (player, track, payload) => {
   const exception = payload?.exception;
   console.error(
     `[TrackError] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} severity=${exception?.severity ?? 'unknown'} reason=${exception?.message ?? payload?.error ?? 'unknown'}`,
   );
   await client.musicUI.sendPlaybackError(player, track, payload);
-});
 
-client.lavalink.on('trackStuck', async (player, track, payload) => {
+  const guildId = player.guildId;
+  if (trackErrorRecovery.has(guildId) || isPlayerStopping(player)) return;
+  trackErrorRecovery.add(guildId);
+  try {
+    if (player.queue.tracks.length > 0) {
+      await player.skip();
+    } else {
+      await player.stopPlaying(false, false);
+      const recovered = await handleAutoplay(player, track, client);
+      if (!recovered) {
+        await clearVoiceTrackStatus(client, player);
+        await client.musicUI.refresh(player);
+        scheduleIdleLeave(player, client);
+      }
+    }
+  } catch (error) {
+    console.error(`[TrackError] Failed to recover guild ${guildId}:`, error);
+  } finally {
+    trackErrorRecovery.delete(guildId);
+    broadcastPlayerUpdate(guildId);
+  }
+}));
+
+client.lavalink.on('trackStuck', safeEventHandler('trackStuck', async (player, track, payload) => {
   console.warn(
     `[TrackStuck] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} threshold=${payload.thresholdMs}`,
   );
@@ -359,9 +392,10 @@ client.lavalink.on('trackStuck', async (player, track, payload) => {
     ...payload,
     message: `Track stuck after ${payload.thresholdMs}ms`,
   });
-});
+  broadcastPlayerUpdate(player.guildId);
+}));
 
-client.lavalink.on('queueEnd', async (player, track) => {
+client.lavalink.on('queueEnd', safeEventHandler('queueEnd', async (player, track) => {
   await savePlayerState(player).catch(() => {});
 
   if (isPlayerStopping(player)) return;
@@ -373,14 +407,16 @@ client.lavalink.on('queueEnd', async (player, track) => {
     scheduleIdleLeave(player, client);
     handleVoiceStateUpdate(player, client);
   }
-});
+  broadcastPlayerUpdate(player.guildId);
+}));
 
-client.lavalink.on('playerDestroy', async (player) => {
+client.lavalink.on('playerDestroy', safeEventHandler('playerDestroy', async (player) => {
   clearEmptyChannelTimer(player.guildId);
   clearAutoplayState(player.guildId);
   await clearVoiceTrackStatus(client, player);
   await client.musicUI.clear(player.guildId);
-});
+  broadcastPlayerUpdate(player.guildId);
+}));
 
 const nodeReconnectAttempts = new Map();
 
@@ -412,7 +448,7 @@ client.lavalink.nodeManager.on('error', (node, error) => {
   console.error(`Node ${node.id} error:`, error?.message ?? error);
 });
 
-const { createApiServer } = require('./server');
+const { createApiServer, broadcastPlayerUpdate } = require('./server');
 
 client
   .login(config.token)
@@ -1126,6 +1162,10 @@ async function gracefulShutdown(signal) {
   for (const guildId of client.musicUI?.messages?.keys() ?? []) {
     await client.musicUI.clear(guildId).catch(() => {});
   }
+
+  await flushQueueStore().catch((error) => {
+    console.error('Failed to flush queue store:', error);
+  });
   client.lyricsUI?.clearAll();
 
   try {

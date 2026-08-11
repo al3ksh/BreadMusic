@@ -36,13 +36,13 @@ test('everyone is treated as DJ when no DJ role is configured', () => {
   assert.equal(access.canManageConfig, false);
 });
 
-test('member access remains read/control only', () => {
+test('member access remains view-only for users without the DJ policy', () => {
   const access = resolveDashboardCapabilities(memberWith(), {
     dashboardAccess: 'members',
     djRoleId: 'dj-role',
   });
   assert.equal(access.canAccess, true);
-  assert.equal(access.canControlPlayer, true);
+  assert.equal(access.canControlPlayer, false);
   assert.equal(access.canUpload, false);
   assert.equal(access.canManageConfig, false);
   assert.equal(access.canUseRemoteControl, false);
@@ -59,11 +59,11 @@ test('activity is viewable without granting dashboard player controls', () => {
   assert.equal(access.canUpload, false);
 });
 
-test('activity respects all-members player access', () => {
+test('activity respects the configured DJ policy even when viewable by everyone', () => {
   const access = resolveActivityCapabilities(memberWith(), {
     dashboardAccess: 'members',
     djRoleId: 'dj-role',
   });
   assert.equal(access.canAccess, true);
-  assert.equal(access.canControlPlayer, true);
+  assert.equal(access.canControlPlayer, false);
 });

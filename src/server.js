@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { Transform } = require('stream');
 const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
 const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
@@ -12,11 +13,14 @@ const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('./music/voiceStatus');
 const { createFileSessionStore } = require('./state/sessionStore');
+const { hydratePlayer } = require('./state/queueStore');
 const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
 const { handleSkipRequest } = require('./music/skipManager');
 const { markPlayerStopping } = require('./music/playerLifecycle');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
+const { acquireGuildMutex } = require('./music/guildMutex');
+const { isTrackSeekable, isUnseekableTrackError } = require('./music/trackCapabilities');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const SCOPES = ['identify', 'guilds'].join(' ');
@@ -99,7 +103,12 @@ const FILTER_PRESETS = {
 const DASHBOARD_ACTION_INTERVAL_MS = 250;
 const DASHBOARD_SEARCH_INTERVAL_MS = 750;
 const DASHBOARD_JOIN_INTERVAL_MS = 750;
+const ACTIVITY_VOICE_RECONNECT_DELAY_MS = 250;
+const ACTIVITY_VOICE_READY_TIMEOUT_MS = 5_000;
 const dashboardActionTimestamps = new Map();
+const playerSearchCache = new Map();
+const PLAYER_SEARCH_CACHE_TTL_MS = 10_000;
+const PLAYER_SEARCH_CACHE_MAX_ENTRIES = 200;
 const AUDIO_UPLOAD_MAX_BYTES = 256 * 1024 * 1024;
 const AUDIO_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const AUDIO_UPLOAD_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus', '.webm']);
@@ -111,6 +120,44 @@ const PLAYER_TEXT_CHANNEL_DISABLED = 'disabled';
 const CONTROL_MESSAGE_LIMIT = 50;
 const CONTROL_MESSAGE_CACHE_TTL_MS = 60_000;
 const controlMessageCache = new Map();
+const MEMBER_SEARCH_CACHE_TTL_MS = 30_000;
+const MEMBER_SEARCH_CACHE_MAX_ENTRIES = 100;
+
+function waitForPlayerVoice(player, timeoutMs = ACTIVITY_VOICE_READY_TIMEOUT_MS) {
+  if (player?.voice?.sessionId && player.voice.token && player.voice.endpoint) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const check = () => {
+      if (player?.voice?.sessionId && player.voice.token && player.voice.endpoint) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        resolve(false);
+        return;
+      }
+      setTimeout(check, 100).unref?.();
+    };
+    check();
+  });
+}
+const memberSearchCache = new Map();
+const playerEventSubscribers = new Map();
+
+function broadcastPlayerUpdate(guildId) {
+  const subscribers = playerEventSubscribers.get(guildId);
+  if (!subscribers) return;
+  for (const subscriber of subscribers) {
+    try {
+      subscriber();
+    } catch (error) {
+      console.warn(`Failed to broadcast player update for ${guildId}:`, error.message);
+    }
+  }
+}
 
 function createApiServer(client) {
   const app = express();
@@ -124,11 +171,11 @@ function createApiServer(client) {
   // Behind cloudflared/reverse proxy, trust one hop so secure cookies work correctly.
   app.set('trust proxy', 1);
 
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser(sessionSecret));
   app.use(
     session({
-      store: createFileSessionStore(session),
+      store: createFileSessionStore(session, { secret: sessionSecret }),
       secret: sessionSecret,
       resave: false,
       saveUninitialized: false,
@@ -267,11 +314,12 @@ function createApiServer(client) {
   cleanupExpiredAudioUploads().catch((error) => {
     console.warn('Audio upload cleanup failed:', error.message);
   });
-  setInterval(() => {
+  const uploadCleanupTimer = setInterval(() => {
     cleanupExpiredAudioUploads().catch((error) => {
       console.warn('Audio upload cleanup failed:', error.message);
     });
   }, 60 * 60 * 1000);
+  uploadCleanupTimer.unref?.();
 
   async function requireAuth(req, res, next) {
     if (!req.session?.user) {
@@ -501,7 +549,7 @@ function createApiServer(client) {
       }
 
       const user = await userRes.json();
-      req.session.user = {
+      const sessionUser = {
         id: user.id,
         username: user.username,
         discriminator: user.discriminator,
@@ -512,16 +560,18 @@ function createApiServer(client) {
         tokenExpires: Date.now() + tokens.expires_in * 1000,
       };
 
-      req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          return res.redirect('/?error=session_failed');
-        }
-        res.redirect('/dashboard');
+      await new Promise((resolve, reject) => {
+        req.session.regenerate((sessionError) => (sessionError ? reject(sessionError) : resolve()));
       });
+      req.session.user = sessionUser;
+      await new Promise((resolve, reject) => {
+        req.session.save((sessionError) => (sessionError ? reject(sessionError) : resolve()));
+      });
+
+      return res.redirect('/dashboard');
     } catch (err) {
       console.error('OAuth callback error:', err);
-      res.redirect('/?error=server_error');
+      return res.redirect('/?error=session_failed');
     }
   });
 
@@ -816,23 +866,35 @@ function createApiServer(client) {
     let closed = false;
     const sendSnapshot = () => {
       if (closed) return;
-      writeSseEvent(res, 'snapshot', {
-        status: buildPlayerStatusSnapshot(client, guildId),
-        queue: buildQueueSnapshot(client, guildId, page),
-        timestamp: Date.now(),
-      });
+      try {
+        writeSseEvent(res, 'snapshot', {
+          status: buildPlayerStatusSnapshot(client, guildId),
+          queue: buildQueueSnapshot(client, guildId, page),
+          timestamp: Date.now(),
+        });
+      } catch {
+        closed = true;
+      }
     };
 
+    const subscribers = playerEventSubscribers.get(guildId) || new Set();
+    subscribers.add(sendSnapshot);
+    playerEventSubscribers.set(guildId, subscribers);
     sendSnapshot();
-    const snapshotInterval = setInterval(sendSnapshot, 1000);
     const heartbeatInterval = setInterval(() => {
-      if (!closed) res.write(': keep-alive\n\n');
+      if (closed) return;
+      try {
+        res.write(': keep-alive\n\n');
+      } catch {
+        closed = true;
+      }
     }, 15000);
 
     req.on('close', () => {
       closed = true;
-      clearInterval(snapshotInterval);
       clearInterval(heartbeatInterval);
+      subscribers.delete(sendSnapshot);
+      if (subscribers.size === 0) playerEventSubscribers.delete(guildId);
     });
   });
 
@@ -846,11 +908,14 @@ function createApiServer(client) {
     requireGuildDJ,
     requireTrustedOrigin,
     requireDashboardActionRateLimit,
-    express.raw({ type: '*/*', limit: AUDIO_UPLOAD_MAX_BYTES }),
     async (req, res) => {
       const guildId = req.params.guildId;
+      res.once('finish', () => broadcastPlayerUpdate(guildId));
+      const releaseUpload = await acquireGuildMutex(guildId);
       const guild = client.guilds.cache.get(guildId);
       let player = client.lavalink?.players?.get(guildId);
+      let uploadTempPath = null;
+      let storedFilePath = null;
 
       try {
         const guildConfig = getConfig(guildId);
@@ -873,10 +938,6 @@ function createApiServer(client) {
           return res.status(404).json({ error: 'No active player in this guild' });
         }
 
-        if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-          return res.status(400).json({ error: 'Upload body is empty' });
-        }
-
         const originalName = sanitizeUploadName(decodeUploadHeader(req.get('x-file-name')) || 'upload');
         const ext = path.extname(originalName).toLowerCase();
         const mimeType = String(req.get('content-type') || '').split(';')[0].toLowerCase();
@@ -885,28 +946,42 @@ function createApiServer(client) {
           return res.status(400).json({ error: 'Unsupported audio file type' });
         }
 
-        const uploadId = crypto.createHash('sha256').update(req.body).digest('hex');
         const guildUploadDir = path.join(UPLOAD_DIR, guildId);
         await fs.promises.mkdir(guildUploadDir, { recursive: true });
 
-        const filePath = path.join(guildUploadDir, `${uploadId}${ext}`);
+        uploadTempPath = path.join(
+          guildUploadDir,
+          `.incoming-${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.tmp`,
+        );
+        const streamedUpload = await streamUploadToFile(req, uploadTempPath, AUDIO_UPLOAD_MAX_BYTES);
+        const streamedUploadId = streamedUpload.uploadId;
+        uploadTempPath = streamedUpload.path;
+        if (!streamedUpload.size) {
+          return res.status(400).json({ error: 'Upload body is empty' });
+        }
+
+        const filePath = path.join(guildUploadDir, `${streamedUploadId}${ext}`);
         if (!isPathInside(filePath, UPLOAD_DIR)) {
           return res.status(400).json({ error: 'Invalid upload path' });
         }
 
         const alreadyStored = await fileExists(filePath);
         if (alreadyStored) {
+          await safeDeleteFile(uploadTempPath);
+          uploadTempPath = null;
           await touchFile(filePath);
         } else {
-          await fs.promises.writeFile(filePath, req.body, { flag: 'wx' });
+          await renameFileWithRetry(uploadTempPath, filePath);
+          uploadTempPath = null;
+          storedFilePath = filePath;
         }
 
         const publicName = encodeURIComponent(originalName);
-        const playbackUrl = `${getUploadPlaybackBaseUrl()}/api/uploads/${encodeURIComponent(guildId)}/${uploadId}/${publicName}`;
+        const playbackUrl = `${getUploadPlaybackBaseUrl()}/api/uploads/${encodeURIComponent(guildId)}/${streamedUploadId}/${publicName}`;
         const requester = getDashboardRequester(req, client);
         const node = getUsableNode(client);
         if (!node) {
-          if (!alreadyStored) await safeDeleteFile(filePath);
+          if (storedFilePath) await safeDeleteFile(storedFilePath);
           return res.status(503).json({ error: 'No Lavalink node available' });
         }
 
@@ -914,14 +989,14 @@ function createApiServer(client) {
         try {
           result = await node.search({ query: playbackUrl }, requester);
         } catch (error) {
-          if (!alreadyStored) await safeDeleteFile(filePath);
+          if (storedFilePath) await safeDeleteFile(storedFilePath);
           console.error('Lavalink upload load failed:', error);
           return res.status(502).json({ error: `Lavalink could not load upload URL: ${error.message}` });
         }
 
         const track = result?.tracks?.[0];
         if (!track) {
-          if (!alreadyStored) await safeDeleteFile(filePath);
+          if (storedFilePath) await safeDeleteFile(storedFilePath);
           return res.status(400).json({ error: 'Lavalink could not load this audio file' });
         }
 
@@ -940,7 +1015,7 @@ function createApiServer(client) {
         };
         queuedTrack.localUpload = {
           guildId,
-          uploadId,
+          uploadId: streamedUploadId,
           fileName: originalName,
           filePath,
           expiresAt: Date.now() + AUDIO_UPLOAD_TTL_MS,
@@ -962,12 +1037,18 @@ function createApiServer(client) {
           success: true,
           title: queuedTrack.info.title,
           author: queuedTrack.info.author,
-          size: req.body.length,
+          size: streamedUpload.size,
           cached: alreadyStored,
         });
       } catch (err) {
         console.error('Player upload error:', err);
-        res.status(500).json({ error: `Upload failed: ${err.message}` });
+        await safeDeleteFile(uploadTempPath);
+        if (!res.headersSent) {
+          const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : err.code === 'ECONNABORTED' ? 400 : 500;
+          res.status(status).json({ error: `Upload failed: ${err.message}` });
+        }
+      } finally {
+        releaseUpload();
       }
     },
   );
@@ -1183,6 +1264,8 @@ function createApiServer(client) {
     const action = req.params.action;
     let player = client.lavalink?.players?.get(guildId);
     const guild = client.guilds.cache.get(guildId);
+    const releaseAction = await acquireGuildMutex(guildId);
+    res.once('finish', () => broadcastPlayerUpdate(guildId));
 
     try {
       const guildConfig = getConfig(guildId);
@@ -1209,6 +1292,11 @@ function createApiServer(client) {
         }
         const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform || 'ytsearch';
         const preparedQuery = applyPreferredSource(query, guildConfig, defaultSource);
+        const searchCacheKey = `${guildId}:${preparedQuery.trim().toLowerCase()}`;
+        const cachedSearch = playerSearchCache.get(searchCacheKey);
+        if (cachedSearch && cachedSearch.expiresAt > Date.now()) {
+          return res.json({ success: true, tracks: cachedSearch.tracks });
+        }
         const requester = getDashboardRequester(req, client);
         let result;
         try {
@@ -1235,6 +1323,11 @@ function createApiServer(client) {
           duration: track.info.duration,
           artwork: extractArtwork(track.info),
         }));
+        playerSearchCache.set(searchCacheKey, { tracks, expiresAt: Date.now() + PLAYER_SEARCH_CACHE_TTL_MS });
+        if (playerSearchCache.size > PLAYER_SEARCH_CACHE_MAX_ENTRIES) {
+          const oldestKey = playerSearchCache.keys().next().value;
+          if (oldestKey) playerSearchCache.delete(oldestKey);
+        }
         return res.json({ success: true, tracks });
       }
 
@@ -1257,6 +1350,7 @@ function createApiServer(client) {
           guildConfig.playerTextChannelId,
           player?.textChannelId ?? null,
         );
+        const createdActivityPlayer = !player;
         if (!player) {
           player = client.lavalink.createPlayer({
             guildId,
@@ -1265,54 +1359,40 @@ function createApiServer(client) {
             selfDeaf: true,
             volume: guildConfig.defaultVolume ?? 60,
           });
-          await player.node.updatePlayer({
-            guildId,
-            playerOptions: { track: { encoded: null }, paused: false },
-          });
-          player.queue.current = null;
-          player.playing = false;
-          player.paused = false;
         } else {
           player.voiceChannelId = memberVoiceChannelId;
           player.textChannelId = preferredTextChannelId;
         }
 
-        if (!connectedBotVoiceChannelId) await player.connect();
+        if (createdActivityPlayer) {
+          // Discord may still report the old voice state while Lavalink has no player
+          // after a bot restart. Reconnect explicitly before restoring persisted audio.
+          if (connectedBotVoiceChannelId) {
+            await player.disconnect(true).catch(() => {});
+            await new Promise((resolve) => setTimeout(resolve, ACTIVITY_VOICE_RECONNECT_DELAY_MS));
+          }
+          await player.connect();
+          const voiceReady = await waitForPlayerVoice(player);
+          if (!voiceReady) {
+            console.warn(`[Activity] Voice handshake still pending for guild ${guildId}; restoring player anyway.`);
+          }
+          await hydratePlayer(player, client).catch((error) => {
+            console.error(`Failed to restore Activity player for ${guildId}:`, error.message);
+          });
+          if (!player.queue.current && player.queue.tracks.length === 0) {
+            await player.node.updatePlayer({
+              guildId,
+              playerOptions: { track: { encoded: null }, paused: false },
+            });
+            player.playing = false;
+            player.paused = false;
+          }
+        } else if (!connectedBotVoiceChannelId) {
+          await player.connect();
+        }
         return res.json({ success: true, channelId: memberVoiceChannelId, channelName: channel.name });
       }
 
-      const activityPlaybackChannelId = ['play', 'playnow'].includes(action) ? req.body?.channelId || null : null;
-      if (activityPlaybackChannelId) {
-        if (!memberVoiceChannelId || activityPlaybackChannelId !== memberVoiceChannelId) {
-          return res.status(403).json({ error: 'Open the Activity from the voice channel you are currently in' });
-        }
-        const channel = guild?.channels?.cache?.get(activityPlaybackChannelId);
-        if (!channel?.isVoiceBased()) {
-          return res.status(400).json({ error: 'The Activity channel is not a voice channel' });
-        }
-        if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== activityPlaybackChannelId) {
-          return res.status(409).json({ error: 'Bread is already active in another voice channel' });
-        }
-
-        if (!player) {
-          player = client.lavalink.createPlayer({
-            guildId,
-            voiceChannelId: activityPlaybackChannelId,
-            textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, null),
-            selfDeaf: true,
-            volume: guildConfig.defaultVolume ?? 60,
-          });
-        } else {
-          player.voiceChannelId = activityPlaybackChannelId;
-          player.textChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player.textChannelId ?? null);
-        }
-        if (!connectedBotVoiceChannelId) await player.connect();
-        botVoiceChannelId = activityPlaybackChannelId;
-      }
-
-      if (!privileged && (!memberVoiceChannelId || memberVoiceChannelId !== botVoiceChannelId)) {
-        return res.status(403).json({ error: 'Join the same voice channel as the bot to control playback' });
-      }
       const djOnlyActions = new Set([
         'stop',
         'clearqueue',
@@ -1329,6 +1409,58 @@ function createApiServer(client) {
       ]);
       if (!privileged && djOnlyActions.has(action)) {
         return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
+      }
+
+      const isPlaybackAction = ['play', 'playnow'].includes(action);
+      const requestedPlaybackChannelId = isPlaybackAction
+        ? req.body?.channelId || memberVoiceChannelId || connectedBotVoiceChannelId || null
+        : null;
+      if (requestedPlaybackChannelId) {
+        if (req.activityUser && (!memberVoiceChannelId || requestedPlaybackChannelId !== memberVoiceChannelId)) {
+          return res.status(403).json({ error: 'Open the Activity from the voice channel you are currently in' });
+        }
+        const channel = guild?.channels?.cache?.get(requestedPlaybackChannelId);
+        if (!channel?.isVoiceBased()) {
+          return res.status(400).json({ error: 'The Activity channel is not a voice channel' });
+        }
+        if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== requestedPlaybackChannelId) {
+          return res.status(409).json({ error: 'Bread is already active in another voice channel' });
+        }
+
+        const createdPlaybackPlayer = !player;
+        if (!player) {
+          player = client.lavalink.createPlayer({
+            guildId,
+            voiceChannelId: requestedPlaybackChannelId,
+            textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, null),
+            selfDeaf: true,
+            volume: guildConfig.defaultVolume ?? 60,
+          });
+        } else {
+          player.voiceChannelId = requestedPlaybackChannelId;
+          player.textChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player.textChannelId ?? null);
+        }
+        if (createdPlaybackPlayer) {
+          if (connectedBotVoiceChannelId) {
+            await player.disconnect(true).catch(() => {});
+            await new Promise((resolve) => setTimeout(resolve, ACTIVITY_VOICE_RECONNECT_DELAY_MS));
+          }
+          await player.connect();
+          const voiceReady = await waitForPlayerVoice(player);
+          if (!voiceReady) {
+            console.warn(`[Player] Voice handshake still pending for guild ${guildId}; continuing playback request.`);
+          }
+          await hydratePlayer(player, client).catch((error) => {
+            console.error(`Failed to restore player for ${guildId}:`, error.message);
+          });
+        } else if (!connectedBotVoiceChannelId) {
+          await player.connect();
+        }
+        botVoiceChannelId = requestedPlaybackChannelId;
+      }
+
+      if (!privileged && (!memberVoiceChannelId || memberVoiceChannelId !== botVoiceChannelId)) {
+        return res.status(403).json({ error: 'Join the same voice channel as the bot to control playback' });
       }
 
       // Allow dashboard play when the bot is already in voice but player object is missing.
@@ -1401,7 +1533,7 @@ function createApiServer(client) {
             await player.stopPlaying(true);
             player.queue.tracks.splice(0, player.queue.tracks.length);
             await player.destroy('Stopped via dashboard', true);
-            client.musicUI?.clear(guildId);
+            await client.musicUI?.clear(guildId).catch(() => {});
           }
           return res.json({ success: true, stopped: true });
 
@@ -1458,12 +1590,22 @@ function createApiServer(client) {
 
         case 'playnow':
         case 'play': {
-          const { encoded, query } = req.body;
+          const { encoded, query, track: metadata } = req.body;
           const playImmediately = action === 'playnow';
           const requester = getDashboardRequester(req, client);
 
           if (encoded) {
-            const track = { encoded, info: {}, requester };
+            const track = {
+              encoded,
+              info: {
+                title: typeof metadata?.title === 'string' ? metadata.title : 'Unknown title',
+                author: typeof metadata?.author === 'string' ? metadata.author : 'Unknown artist',
+                uri: typeof metadata?.uri === 'string' ? metadata.uri : null,
+                duration: Number.isFinite(metadata?.duration) ? metadata.duration : 0,
+                artworkUrl: typeof metadata?.artwork === 'string' ? metadata.artwork : null,
+              },
+              requester,
+            };
             await addRequestedTrackToQueue(player, track, playImmediately);
             if (playImmediately && player.queue.current) {
               await player.skip();
@@ -1580,7 +1722,18 @@ function createApiServer(client) {
         case 'seek': {
           const position = parseInt(req.body.position, 10);
           if (isNaN(position) || position < 0) return res.status(400).json({ error: 'Invalid position' });
-          if (player) await player.seek(position);
+          if (!player) return res.status(404).json({ error: 'No active player' });
+          if (!isTrackSeekable(player.queue.current)) {
+            return res.status(409).json({ error: 'This track cannot be seeked.' });
+          }
+          try {
+            await player.seek(position);
+          } catch (error) {
+            if (isUnseekableTrackError(error)) {
+              return res.status(409).json({ error: 'This track cannot be seeked.' });
+            }
+            throw error;
+          }
           return res.json({ success: true, position });
         }
 
@@ -1612,7 +1765,9 @@ function createApiServer(client) {
       res.json({ success: true });
     } catch (err) {
       console.error(`Player action ${action} error:`, err);
-      res.status(500).json({ error: `Action failed: ${err.message}` });
+      if (!res.headersSent) res.status(500).json({ error: `Action failed: ${err.message}` });
+    } finally {
+      releaseAction();
     }
   });
 
@@ -1667,6 +1822,12 @@ function createApiServer(client) {
         return res.json({ members: [] });
       }
 
+      const cacheKey = `${guild.id}:${limit}:${query.toLowerCase()}`;
+      const cached = memberSearchCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.json({ members: cached.members });
+      }
+
       let members;
       try {
         members = await guild.members.search({ query, limit, cache: true });
@@ -1690,6 +1851,15 @@ function createApiServer(client) {
           displayName: member.displayName || member.user.globalName || member.user.username,
           avatar: member.displayAvatarURL({ size: 64 }) || null,
         }));
+
+      memberSearchCache.set(cacheKey, {
+        members: list,
+        expiresAt: Date.now() + MEMBER_SEARCH_CACHE_TTL_MS,
+      });
+      if (memberSearchCache.size > MEMBER_SEARCH_CACHE_MAX_ENTRIES) {
+        const oldestKey = memberSearchCache.keys().next().value;
+        if (oldestKey) memberSearchCache.delete(oldestKey);
+      }
 
       res.json({ members: list });
     } catch (err) {
@@ -2105,6 +2275,79 @@ function getUploadPlaybackBaseUrl() {
   return `http://127.0.0.1:${port}`;
 }
 
+function streamUploadToFile(request, filePath, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const declaredLength = Number(request.headers['content-length']);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      const error = new Error(`Upload exceeds the ${Math.floor(maxBytes / (1024 * 1024))}MB limit`);
+      error.code = 'LIMIT_FILE_SIZE';
+      request.resume();
+      reject(error);
+      return;
+    }
+
+    const hash = crypto.createHash('sha256');
+    let size = 0;
+    let settled = false;
+    const transform = new Transform({
+      transform(chunk, _encoding, callback) {
+        size += chunk.length;
+        if (size > maxBytes) {
+          const error = new Error(`Upload exceeds the ${Math.floor(maxBytes / (1024 * 1024))}MB limit`);
+          error.code = 'LIMIT_FILE_SIZE';
+          callback(error);
+          return;
+        }
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    const output = fs.createWriteStream(filePath, { flags: 'wx' });
+
+    const cleanup = async () => {
+      request.unpipe(transform);
+      request.resume();
+      transform.destroy();
+      output.destroy();
+      await safeDeleteFile(filePath);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup().finally(() => reject(error));
+    };
+
+    request.once('aborted', () => {
+      const error = new Error('Upload request was aborted');
+      error.code = 'ECONNABORTED';
+      fail(error);
+    });
+    request.once('error', fail);
+    transform.once('error', fail);
+    output.once('error', fail);
+    output.once('finish', () => {
+      if (settled) return;
+      settled = true;
+      resolve({ path: filePath, size, uploadId: hash.digest('hex') });
+    });
+
+    request.pipe(transform).pipe(output);
+  });
+}
+
+async function renameFileWithRetry(source, destination, attempts = 5) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fs.promises.rename(source, destination);
+      return;
+    } catch (error) {
+      const retryable = ['EPERM', 'EACCES', 'EBUSY', 'ENOENT'].includes(error.code);
+      if (!retryable || attempt === attempts - 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+}
+
 async function safeDeleteFile(filePath) {
   try {
     await fs.promises.unlink(filePath);
@@ -2222,6 +2465,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
       uri: info.uri || '',
       duration: info.duration || 0,
       position: player.position || 0,
+      seekable: isTrackSeekable(player.queue.current),
       artwork: extractArtwork(info),
       requester: formatRequester(player.queue.current.requester),
     };
@@ -2453,4 +2697,4 @@ function buildTrustedOrigins(webUrl) {
   return origins;
 }
 
-module.exports = { createApiServer };
+module.exports = { createApiServer, broadcastPlayerUpdate };

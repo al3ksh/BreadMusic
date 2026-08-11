@@ -493,12 +493,18 @@ function buildSearchQueries(context) {
 }
 
 async function searchWithTimeout(node, query, requester) {
-  return Promise.race([
-    node.search({ query }, requester),
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('timeout')), SEARCH_TIMEOUT);
-    }),
-  ]);
+  let timeout;
+  try {
+    return await Promise.race([
+      node.search({ query }, requester),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('timeout')), SEARCH_TIMEOUT);
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function searchTracks(node, query, client) {
@@ -832,9 +838,12 @@ async function findNextTrack(player, lastTrack, client) {
   const queries = buildSearchQueries(context);
   logAutoplay('debug', `Search queries: ${queries.join(' | ') || 'none'}`);
 
-  for (const query of queries) {
-    const tracks = await searchTracks(node, query, client);
-    tracks.forEach((track, index) => addCandidate(candidates, track, 'search', index));
+  for (let offset = 0; offset < queries.length; offset += 3) {
+    const batch = queries.slice(offset, offset + 3);
+    const results = await Promise.all(batch.map((query) => searchTracks(node, query, client)));
+    results.forEach((tracks) => {
+      tracks.forEach((track, index) => addCandidate(candidates, track, 'search', index));
+    });
   }
 
   if (!candidates.size) {
@@ -977,7 +986,7 @@ function resetSeed(guildId, trackInfo = null) {
   }
 }
 
-setInterval(() => {
+const cleanupTimer = setInterval(() => {
   for (const [guildId, entries] of skippedAutoplayTracks) {
     const pruned = pruneSkippedEntries(entries);
     if (pruned.length) {
@@ -987,6 +996,7 @@ setInterval(() => {
     }
   }
 }, 10 * 60 * 1000);
+cleanupTimer.unref?.();
 
 module.exports = {
   isAutoplayEnabled,

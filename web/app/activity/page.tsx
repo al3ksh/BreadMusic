@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   AlertTriangle,
   AudioLines,
@@ -109,7 +109,7 @@ function ActivitySpinner() {
   return <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />;
 }
 
-function ActivityArtwork({ src, large = false }: { src?: string | null; large?: boolean }) {
+const ActivityArtwork = memo(function ActivityArtwork({ src, large = false }: { src?: string | null; large?: boolean }) {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => setFailed(false), [src]);
@@ -123,7 +123,7 @@ function ActivityArtwork({ src, large = false }: { src?: string | null; large?: 
   }
 
   return <img src={activityArtworkSrc(src)} alt="" onError={() => setFailed(true)} />;
-}
+});
 
 export default function ActivityPage() {
   const sdkRef = useRef<ActivitySdk | null>(null);
@@ -138,6 +138,7 @@ export default function ActivityPage() {
   const seekCommitTimerRef = useRef<number | null>(null);
   const seekDraggingRef = useRef(false);
   const seekPendingRef = useRef<number | null>(null);
+  const seekRollbackRef = useRef<PlayerClock | null>(null);
   const noticeIdRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchDebounceTimerRef = useRef<number | null>(null);
@@ -210,17 +211,32 @@ export default function ActivityPage() {
   const activityFetch = useCallback(async <T,>(path: string, options: RequestInit = {}) => {
     const token = activityTokenRef.current;
     if (!token) throw new Error('Activity authentication is not ready');
-    const response = await fetch(path, {
-      ...options,
-      headers: {
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        Authorization: `Bearer ${token}`,
-        ...options.headers,
-      },
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
-    return body as T;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    const forwardAbort = () => controller.abort();
+    options.signal?.addEventListener('abort', forwardAbort, { once: true });
+    try {
+      const response = await fetch(path, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+          Authorization: `Bearer ${token}`,
+          ...options.headers,
+        },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
+      return body as T;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError' && !options.signal?.aborted) {
+        throw new Error('Request timed out');
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', forwardAbort);
+    }
   }, []);
 
   const applySnapshot = useCallback((payload: { status?: PlayerStatus; queue?: QueueSnapshot }) => {
@@ -230,6 +246,7 @@ export default function ActivityPage() {
 
       if (!track) {
         clockRef.current = { trackKey: '', base: 0, startedAt: Date.now(), paused: true };
+        seekRollbackRef.current = null;
         setPosition(0);
         setStatus(incomingStatus);
       } else {
@@ -245,6 +262,7 @@ export default function ActivityPage() {
           setSeekDraft(null);
           if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
           seekCommitTimerRef.current = null;
+          seekRollbackRef.current = null;
         }
 
         if (seekDraggingRef.current || seekPendingRef.current !== null) {
@@ -257,6 +275,7 @@ export default function ActivityPage() {
             setSeekDraft(null);
             if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
             seekCommitTimerRef.current = null;
+            seekRollbackRef.current = null;
           }
         }
 
@@ -495,36 +514,64 @@ export default function ActivityPage() {
     if (phase !== 'ready' || !guildId) return;
     const controller = new AbortController();
     let active = true;
+    let retryDelay = 1000;
+    let hasReportedDisconnect = false;
+
+    const wait = (delay: number) => new Promise<void>((resolve) => {
+      window.setTimeout(resolve, delay);
+    });
 
     async function streamSnapshots() {
-      try {
-        const response = await fetch(`/api/guilds/${guildId}/player/events?page=0`, {
-          headers: { Authorization: `Bearer ${activityTokenRef.current}` },
-          signal: controller.signal,
-        });
-        if (!response.ok || !response.body) throw new Error('Live player connection failed');
+      while (active && !controller.signal.aborted) {
+        try {
+          const response = await fetch(`/api/guilds/${guildId}/player/events?page=0`, {
+            headers: { Authorization: `Bearer ${activityTokenRef.current}` },
+            signal: controller.signal,
+          });
+          if (!response.ok || !response.body) throw new Error('Live player connection failed');
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (active) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split('\n\n');
-          buffer = frames.pop() || '';
-          for (const frame of frames) {
-            const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
-            if (!dataLine) continue;
+          if (hasReportedDisconnect && capabilities?.canControlPlayer && channelId) {
             try {
-              applySnapshot(JSON.parse(dataLine.slice(5).trim()));
-            } catch {
-              // The next snapshot repairs malformed or incomplete data.
+              await activityFetch(`/api/guilds/${guildId}/player/join`, {
+                method: 'POST',
+                body: JSON.stringify({ channelId }),
+              });
+              hasReportedDisconnect = false;
+            } catch (error) {
+              notify(error instanceof Error ? error.message : 'Could not restore the voice connection', 'warning');
             }
           }
+
+          retryDelay = 1000;
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (active) {
+            const { value, done } = await reader.read();
+            if (done) throw new Error('Live player connection closed');
+            buffer += decoder.decode(value, { stream: true });
+            const frames = buffer.split('\n\n');
+            buffer = frames.pop() || '';
+            for (const frame of frames) {
+              const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+              if (!dataLine) continue;
+              try {
+                applySnapshot(JSON.parse(dataLine.slice(5).trim()));
+              } catch {
+                // The next snapshot repairs malformed or incomplete data.
+              }
+            }
           }
-      } catch (error) {
-        if (!controller.signal.aborted) notify(error instanceof Error ? error.message : 'Live player connection lost', 'error');
+        } catch (error) {
+          if (!active || controller.signal.aborted) return;
+          setStatus((current) => ({ ...current, connected: false }));
+          if (!hasReportedDisconnect) {
+            notify(error instanceof Error ? error.message : 'Live player connection lost', 'warning');
+            hasReportedDisconnect = true;
+          }
+          await wait(retryDelay);
+          retryDelay = Math.min(10_000, retryDelay * 2);
+        }
       }
     }
 
@@ -533,7 +580,7 @@ export default function ActivityPage() {
       active = false;
       controller.abort();
     };
-  }, [applySnapshot, guildId, notify, phase]);
+  }, [activityFetch, applySnapshot, capabilities?.canControlPlayer, channelId, guildId, notify, phase]);
 
   useEffect(() => {
     if (phase !== 'ready') return;
@@ -544,7 +591,7 @@ export default function ActivityPage() {
       }
     };
     tick();
-    const timer = setInterval(tick, 250);
+    const timer = setInterval(tick, 500);
     return () => clearInterval(timer);
   }, [getClockPosition, phase, seekDraft, status.currentTrack?.duration]);
 
@@ -573,10 +620,20 @@ export default function ActivityPage() {
       });
       return true;
     } catch (error) {
-      if (action === 'toggle' || action === 'autoplay') {
-        clockRef.current = previousClock;
+      if (['toggle', 'autoplay', 'seek', 'volume'].includes(action)) {
+        const rollbackClock = action === 'seek' ? seekRollbackRef.current || previousClock : previousClock;
+        clockRef.current = rollbackClock;
         setStatus(previousStatus);
-        setPosition(previousClock.base);
+        setPosition(rollbackClock.base);
+        if (action === 'seek') {
+          seekPendingRef.current = null;
+          setSeekDraft(null);
+          seekRollbackRef.current = null;
+        }
+        if (action === 'volume') {
+          volumePendingRef.current = null;
+          setVolumeDraft(null);
+        }
       }
       notify(error instanceof Error ? error.message : 'Player action failed', 'error');
       return false;
@@ -609,6 +666,7 @@ export default function ActivityPage() {
     const normalized = Math.max(0, Math.min(duration, Math.round(value)));
     seekDraggingRef.current = false;
     if (seekPendingRef.current === normalized) return;
+    seekRollbackRef.current = { ...clockRef.current };
     seekPendingRef.current = normalized;
     setClockPosition(normalized);
     setSeekDraft(normalized);
@@ -617,6 +675,7 @@ export default function ActivityPage() {
     if (!applied) {
       seekPendingRef.current = null;
       setSeekDraft(null);
+      seekRollbackRef.current = null;
       return;
     }
 
@@ -624,6 +683,7 @@ export default function ActivityPage() {
     seekCommitTimerRef.current = window.setTimeout(() => {
       seekPendingRef.current = null;
       setSeekDraft(null);
+      seekRollbackRef.current = null;
       seekCommitTimerRef.current = null;
     }, 1800);
   }, [playerAction, setClockPosition, status.currentTrack?.duration]);
@@ -697,8 +757,9 @@ export default function ActivityPage() {
       window.clearTimeout(searchDebounceTimerRef.current);
       searchDebounceTimerRef.current = null;
     }
-    if (!searching) handleSearch();
-  }, [handleSearch, searching]);
+    const query = searchQuery.trim();
+    if (!searching && query && searchCompletedQuery !== query) handleSearch(query);
+  }, [handleSearch, searchCompletedQuery, searchQuery, searching]);
 
   useEffect(() => {
     if (activePanel !== 'search') return;
@@ -832,7 +893,15 @@ export default function ActivityPage() {
     const startsPlayback = !status.currentTrack;
     const action = mode === 'now' ? 'playnow' : 'play';
     const queued = await playerAction(action, {
-      query: track.uri || `${track.author} ${track.title}`,
+      encoded: track.encoded,
+      query: track.encoded ? undefined : track.uri || `${track.author} ${track.title}`,
+      track: {
+        title: track.title,
+        author: track.author,
+        uri: track.uri,
+        duration: track.duration,
+        artwork: track.artwork,
+      },
       channelId,
     });
     if (!queued) return;
@@ -846,6 +915,7 @@ export default function ActivityPage() {
 
   const canDj = capabilities?.canControlPlayer === true;
   const hasTrack = Boolean(status.connected && status.currentTrack);
+  const canSeekTrack = Boolean(canDj && status.currentTrack?.seekable);
   const normalizedRepeatMode = String(status.repeatMode || 'off').toLowerCase();
   const loopActive = !['off', 'none', 'false'].includes(normalizedRepeatMode);
   const loopLabel = normalizedRepeatMode === 'track'
@@ -858,7 +928,7 @@ export default function ActivityPage() {
   const displayedPosition = seekDraft ?? position;
   const currentTrackLink = /^https?:\/\//i.test(status.currentTrack?.uri || '') ? status.currentTrack?.uri || '' : '';
   const percent = currentDuration ? Math.min(100, (displayedPosition / currentDuration) * 100) : 0;
-  const syncedLyrics = parseSyncedLyrics(lyrics?.syncedLyrics);
+  const syncedLyrics = useMemo(() => parseSyncedLyrics(lyrics?.syncedLyrics), [lyrics?.syncedLyrics]);
   const activeLyricIndex = syncedLyrics.reduce((current, line, index) => (line.time <= displayedPosition ? index : current), -1);
   const activeLyric = syncedLyrics[activeLyricIndex]?.text || '';
   const previousLyric = syncedLyrics[activeLyricIndex - 1]?.text || '';
@@ -906,14 +976,14 @@ export default function ActivityPage() {
       <div
         className="activity-seek"
         onPointerMove={(event) => {
-          if (!canDj || !currentDuration) return;
+          if (!canSeekTrack || !currentDuration) return;
           const rect = event.currentTarget.getBoundingClientRect();
           const previewPercent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
           setSeekPreview({ position: previewPercent * currentDuration, percent: previewPercent * 100 });
         }}
         onPointerLeave={() => setSeekPreview(null)}
       >
-        {seekPreview && canDj && (
+        {seekPreview && canSeekTrack && (
           <output className="activity-seek-preview" style={{ '--seek-preview': `${seekPreview.percent}%` } as CSSProperties}>
             {formatMs(seekPreview.position)}
           </output>
@@ -924,7 +994,7 @@ export default function ActivityPage() {
           min={0}
           max={currentDuration || 1}
           value={Math.min(displayedPosition, currentDuration || 1)}
-          disabled={!canDj}
+          disabled={!canSeekTrack}
           onPointerDown={(event) => {
             if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
             seekCommitTimerRef.current = null;
@@ -949,7 +1019,7 @@ export default function ActivityPage() {
             if (seekDraft !== null && seekPendingRef.current === null) commitSeek(Number(event.currentTarget.value));
           }}
           style={{ '--range-progress': `${percent}%` } as CSSProperties}
-          aria-label="Track position"
+          aria-label={canSeekTrack ? 'Track position' : 'Track position (not seekable)'}
           aria-valuetext={`${formatMs(displayedPosition)} of ${formatMs(currentDuration)}`}
         />
       </div>
@@ -1065,7 +1135,7 @@ export default function ActivityPage() {
   }
 
   return (
-    <main className="activity-shell">
+    <main className="activity-shell activity-workspace-shell">
       <header className="activity-header">
         <button type="button" className="activity-brand" onClick={() => openExternalUrl('https://breadmusic.aleksh.xyz')} aria-label="Open Bread website">
           <img src="/assets/breadicon.png?v=3" alt="" />

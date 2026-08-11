@@ -28,6 +28,13 @@ async function handleSkipRequest(interaction, player, config, client) {
     throw new CommandError('You must join a voice channel to use skip.');
   }
 
+  const playerChannel = player.voiceChannelId
+    ? interaction.guild?.channels?.cache?.get(player.voiceChannelId)
+    : null;
+  if (playerChannel && playerChannel.id !== voiceChannel.id) {
+    throw new CommandError('You must be in the same voice channel as the bot to use skip.');
+  }
+
   const requiresDjRole = Boolean(config.djRoleId);
   if (!requiresDjRole || hasDJPermissions(member, config)) {
     if (isLastTrack) {
@@ -48,9 +55,18 @@ async function handleSkipRequest(interaction, player, config, client) {
     return { skipped: true, message: 'Skipped the track.', needsAutoplay: false };
   }
 
-  const listeners = voiceChannel.members.filter((m) => !m.user.bot).size;
+  const eligibleUserIds = new Set(
+    voiceChannel.members
+      .filter((m) => !m.user.bot)
+      .map((m) => m.id),
+  );
+  const listeners = eligibleUserIds.size;
   const requiredVotes = Math.max(1, Math.ceil(listeners * config.voteSkipPercent));
-  const votes = registerVote(player.guildId, interaction.user.id);
+  const currentTrackKey = player.queue.current?.info?.identifier
+    || player.queue.current?.info?.uri
+    || player.queue.current?.info?.title
+    || 'unknown-track';
+  const votes = registerVote(player.guildId, interaction.user.id, eligibleUserIds, currentTrackKey);
   if (votes >= requiredVotes) {
     if (isLastTrack) {
       const currentTrack = player.queue.current;

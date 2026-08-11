@@ -84,7 +84,11 @@ async function savePlayerState(player) {
     current: packTrack(player.queue.current),
     tracks: player.queue.tracks.map((track) => packTrack(track)).filter(Boolean),
     previous: player.queue.previous.map((track) => packTrack(track)).filter(Boolean),
-    position: player.position,
+    position: player.paused ? player.lastPosition ?? player.position : player.position,
+    paused: Boolean(player.paused),
+    repeatMode: player.repeatMode || 'off',
+    volume: Number.isFinite(player.volume) ? player.volume : null,
+    filterPreset: player.filterManager?.activePreset || null,
     timestamp: Date.now(),
   };
 
@@ -112,12 +116,25 @@ async function hydratePlayer(player, client) {
   }
 
   if (current) {
+    const duration = Number(current.info?.duration ?? current.info?.length ?? 0);
+    const requestedPosition = Number(payload.position) || 0;
+    const startTime = duration > 0 ? Math.min(duration, Math.max(0, requestedPosition)) : Math.max(0, requestedPosition);
     await player.play({
       clientTrack: current,
-      startTime: payload.position ?? 0,
+      startTime,
     });
   } else if (player.queue.tracks.length > 0) {
     await player.play();
+  }
+
+  if (Number.isFinite(payload.volume)) {
+    await player.setVolume(Math.max(0, Math.min(500, payload.volume)));
+  }
+  if (['off', 'track', 'queue'].includes(payload.repeatMode)) {
+    await player.setRepeatMode(payload.repeatMode);
+  }
+  if (payload.paused && player.playing) {
+    await player.pause();
   }
 }
 
@@ -125,8 +142,13 @@ function clearStoredQueue(guildId) {
   queueStore.delete(guildId);
 }
 
+function flushQueueStore() {
+  return queueStore.flush();
+}
+
 module.exports = {
   savePlayerState,
   hydratePlayer,
   clearStoredQueue,
+  flushQueueStore,
 };
