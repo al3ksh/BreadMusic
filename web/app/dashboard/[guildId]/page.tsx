@@ -904,15 +904,12 @@ function SegmentedVolume({ value, onChange, onCommit }: { value: number; onChang
   const max = 150;
   const segments = 15;
   const isDragging = useRef(false);
+  const dragPointerId = useRef<number | null>(null);
+  const dragValue = useRef(value);
 
-  const getClientX = (e: React.MouseEvent | React.TouchEvent) => {
-    if ('touches' in e) {
-      return e.touches[0]?.clientX ?? e.changedTouches[0]?.clientX ?? 0;
-    }
-    return (e as React.MouseEvent).clientX;
-  };
+  const getClientX = (e: React.PointerEvent) => e.clientX;
 
-  const getHoverIndex = (e: React.MouseEvent | React.TouchEvent, el: HTMLElement) => {
+  const getHoverIndex = (e: React.PointerEvent, el: HTMLElement) => {
     const rect = el.getBoundingClientRect();
     const x = getClientX(e);
     const progress = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
@@ -920,44 +917,38 @@ function SegmentedVolume({ value, onChange, onCommit }: { value: number; onChang
     return Math.round(progress * segments);
   };
 
+  const updateFromPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    const hIdx = getHoverIndex(e, e.currentTarget);
+    const nextValue = hIdx * (max / segments);
+    dragValue.current = nextValue;
+    setHoverIdx(hIdx);
+    if (isDragging.current && value !== nextValue) onChange(nextValue);
+  };
+
   return (
     <div 
       className="relative flex items-end justify-between h-6 w-36 gap-[3px] cursor-pointer group py-1"
-      onMouseLeave={() => { setHoverIdx(null); isDragging.current = false; }}
-      onMouseUp={(e) => { 
+      style={{ touchAction: 'none' }}
+      onPointerLeave={() => setHoverIdx(null)}
+      onPointerUp={(e) => {
+        updateFromPointer(e);
         isDragging.current = false;
-        onCommit(getHoverIndex(e, e.currentTarget) * (max / segments));
+        dragPointerId.current = null;
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+        onCommit(dragValue.current);
       }}
-      onTouchEnd={(e) => { 
+      onPointerCancel={() => {
         isDragging.current = false;
-        onCommit(getHoverIndex(e, e.currentTarget) * (max / segments));
+        dragPointerId.current = null;
+        onCommit(dragValue.current);
       }}
-      onMouseDown={(e) => {
+      onPointerDown={(e) => {
         isDragging.current = true;
-        const v = getHoverIndex(e, e.currentTarget) * (max / segments);
-        if (value !== v) onChange(v);
+        dragPointerId.current = e.pointerId;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        updateFromPointer(e);
       }}
-      onTouchStart={(e) => {
-        isDragging.current = true;
-        const v = getHoverIndex(e, e.currentTarget) * (max / segments);
-        if (value !== v) onChange(v);
-      }}
-      onMouseMove={(e) => {
-        const hIdx = getHoverIndex(e, e.currentTarget);
-        setHoverIdx(hIdx);
-        const v = hIdx * (max / segments);
-        if (isDragging.current && value !== v) {
-            onChange(v);
-        }
-      }}
-      onTouchMove={(e) => {
-        if (isDragging.current) {
-            const hIdx = getHoverIndex(e, e.currentTarget);
-            setHoverIdx(hIdx);
-            const v = hIdx * (max / segments);
-            if (value !== v) onChange(v);
-        }
-      }}
+      onPointerMove={updateFromPointer}
     >
       {hoverIdx !== null && (
         <div
@@ -1294,7 +1285,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const [status, setStatus] = useState<PlayerStatus | null>(null);
   const [queue, setQueue] = useState<{ current: QueueTrack | null; tracks: QueueTrack[]; total: number; page: number; totalPages: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string; source?: string | null }[]>([]);
   const [searchedQuery, setSearchedQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [queuePage, setQueuePage] = useState(0);
@@ -1313,6 +1304,9 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const statusRef = useRef<PlayerStatus | null>(null);
+  const volumeCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekLastCommitRef = useRef<number | null>(null);
   const lastTrackSeenAtRef = useRef(0);
   const pausedTrackKeyRef = useRef<string | null>(null);
   const pausedTrackPositionRef = useRef<number | null>(null);
@@ -1431,9 +1425,11 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     statusRef.current = status;
   }, [status]);
 
-  const fetchData = useCallback(() => {
-    apiFetch<PlayerStatus>(`/guilds/${guildId}/status`).then(applyIncomingStatus).catch(() => {});
-    apiFetch<NonNullable<typeof queue>>(`/guilds/${guildId}/queue?page=${queuePage}`).then(setQueue).catch(() => {});
+  const fetchData = useCallback(async () => {
+    await Promise.allSettled([
+      apiFetch<PlayerStatus>(`/guilds/${guildId}/status`).then(applyIncomingStatus),
+      apiFetch<NonNullable<typeof queue>>(`/guilds/${guildId}/queue?page=${queuePage}`).then(setQueue),
+    ]);
   }, [applyIncomingStatus, guildId, queuePage]);
 
   useEffect(() => {
@@ -1442,6 +1438,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
     let usingFallback = false;
+    let streamErrors = 0;
 
     const startFallback = () => {
       if (usingFallback) return;
@@ -1449,11 +1446,21 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       fallbackInterval = setInterval(fetchData, 3000);
     };
 
+    const stopFallback = () => {
+      usingFallback = false;
+      if (fallbackInterval) clearInterval(fallbackInterval);
+      fallbackInterval = null;
+    };
+
     fetchData();
 
     const connect = () => {
       if (stopped) return;
       source = new EventSource(`/api/guilds/${guildId}/player/events?page=${queuePage}`);
+      source.onopen = () => {
+        streamErrors = 0;
+        stopFallback();
+      };
       source.addEventListener('snapshot', (event) => {
         try {
           const payload = JSON.parse((event as MessageEvent).data) as {
@@ -1467,8 +1474,10 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
         }
       });
       source.onerror = () => {
+        streamErrors += 1;
         source?.close();
         source = null;
+        if (streamErrors >= 3) startFallback();
         if (!stopped) reconnectTimer = setTimeout(connect, 1000);
       };
     };
@@ -1574,8 +1583,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
-      // Fetch data immediately after API completes instead of timeout
-      fetchData();
+      // Confirm the optimistic state from the server before releasing slider drafts.
+      await fetchData();
 
       if (!silentActions.has(action)) {
         const description = action === 'skip' && result.message
@@ -1583,11 +1592,13 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
           : actionDescriptions[action] || 'Player action completed.';
         toast.success(result.voteSkip ? 'Vote registered' : 'Action applied', description);
       }
+      return true;
     } catch (err) {
       console.error('Player action failed:', err);
       const errorText = err instanceof Error ? err.message : 'Unknown player action error.';
       toast.error('Player action failed', errorText);
-      fetchData(); // revert on fail
+      await fetchData(); // revert on fail
+      return false;
     }
   }, [guildId, fetchData, status, toast]);
 
@@ -1596,7 +1607,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     if (!query) return;
     setSearching(true);
     try {
-      const res = await apiFetch<{ tracks: { encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string }[] }>(
+      const res = await apiFetch<{ tracks: { encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string; source?: string | null }[] }>(
         `/guilds/${guildId}/player/search`,
         { method: 'POST', body: JSON.stringify({ query }) },
       );
@@ -1714,12 +1725,22 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     });
   }, [playerAction]);
 
-  const handleVolumeCommit = (vol: number) => {
-    playerAction('volume', { volume: vol });
-    setTimeout(() => setLocalVolume(null), 100);
-  };
+  const handleVolumeCommit = useCallback(async (vol: number) => {
+    if (volumeCommitTimerRef.current) clearTimeout(volumeCommitTimerRef.current);
+    const applied = await playerAction('volume', { volume: vol });
+    if (!applied) {
+      setLocalVolume(null);
+      return;
+    }
+    volumeCommitTimerRef.current = setTimeout(() => {
+      setLocalVolume(null);
+      volumeCommitTimerRef.current = null;
+    }, 1500);
+  }, [playerAction]);
 
-  const handleSeekCommit = (pos: number) => {
+  const handleSeekCommit = useCallback(async (pos: number) => {
+    if (seekLastCommitRef.current === pos) return;
+    seekLastCommitRef.current = pos;
     const track = status?.currentTrack;
     if (track) {
       playerClockRef.current = {
@@ -1735,9 +1756,19 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       pausedTrackKeyRef.current = `${track.uri}|${track.title}|${track.author}`;
       pausedTrackPositionRef.current = pos;
     }
-    playerAction('seek', { position: pos });
-    setTimeout(() => setLocalSeek(null), 100);
-  };
+    if (seekCommitTimerRef.current) clearTimeout(seekCommitTimerRef.current);
+    const applied = await playerAction('seek', { position: pos });
+    if (!applied) {
+      seekLastCommitRef.current = null;
+      setLocalSeek(null);
+      return;
+    }
+    seekCommitTimerRef.current = setTimeout(() => {
+      seekLastCommitRef.current = null;
+      setLocalSeek(null);
+      seekCommitTimerRef.current = null;
+    }, 1500);
+  }, [playerAction, status?.currentTrack]);
 
   const resetDragState = useCallback(() => {
     setDraggedIdx(null);
@@ -1868,12 +1899,24 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                         onMouseMove={updateSeekPreview}
                         onMouseLeave={() => setSeekPreview(null)}
                         onTouchMove={updateSeekPreview}
-                        onTouchEnd={(e) => {
-                          updateSeekPreview(e);
-                          handleSeekCommit(Number((e.target as HTMLInputElement).value));
+                        onPointerDown={(e) => {
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                        }}
+                        onPointerUp={(e) => {
+                          handleSeekCommit(Number(e.currentTarget.value));
+                          setSeekPreview(null);
+                          if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+                        }}
+                        onPointerCancel={(e) => {
+                          handleSeekCommit(Number(e.currentTarget.value));
                           setSeekPreview(null);
                         }}
-                        onMouseUp={(e) => handleSeekCommit(Number((e.target as HTMLInputElement).value))}
+                        onKeyUp={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') handleSeekCommit(Number(e.currentTarget.value));
+                        }}
+                        onBlur={(e) => {
+                          if (localSeek !== null) handleSeekCommit(Number(e.currentTarget.value));
+                        }}
                         disabled={!canSeekTrack}
                         className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-border transition-all duration-200 hover:h-2 disabled:cursor-not-allowed disabled:opacity-60
                           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(90,84,148,0.6)] [&::-webkit-slider-thumb]:opacity-0 hover:[&::-webkit-slider-thumb]:opacity-100 [&::-webkit-slider-thumb]:transition-opacity
@@ -2068,6 +2111,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                           uri: track.uri,
                           duration: track.duration,
                           artwork: track.artwork,
+                          source: track.source,
                         },
                       });
                       setSearchResults([]);

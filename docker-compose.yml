@@ -5,19 +5,17 @@ services:
       dockerfile: Dockerfile
     container_name: breadmusic-lavalink
     restart: always
-    ports:
-      - "2333:2333"
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml
       - ./lavalink/plugins:/opt/Lavalink/plugins
     environment:
-      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD:-youshallnotpass}
+      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD:?LAVALINK_PASSWORD must be set}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
     networks:
       - breadmusic-network
     healthcheck:
-      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider --header=\"Authorization: $${LAVALINK_PASSWORD:-youshallnotpass}\" http://localhost:2333/version || exit 1"]
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider --header=\"Authorization: $${LAVALINK_PASSWORD}\" http://localhost:2333/version || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -40,7 +38,7 @@ services:
       - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
       - LAVALINK_HOST=lavalink
       - LAVALINK_PORT=2333
-      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD:-youshallnotpass}
+      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD:?LAVALINK_PASSWORD must be set}
       - LAVALINK_SECURE=false
       - DEFAULT_SOURCE=${DEFAULT_SOURCE:-ytsearch}
       - IDLE_TIMEOUT_MS=${IDLE_TIMEOUT_MS:-300000}
@@ -55,8 +53,6 @@ services:
       - ACTIVITY_ENABLED=${ACTIVITY_ENABLED:-true}
       - PLAYER_EMOJI_IDS=${PLAYER_EMOJI_IDS:-}
       - NODE_ENV=production
-    ports:
-      - "3001:3001"
     volumes:
       - ./data:/app/data
     networks:

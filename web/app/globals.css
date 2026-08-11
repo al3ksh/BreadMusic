@@ -1848,6 +1848,10 @@ a { color: inherit; text-decoration: none; }
   display: none;
 }
 
+.activity-compact-player {
+  display: none;
+}
+
 .activity-karaoke-stage {
   display: grid;
   width: min(100%, 1080px);
@@ -2507,88 +2511,206 @@ a { color: inherit; text-decoration: none; }
   }
   .activity-workspace {
     width: 100%;
-    max-width: 280px;
+    max-width: 344px;
     flex: 0 0 auto;
     margin: 0 auto;
     padding: 0;
     overflow: visible;
   }
+
   .activity-player-stage {
+    display: none;
+  }
+
+  .activity-compact-player {
+    position: relative;
+    display: grid;
     width: 100%;
-    grid-template-columns: 56px minmax(0, 1fr);
-    gap: 10px;
-    padding: 8px;
-    background: #131314;
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    min-height: 152px;
+    grid-template-rows: auto auto auto;
+    gap: 12px;
+    padding: 14px;
+    overflow: hidden;
+    background: #161618;
+    border: 1px solid rgba(170, 164, 237, 0.14);
+    border-radius: 12px;
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.34);
+    animation: activity-player-arrive 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .activity-compact-track {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+  }
+
+  .activity-compact-art {
+    position: relative;
+    width: 64px;
+    aspect-ratio: 1;
+    overflow: hidden;
+    background: #111113;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 9px;
   }
-  .activity-track-art {
-    width: 56px;
-    border-radius: 6px;
-    box-shadow: none;
+
+  .activity-compact-art > img,
+  .activity-compact-art .activity-art-fallback,
+  .activity-compact-art .activity-queue-art {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
-  .activity-playing-indicator {
+
+  .activity-compact-art .activity-playing-indicator {
     right: 4px;
     bottom: 4px;
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
   }
-  .activity-playing-indicator,
-  .activity-playing-indicator.paused {
-    box-shadow: 0 0 0 2px #131314;
+
+  .activity-compact-art .activity-playing-indicator,
+  .activity-compact-art .activity-playing-indicator.paused {
+    box-shadow: 0 0 0 2px #161618;
   }
-  .activity-player-main {
-    display: block;
-    min-width: 0;
-  }
-  .activity-track-copy h1 {
-    overflow: hidden;
-    max-width: 100%;
-    margin: 0 0 4px;
-    font-size: 14px;
-    line-height: 1.22;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .activity-track-copy > p:not(.activity-kicker) {
-    overflow: hidden;
-    color: #a6a8b2;
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .activity-mini-progress {
+
+  .activity-compact-copy {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 7px;
-    margin-top: 8px;
+    min-width: 0;
+    gap: 4px;
   }
-  .activity-track-requester { display: none; }
-  .activity-mini-brand {
+
+  .activity-compact-brand {
     display: inline-flex;
     width: max-content;
     align-items: center;
     gap: 5px;
-    margin-bottom: 5px;
-    color: #8f92a0;
+    color: #aaa4ed;
     font-size: 9px;
-    font-weight: 650;
+    font-weight: 700;
   }
-  .activity-mini-brand img {
+
+  .activity-compact-brand img {
     width: 13px;
     height: 13px;
     object-fit: cover;
     border-radius: 4px;
   }
-  .activity-mini-progress time {
-    color: #767984;
-    font-size: 9px;
+
+  .activity-compact-copy h1 {
+    overflow: hidden;
+    max-width: 100%;
+    margin: 0;
+    color: #f4f3f7;
+    font-size: 15px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .activity-player-stage.is-playing .activity-track-art img {
+
+  .activity-compact-copy h1 a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .activity-compact-copy p {
+    overflow: hidden;
+    margin: 0;
+    color: #a6a8b2;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .activity-compact-progress > span {
+    display: block;
+    height: 3px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.09);
+    border-radius: 3px;
+  }
+
+  .activity-compact-progress i {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #8f88dc;
+    border-radius: inherit;
+    transform-origin: left center;
+    transition: transform 250ms linear;
+  }
+
+  .activity-compact-badges {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .activity-compact-badges span {
+    display: inline-flex;
+    min-height: 21px;
+    align-items: center;
+    padding: 0 7px;
+    color: #aeb0ba;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 6px;
+    font-size: 8px;
+    font-weight: 750;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .activity-compact-badges:has(.vote) {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .activity-compact-badges:has(.vote) span {
+    min-width: 0;
+    padding-inline: 5px;
+    font-size: 7px;
+  }
+
+  .activity-compact-badges span:first-child,
+  .activity-compact-badges span.active,
+  .activity-compact-badges span.vote {
+    color: #c9c5ff;
+    background: rgba(108, 100, 184, 0.16);
+    border-color: rgba(170, 164, 237, 0.34);
+  }
+
+  .activity-compact-badges span.paused {
+    color: #efcb83;
+    background: rgba(224, 182, 96, 0.11);
+    border-color: rgba(224, 182, 96, 0.28);
+  }
+
+  .activity-compact-badges span.vote {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .activity-compact-badges span.vote::after {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, transparent 20%, rgba(255, 255, 255, 0.42) 48%, transparent 74%);
+    content: '';
+    transform: translateX(-140%);
+    opacity: 0;
+    animation: activity-vote-shine 3s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .activity-compact-player.is-playing .activity-compact-art img {
     animation: activity-mini-art 6s ease-in-out infinite;
   }
-  .activity-player-stage.is-paused .activity-track-art img {
+
+  .activity-compact-player.is-paused .activity-compact-art img {
     animation-play-state: paused;
   }
   .activity-karaoke-stage {
@@ -2677,6 +2799,7 @@ a { color: inherit; text-decoration: none; }
   .activity-notice,
   .activity-notice::after,
   .activity-playback-state span.vote::after,
+  .activity-compact-badges span.vote::after,
   .activity-intro-backdrop,
   .activity-intro-content,
   .activity-intro-message,

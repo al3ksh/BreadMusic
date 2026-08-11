@@ -916,6 +916,7 @@ export default function ActivityPage() {
         uri: track.uri,
         duration: track.duration,
         artwork: track.artwork,
+        source: track.source,
       },
       channelId,
     });
@@ -1207,6 +1208,41 @@ export default function ActivityPage() {
             </div>
           </section>
         ) : (
+        <>
+        <section className={`activity-compact-player ${status.paused ? 'is-paused' : 'is-playing'}`}>
+          <div className="activity-compact-track">
+            <div className="activity-compact-art">
+              <ActivityArtwork src={status.currentTrack?.artwork} />
+              {hasTrack && <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />}
+            </div>
+            <div className="activity-compact-copy">
+              <div className="activity-compact-brand">
+                <img src="/assets/breadicon.png?v=3" alt="" />
+                <span>{status.paused ? 'Paused' : 'Playing'}</span>
+              </div>
+              <h1>
+                {currentTrackLink ? (
+                  <a href={currentTrackLink} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); openExternalUrl(currentTrackLink); }}>
+                    {status.currentTrack?.title}
+                  </a>
+                ) : status.currentTrack?.title || 'Nothing is playing'}
+              </h1>
+              <p>{status.currentTrack?.author || 'Bread'}</p>
+            </div>
+          </div>
+
+          <div className="activity-compact-progress" aria-label={`${formatMs(displayedPosition)} of ${formatMs(currentDuration)}`}>
+            <span><i style={{ transform: `scaleX(${percent / 100})` }} /></span>
+          </div>
+
+          <div className="activity-compact-badges" aria-label="Playback status">
+            <span className={hasTrack && status.paused ? 'paused' : ''}>{hasTrack ? (status.paused ? 'Paused' : 'Now playing') : status.connected ? 'Player idle' : 'Player offline'}</span>
+            <span className={status.autoplay ? 'active' : ''}>Autoplay {status.autoplay ? 'on' : 'off'}</span>
+            <span className={loopActive ? 'active' : ''}>{loopActive ? loopLabel : 'Loop off'}</span>
+            {status.voteSkip && <span className="vote">Skip {status.voteSkip.votes}/{status.voteSkip.requiredVotes}</span>}
+          </div>
+        </section>
+
         <section className={`activity-player-stage ${status.paused ? 'is-paused' : 'is-playing'}`}>
           <div className="activity-track-art">
             <ActivityArtwork src={status.currentTrack?.artwork} large />
@@ -1250,6 +1286,7 @@ export default function ActivityPage() {
             {hasTrack && renderPlayerControls(true)}
           </div>
         </section>
+        </>
         )}
 
         <nav className="activity-panel-nav" aria-label="Player panels">

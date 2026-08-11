@@ -177,7 +177,7 @@ WEB_URL=http://localhost:3000
 ```ini
 LAVALINK_HOST=127.0.0.1
 LAVALINK_PORT=2333
-LAVALINK_PASSWORD=youshallnotpass
+LAVALINK_PASSWORD=replace-with-a-long-random-password
 LAVALINK_SECURE=false
 ```
 

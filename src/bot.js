@@ -56,6 +56,7 @@ const {
   setVoiceTrackStatus,
 } = require('./music/voiceStatus');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
+const { createPlaybackRecovery } = require('./music/playbackRecovery');
 const {
   CLOSE_LYRICS_BUTTON_PREFIX,
   LyricsUI,
@@ -88,7 +89,7 @@ const MAX_AUTOCOMPLETE_RESULTS = 5;
 
 const config = loadConfig();
 let isShuttingDown = false;
-const trackErrorRecovery = new Set();
+const playbackFailureRecovery = new Set();
 
 function safeEventHandler(label, handler) {
   return (...args) => {
@@ -371,40 +372,22 @@ client.lavalink.on('trackError', safeEventHandler('trackError', async (player, t
   console.error(
     `[TrackError] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} severity=${exception?.severity ?? 'unknown'} reason=${exception?.message ?? payload?.error ?? 'unknown'}`,
   );
-  await client.musicUI.sendPlaybackError(player, track, payload);
-
-  const guildId = player.guildId;
-  if (trackErrorRecovery.has(guildId) || isPlayerStopping(player)) return;
-  trackErrorRecovery.add(guildId);
-  try {
-    if (player.queue.tracks.length > 0) {
-      await player.skip();
-    } else {
-      await player.stopPlaying(false, false);
-      const recovered = await handleAutoplay(player, track, client);
-      if (!recovered) {
-        await clearVoiceTrackStatus(client, player);
-        await client.musicUI.refresh(player);
-        scheduleIdleLeave(player, client);
-      }
-    }
-  } catch (error) {
-    console.error(`[TrackError] Failed to recover guild ${guildId}:`, error);
-  } finally {
-    trackErrorRecovery.delete(guildId);
-    broadcastPlayerUpdate(guildId);
-  }
+  await recoverPlaybackFailure({ player, track, payload, label: 'TrackError' });
 }));
 
 client.lavalink.on('trackStuck', safeEventHandler('trackStuck', async (player, track, payload) => {
   console.warn(
-    `[TrackStuck] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} threshold=${payload.thresholdMs}`,
+    `[TrackStuck] Guild=${player.guildId} track=${track?.info?.title ?? 'unknown'} threshold=${payload?.thresholdMs ?? 'unknown'}`,
   );
-  await client.musicUI.sendPlaybackError(player, track, {
-    ...payload,
-    message: `Track stuck after ${payload.thresholdMs}ms`,
+  await recoverPlaybackFailure({
+    player,
+    track,
+    label: 'TrackStuck',
+    payload: {
+      ...payload,
+      message: `Track stuck after ${payload?.thresholdMs ?? 'an unknown duration'}ms`,
+    },
   });
-  broadcastPlayerUpdate(player.guildId);
 }));
 
 client.lavalink.on('queueEnd', safeEventHandler('queueEnd', async (player, track) => {
@@ -462,6 +445,17 @@ client.lavalink.nodeManager.on('error', (node, error) => {
 });
 
 const { createApiServer, broadcastPlayerUpdate } = require('./server');
+
+const recoverPlaybackFailure = createPlaybackRecovery({
+  recoverySet: playbackFailureRecovery,
+  isPlayerStopping,
+  sendPlaybackError: (player, track, payload) => client.musicUI.sendPlaybackError(player, track, payload),
+  handleAutoplay: (player, track) => handleAutoplay(player, track, client),
+  clearVoiceTrackStatus: (player) => clearVoiceTrackStatus(client, player),
+  refreshPlayer: (player) => client.musicUI.refresh(player),
+  scheduleIdleLeave: (player) => scheduleIdleLeave(player, client),
+  broadcastPlayerUpdate,
+});
 
 client
   .login(config.token)

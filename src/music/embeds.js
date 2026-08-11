@@ -1,6 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const { formatDuration, buildProgressBar } = require('../utils/time');
 const { isAutoplayEnabled } = require('./autoplay');
+const { normalizeSourceName } = require('./sourceNames');
 const { BRAND_COLORS } = require('../theme');
 
 const LABELS = {
@@ -132,7 +133,7 @@ function formatTrackAuthor(track) {
 
 function formatTrackSource(track) {
   if (isLocalUploadTrack(track)) return 'upload';
-  return track?.info?.sourceName ?? 'Unknown';
+  return normalizeSourceName(track?.info) ?? 'Unknown';
 }
 
 function formatTrackLink(track, label) {

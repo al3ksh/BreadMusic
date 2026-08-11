@@ -1,4 +1,5 @@
 const { FileStore } = require('./fileStore');
+const { normalizeSourceName } = require('../music/sourceNames');
 
 const analyticsStore = new FileStore('analytics.json', {});
 
@@ -74,7 +75,7 @@ function normalizeTrackInfo(track) {
     uri: typeof info.uri === 'string' ? info.uri : '',
     duration: Number.isFinite(info.duration) ? info.duration : 0,
     artwork: extractArtwork(info),
-    source: typeof info.sourceName === 'string' ? info.sourceName : null,
+    source: normalizeSourceName(info),
   };
 }
 

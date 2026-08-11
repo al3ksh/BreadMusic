@@ -21,11 +21,15 @@ const { markPlayerStopping } = require('./music/playerLifecycle');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 const { acquireGuildMutex } = require('./music/guildMutex');
 const { isTrackSeekable, isUnseekableTrackError } = require('./music/trackCapabilities');
+const { normalizeSourceName } = require('./music/sourceNames');
+const { createFixedWindowRateLimiter } = require('./utils/rateLimit');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const SCOPES = ['identify', 'guilds'].join(' ');
 const activityAuthCache = new Map();
 const ACTIVITY_ARTWORK_MAX_BYTES = 6 * 1024 * 1024;
+const ACTIVITY_TOKEN_RATE_LIMIT = createFixedWindowRateLimiter({ windowMs: 60_000, max: 10 });
+const ACTIVITY_ARTWORK_RATE_LIMIT = createFixedWindowRateLimiter({ windowMs: 60_000, max: 120 });
 const ACTIVITY_ARTWORK_HOSTS = [
   'i.ytimg.com',
   'img.youtube.com',
@@ -224,6 +228,12 @@ function createApiServer(client) {
   });
 
   app.get('/api/activity/artwork', async (req, res) => {
+    const artworkLimit = ACTIVITY_ARTWORK_RATE_LIMIT.check(req.ip || req.socket.remoteAddress);
+    if (!artworkLimit.allowed) {
+      res.setHeader('Retry-After', Math.ceil(artworkLimit.retryAfterMs / 1000));
+      return res.status(429).json({ error: 'Too many artwork requests' });
+    }
+
     const rawUrl = typeof req.query.url === 'string' ? req.query.url : '';
     let artworkUrl;
 
@@ -277,6 +287,12 @@ function createApiServer(client) {
   app.post('/api/activity/token', async (req, res) => {
     if (process.env.ACTIVITY_ENABLED === 'false') {
       return res.status(404).json({ error: 'Activity is disabled' });
+    }
+
+    const tokenLimit = ACTIVITY_TOKEN_RATE_LIMIT.check(req.ip || req.socket.remoteAddress);
+    if (!tokenLimit.allowed) {
+      res.setHeader('Retry-After', Math.ceil(tokenLimit.retryAfterMs / 1000));
+      return res.status(429).json({ error: 'Too many authorization attempts' });
     }
 
     const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
@@ -1348,6 +1364,7 @@ function createApiServer(client) {
           uri: track.info.uri,
           duration: track.info.duration,
           artwork: extractArtwork(track.info),
+          source: normalizeSourceName(track.info),
         }));
         playerSearchCache.set(searchCacheKey, { tracks, expiresAt: Date.now() + PLAYER_SEARCH_CACHE_TTL_MS });
         if (playerSearchCache.size > PLAYER_SEARCH_CACHE_MAX_ENTRIES) {
@@ -1637,6 +1654,9 @@ function createApiServer(client) {
                 uri: typeof metadata?.uri === 'string' ? metadata.uri : null,
                 duration: Number.isFinite(metadata?.duration) ? metadata.duration : 0,
                 artworkUrl: typeof metadata?.artwork === 'string' ? metadata.artwork : null,
+                sourceName: typeof metadata?.source === 'string'
+                  ? metadata.source
+                  : normalizeSourceName(metadata),
               },
               requester,
             };

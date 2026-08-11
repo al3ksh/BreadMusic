@@ -65,6 +65,14 @@ function loadConfig() {
     });
   }
 
+  if (nodes.some((node) => !node.authorization)) {
+    throw new Error('Every Lavalink node must define a password or authorization value.');
+  }
+
+  if (process.env.NODE_ENV === 'production' && nodes.some((node) => node.authorization === 'youshallnotpass')) {
+    throw new Error('The default Lavalink password is not allowed in production.');
+  }
+
   const enabledSources = ['youtube', 'soundcloud', 'bandcamp', 'spotify'];
 
   return {

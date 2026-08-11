@@ -3,7 +3,7 @@ server:
 
 lavalink:
   server:
-    password: "${LAVALINK_PASSWORD:youshallnotpass}"
+    password: "${LAVALINK_PASSWORD}"
     bufferDurationMs: 400
     sources:
       youtube: false

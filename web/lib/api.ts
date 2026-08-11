@@ -257,6 +257,7 @@ export interface QueueTrack {
   duration: number;
   requester: string;
   artwork?: string;
+  source?: string | null;
 }
 
 export interface BotStats {
