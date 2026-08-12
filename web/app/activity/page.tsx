@@ -229,7 +229,11 @@ export default function ActivityPage() {
         },
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
+      if (!response.ok) {
+        const error = new Error(body.error || `Request failed: ${response.status}`) as Error & { status?: number };
+        error.status = response.status;
+        throw error;
+      }
       return body as T;
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError' && !options.signal?.aborted) {
@@ -241,6 +245,17 @@ export default function ActivityPage() {
       options.signal?.removeEventListener('abort', forwardAbort);
     }
   }, []);
+
+  const refreshCapabilities = useCallback(async () => {
+    if (!guildId) return null;
+    try {
+      const access = await activityFetch<DashboardCapabilities>(`/api/guilds/${guildId}/access`);
+      setCapabilities(access);
+      return access;
+    } catch {
+      return null;
+    }
+  }, [activityFetch, guildId]);
 
   const applySnapshot = useCallback((payload: { status?: PlayerStatus; queue?: QueueSnapshot }) => {
     if (payload.status) {
@@ -394,6 +409,13 @@ export default function ActivityPage() {
     initialize();
     return () => { cancelled = true; };
   }, [activityFetch]);
+
+  useEffect(() => {
+    if (phase !== 'ready' || !guildId) return;
+    const refresh = () => { void refreshCapabilities(); };
+    const timer = window.setInterval(refresh, 5000);
+    return () => window.clearInterval(timer);
+  }, [guildId, phase, refreshCapabilities]);
 
   const closePanel = useCallback(() => {
     if (!activePanel || drawerClosing) return;
@@ -635,6 +657,9 @@ export default function ActivityPage() {
       }
       return true;
     } catch (error) {
+      if ((error as Error & { status?: number }).status === 403) {
+        await refreshCapabilities();
+      }
       if (['toggle', 'autoplay', 'seek', 'volume'].includes(action)) {
         const rollbackClock = action === 'seek' ? seekRollbackRef.current || previousClock : previousClock;
         clockRef.current = rollbackClock;
@@ -655,7 +680,7 @@ export default function ActivityPage() {
     } finally {
       setActionBusy(null);
     }
-  }, [activityFetch, getClockPosition, guildId, notify, status]);
+  }, [activityFetch, getClockPosition, guildId, notify, refreshCapabilities, status]);
 
   const flashControl = useCallback((action: string) => {
     if (controlFeedbackFrameRef.current) window.cancelAnimationFrame(controlFeedbackFrameRef.current);
@@ -703,8 +728,9 @@ export default function ActivityPage() {
     }, 1800);
   }, [playerAction, setClockPosition, status.currentTrack?.duration]);
 
+  const volumeLimit = Math.max(1, Math.round(capabilities?.maxVolume ?? 100));
   const commitVolume = useCallback(async (value: number) => {
-    const normalized = Math.max(0, Math.min(100, Math.round(value)));
+    const normalized = Math.max(0, Math.min(volumeLimit, Math.round(value)));
     volumeDraggingRef.current = false;
     if (volumePendingRef.current === normalized) return;
     volumePendingRef.current = normalized;
@@ -722,7 +748,7 @@ export default function ActivityPage() {
       setVolumeDraft(null);
       volumeCommitTimerRef.current = null;
     }, 1800);
-  }, [playerAction]);
+  }, [playerAction, volumeLimit]);
 
   useEffect(() => {
     if (volumeDraft === null || volumeDraggingRef.current || volumePendingRef.current === null) return;
@@ -917,6 +943,8 @@ export default function ActivityPage() {
         duration: track.duration,
         artwork: track.artwork,
         source: track.source,
+        seekable: track.seekable,
+        isStream: track.isStream,
       },
       channelId,
     });
@@ -939,7 +967,7 @@ export default function ActivityPage() {
     : normalizedRepeatMode === 'queue'
       ? 'Loop queue'
       : 'Loop on';
-  const displayedVolume = volumeDraft ?? status.volume;
+  const displayedVolume = Math.min(volumeLimit, volumeDraft ?? status.volume);
   const currentDuration = status.currentTrack?.duration || 0;
   const displayedPosition = seekDraft ?? position;
   const currentTrackLink = /^https?:\/\//i.test(status.currentTrack?.uri || '') ? status.currentTrack?.uri || '' : '';
@@ -1068,7 +1096,7 @@ export default function ActivityPage() {
             title={`Volume ${displayedVolume}%`}
           >
             <Volume2 size={17} />
-            <i style={{ transform: `scaleX(${displayedVolume / 100})` }} />
+            <i style={{ transform: `scaleX(${displayedVolume / volumeLimit})` }} />
           </button>
           {volumeOpen && (
             <div className="activity-volume-popover" role="group" aria-label="Volume control">
@@ -1079,7 +1107,7 @@ export default function ActivityPage() {
               <input
                 type="range"
                 min={0}
-                max={100}
+                max={volumeLimit}
                 value={displayedVolume}
                 disabled={!canDj || !status.connected}
                 onPointerDown={(event) => {
@@ -1105,11 +1133,11 @@ export default function ActivityPage() {
                 onBlur={(event) => {
                   if (volumeDraft !== null && volumePendingRef.current === null) commitVolume(Number(event.currentTarget.value));
                 }}
-                style={{ '--range-progress': `${displayedVolume}%` } as CSSProperties}
+                style={{ '--range-progress': `${(displayedVolume / volumeLimit) * 100}%` } as CSSProperties}
                 aria-label="Volume"
                 aria-valuetext={`${displayedVolume}%`}
               />
-              <div className="activity-volume-scale" aria-hidden="true"><span>0</span><span>100</span></div>
+              <div className="activity-volume-scale" aria-hidden="true"><span>0</span><span>{volumeLimit}</span></div>
             </div>
           )}
         </div>

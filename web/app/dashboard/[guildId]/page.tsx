@@ -1285,7 +1285,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const [status, setStatus] = useState<PlayerStatus | null>(null);
   const [queue, setQueue] = useState<{ current: QueueTrack | null; tracks: QueueTrack[]; total: number; page: number; totalPages: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string; source?: string | null }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string; source?: string | null; seekable?: boolean; isStream?: boolean }[]>([]);
   const [searchedQuery, setSearchedQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [queuePage, setQueuePage] = useState(0);
@@ -1607,7 +1607,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     if (!query) return;
     setSearching(true);
     try {
-      const res = await apiFetch<{ tracks: { encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string; source?: string | null }[] }>(
+      const res = await apiFetch<{ tracks: { encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string; source?: string | null; seekable?: boolean; isStream?: boolean }[] }>(
         `/guilds/${guildId}/player/search`,
         { method: 'POST', body: JSON.stringify({ query }) },
       );
@@ -2112,6 +2112,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                           duration: track.duration,
                           artwork: track.artwork,
                           source: track.source,
+                          seekable: track.seekable,
+                          isStream: track.isStream,
                         },
                       });
                       setSearchResults([]);

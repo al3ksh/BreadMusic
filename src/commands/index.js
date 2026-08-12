@@ -23,7 +23,7 @@ const {
   buildQueueComponents,
 } = require('../music/queueFormatter');
 const { formatDuration, parseTimecode } = require('../utils/time');
-const { isTrackSeekable, isUnseekableTrackError } = require('../music/trackCapabilities');
+const { isTrackSeekable, isUnseekableTrackError, seekTrack } = require('../music/trackCapabilities');
 const { getSelection, deleteSelection } = require('../state/searchCache');
 const {
   startGame: startBlackjack,
@@ -693,7 +693,7 @@ const commands = [
       }
       const targetPosition = parseTimecode(interaction.options.getString('position', true));
       try {
-        await player.seek(targetPosition);
+        await seekTrack(player, targetPosition);
       } catch (error) {
         if (isUnseekableTrackError(error)) {
           throw new CommandError('This track cannot be seeked because it is a live stream or has no seekable source.');
@@ -1172,6 +1172,11 @@ const commands = [
         deleteConfig(interaction.guildId);
         const fresh = getConfig(interaction.guildId);
         const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
+        if (player && Number.isFinite(player.volume) && player.volume > fresh.maxVolume) {
+          await player.setVolume(fresh.maxVolume);
+          await queuePersist(player);
+          await interaction.client.musicUI?.refresh(player).catch(() => {});
+        }
         if (fresh.voiceChannelStatus && player?.queue.current) {
           await setVoiceTrackStatus(interaction.client, player, player.queue.current);
         }
@@ -1208,6 +1213,11 @@ const commands = [
 
       const updated = setConfig(interaction.guildId, updates);
       const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
+      if (player && Number.isFinite(player.volume) && player.volume > updated.maxVolume) {
+        await player.setVolume(updated.maxVolume);
+        await queuePersist(player);
+        await interaction.client.musicUI?.refresh(player).catch(() => {});
+      }
       if (voiceStatus === false && player) {
         await clearVoiceTrackStatus(interaction.client, player);
       } else if (voiceStatus === true && player?.queue.current) {

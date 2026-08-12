@@ -22,10 +22,21 @@ const OLD_DEFAULT_AFK_TIMEOUT = 5 * 60 * 1000;
 
 const configStore = new FileStore('configs.json', {});
 
+function normalizeVolumeConfig(config) {
+  const normalized = { ...config };
+  normalized.maxVolume = Math.max(10, Math.min(500, Number(normalized.maxVolume) || DEFAULT_CONFIG.maxVolume));
+  normalized.defaultVolume = Math.max(0, Math.min(
+    100,
+    normalized.maxVolume,
+    Number.isFinite(normalized.defaultVolume) ? normalized.defaultVolume : DEFAULT_CONFIG.defaultVolume,
+  ));
+  return normalized;
+}
+
 function getConfig(guildId) {
   if (!guildId) return { ...DEFAULT_CONFIG };
   const stored = configStore.get(guildId, {});
-  const merged = { ...DEFAULT_CONFIG, ...stored };
+  const merged = normalizeVolumeConfig({ ...DEFAULT_CONFIG, ...stored });
 
   let shouldPersist = false;
   if (typeof stored.afkTimeout === 'undefined') {
@@ -44,7 +55,7 @@ function getConfig(guildId) {
 
 function setConfig(guildId, partial) {
   if (!guildId) return;
-  const updated = { ...getConfig(guildId), ...partial };
+  const updated = normalizeVolumeConfig({ ...getConfig(guildId), ...partial });
   configStore.set(guildId, updated);
   return updated;
 }
@@ -92,7 +103,7 @@ function formatConfig(config) {
 }
 
 function listConfigs() {
-  return configStore.entries().map(([guildId, data]) => [guildId, { ...DEFAULT_CONFIG, ...data }]);
+  return configStore.entries().map(([guildId, data]) => [guildId, normalizeVolumeConfig({ ...DEFAULT_CONFIG, ...data })]);
 }
 
 module.exports = {
@@ -104,4 +115,5 @@ module.exports = {
   formatConfig,
   listConfigs,
   DEFAULT_CONFIG,
+  normalizeVolumeConfig,
 };

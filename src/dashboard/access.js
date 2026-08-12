@@ -26,6 +26,9 @@ function resolveDashboardCapabilities(member, config) {
   const memberAllowed = configuredAccess === 'members';
   const djAllowed = configuredAccess === 'dj' || memberAllowed;
   const canAccess = admin || (djAllowed && dj) || memberAllowed;
+  const maxVolume = Number.isFinite(config?.maxVolume)
+    ? Math.max(10, Math.min(500, config.maxVolume))
+    : 100;
 
   return {
     accessLevel: admin ? 'admin' : dj ? 'dj' : 'member',
@@ -39,6 +42,7 @@ function resolveDashboardCapabilities(member, config) {
     canManageConfig: admin,
     canManageEconomy: admin,
     canUseRemoteControl: admin,
+    maxVolume,
   };
 }
 

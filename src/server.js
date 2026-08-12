@@ -20,7 +20,12 @@ const { handleSkipRequest, clearVoteSkip, getVoteSkipSnapshot } = require('./mus
 const { markPlayerStopping } = require('./music/playerLifecycle');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 const { acquireGuildMutex } = require('./music/guildMutex');
-const { isTrackSeekable, isUnseekableTrackError } = require('./music/trackCapabilities');
+const {
+  isTrackSeekable,
+  getTrackCapabilityMetadata,
+  isUnseekableTrackError,
+  seekTrack,
+} = require('./music/trackCapabilities');
 const { normalizeSourceName } = require('./music/sourceNames');
 const { createFixedWindowRateLimiter } = require('./utils/rateLimit');
 
@@ -849,6 +854,17 @@ function createApiServer(client) {
 
     const updated = setConfig(guildId, updates);
 
+    if (Object.prototype.hasOwnProperty.call(updates, 'maxVolume')) {
+      const player = client.lavalink?.players?.get(guildId);
+      if (player && Number.isFinite(player.volume) && player.volume > updated.maxVolume) {
+        await player.setVolume(updated.maxVolume);
+        const { savePlayerState } = require('./state/queueStore');
+        await savePlayerState(player).catch(() => {});
+        await client.musicUI?.refresh(player).catch(() => {});
+        broadcastPlayerUpdate(guildId);
+      }
+    }
+
     if (Object.prototype.hasOwnProperty.call(updates, 'playerTextChannelId')) {
       const player = client.lavalink?.players?.get(guildId);
       const preferredTextChannelId = resolvePlayerTextChannelId(guild, updated.playerTextChannelId, player?.textChannelId ?? null);
@@ -877,9 +893,17 @@ function createApiServer(client) {
   });
 
   app.post('/api/guilds/:guildId/config/reset', requireAuth, requireGuildAdmin, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
-    deleteConfig(req.params.guildId);
-    const fresh = getConfig(req.params.guildId);
-    const player = client.lavalink?.players?.get(req.params.guildId);
+    const guildId = req.params.guildId;
+    deleteConfig(guildId);
+    const fresh = getConfig(guildId);
+    const player = client.lavalink?.players?.get(guildId);
+    if (player && Number.isFinite(player.volume) && player.volume > fresh.maxVolume) {
+      await player.setVolume(fresh.maxVolume);
+      const { savePlayerState } = require('./state/queueStore');
+      await savePlayerState(player).catch(() => {});
+      await client.musicUI?.refresh(player).catch(() => {});
+      broadcastPlayerUpdate(guildId);
+    }
     if (fresh.voiceChannelStatus && player?.queue.current) {
       await setVoiceTrackStatus(client, player, player.queue.current);
     }
@@ -1365,6 +1389,7 @@ function createApiServer(client) {
           duration: track.info.duration,
           artwork: extractArtwork(track.info),
           source: normalizeSourceName(track.info),
+          ...getTrackCapabilityMetadata(track),
         }));
         playerSearchCache.set(searchCacheKey, { tracks, expiresAt: Date.now() + PLAYER_SEARCH_CACHE_TTL_MS });
         if (playerSearchCache.size > PLAYER_SEARCH_CACHE_MAX_ENTRIES) {
@@ -1657,6 +1682,8 @@ function createApiServer(client) {
                 sourceName: typeof metadata?.source === 'string'
                   ? metadata.source
                   : normalizeSourceName(metadata),
+                isSeekable: metadata?.seekable === true,
+                isStream: metadata?.isStream === true,
               },
               requester,
             };
@@ -1773,7 +1800,7 @@ function createApiServer(client) {
             return res.status(409).json({ error: 'This track cannot be seeked.' });
           }
           try {
-            await player.seek(position);
+            await seekTrack(player, position);
           } catch (error) {
             if (isUnseekableTrackError(error)) {
               return res.status(409).json({ error: 'This track cannot be seeked.' });

@@ -62,6 +62,7 @@ export interface DashboardCapabilities {
   canManageConfig: boolean;
   canManageEconomy: boolean;
   canUseRemoteControl: boolean;
+  maxVolume: number;
 }
 
 export interface GuildConfig {
@@ -258,6 +259,8 @@ export interface QueueTrack {
   requester: string;
   artwork?: string;
   source?: string | null;
+  seekable?: boolean;
+  isStream?: boolean;
 }
 
 export interface BotStats {
