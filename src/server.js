@@ -8,12 +8,19 @@ const { Transform } = require('stream');
 const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
 const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
-const { setAutoplay, addManualSeed, recordAutoplaySkip, clearAutoplayState, handleAutoplay } = require('./music/autoplay');
+const {
+  setAutoplay,
+  addManualSeed,
+  recordAutoplaySkip,
+  clearAutoplayState,
+  clearAutoplayPrefetch,
+  handleAutoplay,
+} = require('./music/autoplay');
 const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('./music/voiceStatus');
 const { createFileSessionStore } = require('./state/sessionStore');
-const { hydratePlayer } = require('./state/queueStore');
+const { hydratePlayer, getStoredLocalUploadPaths } = require('./state/queueStore');
 const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
 const { handleSkipRequest, clearVoteSkip, getVoteSkipSnapshot } = require('./music/skipManager');
@@ -117,9 +124,24 @@ const ACTIVITY_VOICE_READY_TIMEOUT_MS = 5_000;
 const dashboardActionTimestamps = new Map();
 const playerSearchCache = new Map();
 const PLAYER_SEARCH_CACHE_TTL_MS = 10_000;
+const PLAYER_PLAYLIST_CACHE_TTL_MS = 2 * 60_000;
 const PLAYER_SEARCH_CACHE_MAX_ENTRIES = 200;
+const PLAYER_PLAYLIST_CACHE_MAX_TRACKS = 5_000;
+const PLAYER_PLAYLIST_MAX_TRACKS = 500;
 const AUDIO_UPLOAD_MAX_BYTES = 256 * 1024 * 1024;
+const AUDIO_UPLOAD_QUOTA_DEFAULT_MB = 1024;
+const AUDIO_UPLOAD_QUOTA_MIN_MB = 256;
+const AUDIO_UPLOAD_QUOTA_MAX_MB = 10 * 1024;
+const configuredUploadQuotaMb = Number.parseInt(process.env.UPLOAD_STORAGE_LIMIT_MB || '', 10);
+const AUDIO_UPLOAD_QUOTA_BYTES = Math.max(
+  AUDIO_UPLOAD_QUOTA_MIN_MB,
+  Math.min(
+    AUDIO_UPLOAD_QUOTA_MAX_MB,
+    Number.isFinite(configuredUploadQuotaMb) ? configuredUploadQuotaMb : AUDIO_UPLOAD_QUOTA_DEFAULT_MB,
+  ),
+) * 1024 * 1024;
 const AUDIO_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
+const AUDIO_UPLOAD_TEMP_TTL_MS = 60 * 60 * 1000;
 const AUDIO_UPLOAD_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus', '.webm']);
 const AUDIO_UPLOAD_MIME_PREFIXES = ['audio/'];
 const AUDIO_UPLOAD_MIME_TYPES = new Set(['application/ogg', 'video/webm']);
@@ -131,6 +153,41 @@ const CONTROL_MESSAGE_CACHE_TTL_MS = 60_000;
 const controlMessageCache = new Map();
 const MEMBER_SEARCH_CACHE_TTL_MS = 30_000;
 const MEMBER_SEARCH_CACHE_MAX_ENTRIES = 100;
+let uploadQuotaQueue = Promise.resolve();
+const activeUploadTempPaths = new Set();
+
+async function acquireUploadQuotaMutex() {
+  const previous = uploadQuotaQueue;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  uploadQuotaQueue = previous.catch(() => {}).then(() => gate);
+  await previous.catch(() => {});
+  return release;
+}
+
+function prunePlayerSearchCache(now = Date.now()) {
+  for (const [key, entry] of playerSearchCache) {
+    if (entry.expiresAt <= now) playerSearchCache.delete(key);
+  }
+
+  let cachedPlaylistTracks = 0;
+  for (const entry of playerSearchCache.values()) {
+    cachedPlaylistTracks += entry.playlistTracks?.length || 0;
+  }
+
+  while (
+    playerSearchCache.size > PLAYER_SEARCH_CACHE_MAX_ENTRIES ||
+    cachedPlaylistTracks > PLAYER_PLAYLIST_CACHE_MAX_TRACKS
+  ) {
+    const oldestKey = playerSearchCache.keys().next().value;
+    if (!oldestKey) break;
+    const oldest = playerSearchCache.get(oldestKey);
+    cachedPlaylistTracks -= oldest?.playlistTracks?.length || 0;
+    playerSearchCache.delete(oldestKey);
+  }
+}
 
 function waitForPlayerVoice(player, timeoutMs = ACTIVITY_VOICE_READY_TIMEOUT_MS) {
   if (player?.voice?.sessionId && player.voice.token && player.voice.endpoint) {
@@ -357,11 +414,11 @@ function createApiServer(client) {
     }
   });
 
-  cleanupExpiredAudioUploads().catch((error) => {
+  runAudioUploadCleanup(client).catch((error) => {
     console.warn('Audio upload cleanup failed:', error.message);
   });
   const uploadCleanupTimer = setInterval(() => {
-    cleanupExpiredAudioUploads().catch((error) => {
+    runAudioUploadCleanup(client).catch((error) => {
       console.warn('Audio upload cleanup failed:', error.message);
     });
   }, 60 * 60 * 1000);
@@ -981,6 +1038,7 @@ function createApiServer(client) {
       const guild = client.guilds.cache.get(guildId);
       let player = client.lavalink?.players?.get(guildId);
       let uploadTempPath = null;
+      let activeUploadTempPath = null;
       let storedFilePath = null;
 
       try {
@@ -1019,6 +1077,8 @@ function createApiServer(client) {
           guildUploadDir,
           `.incoming-${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.tmp`,
         );
+        activeUploadTempPath = path.resolve(uploadTempPath);
+        activeUploadTempPaths.add(activeUploadTempPath);
         const streamedUpload = await streamUploadToFile(req, uploadTempPath, AUDIO_UPLOAD_MAX_BYTES);
         const streamedUploadId = streamedUpload.uploadId;
         uploadTempPath = streamedUpload.path;
@@ -1031,15 +1091,31 @@ function createApiServer(client) {
           return res.status(400).json({ error: 'Invalid upload path' });
         }
 
-        const alreadyStored = await fileExists(filePath);
-        if (alreadyStored) {
-          await safeDeleteFile(uploadTempPath);
-          uploadTempPath = null;
-          await touchFile(filePath);
-        } else {
-          await renameFileWithRetry(uploadTempPath, filePath);
-          uploadTempPath = null;
-          storedFilePath = filePath;
+        const releaseQuota = await acquireUploadQuotaMutex();
+        let alreadyStored;
+        try {
+          await cleanupExpiredAudioUploads(client);
+          alreadyStored = await fileExists(filePath);
+          if (alreadyStored) {
+            await safeDeleteFile(uploadTempPath);
+            uploadTempPath = null;
+            await touchFile(filePath);
+          } else {
+            const hasRoom = await makeRoomForAudioUpload(streamedUpload.size, client, uploadTempPath);
+            if (!hasRoom) {
+              await safeDeleteFile(uploadTempPath);
+              uploadTempPath = null;
+              return res.status(507).json({
+                error: `Upload storage limit reached (${Math.floor(AUDIO_UPLOAD_QUOTA_BYTES / (1024 * 1024))} MB); all older files are still in use`,
+              });
+            }
+
+            await renameFileWithRetry(uploadTempPath, filePath);
+            uploadTempPath = null;
+            storedFilePath = filePath;
+          }
+        } finally {
+          releaseQuota();
         }
 
         const publicName = encodeURIComponent(originalName);
@@ -1114,6 +1190,7 @@ function createApiServer(client) {
           res.status(status).json({ error: `Upload failed: ${err.message}` });
         }
       } finally {
+        if (activeUploadTempPath) activeUploadTempPaths.delete(activeUploadTempPath);
         releaseUpload();
       }
     },
@@ -1361,7 +1438,13 @@ function createApiServer(client) {
         const searchCacheKey = `${guildId}:${preparedQuery.trim().toLowerCase()}`;
         const cachedSearch = playerSearchCache.get(searchCacheKey);
         if (cachedSearch && cachedSearch.expiresAt > Date.now()) {
-          return res.json({ success: true, tracks: cachedSearch.tracks });
+          playerSearchCache.delete(searchCacheKey);
+          playerSearchCache.set(searchCacheKey, cachedSearch);
+          return res.json({
+            success: true,
+            tracks: cachedSearch.tracks,
+            playlist: cachedSearch.playlist,
+          });
         }
         const requester = getDashboardRequester(req, client);
         let result;
@@ -1381,7 +1464,8 @@ function createApiServer(client) {
             code: failure.code,
           });
         }
-        const tracks = (result?.tracks || []).slice(0, 10).map((track) => ({
+        const loadedTracks = (result?.tracks || []).slice(0, PLAYER_PLAYLIST_MAX_TRACKS);
+        const tracks = loadedTracks.slice(0, 10).map((track) => ({
           encoded: track.encoded,
           title: track.info.title,
           author: track.info.author,
@@ -1391,12 +1475,25 @@ function createApiServer(client) {
           source: normalizeSourceName(track.info),
           ...getTrackCapabilityMetadata(track),
         }));
-        playerSearchCache.set(searchCacheKey, { tracks, expiresAt: Date.now() + PLAYER_SEARCH_CACHE_TTL_MS });
-        if (playerSearchCache.size > PLAYER_SEARCH_CACHE_MAX_ENTRIES) {
-          const oldestKey = playerSearchCache.keys().next().value;
-          if (oldestKey) playerSearchCache.delete(oldestKey);
-        }
-        return res.json({ success: true, tracks });
+        const playlist = result?.playlist
+          ? {
+            key: searchCacheKey,
+            name: result.playlist.name || 'Playlist',
+            trackCount: loadedTracks.length,
+            totalDuration: loadedTracks.reduce((total, track) => total + (Number(track.info?.duration) || 0), 0),
+            artwork: extractArtwork(loadedTracks[0]?.info),
+            truncated: (result.tracks || []).length > loadedTracks.length,
+          }
+          : null;
+        playerSearchCache.delete(searchCacheKey);
+        playerSearchCache.set(searchCacheKey, {
+          tracks,
+          playlist,
+          playlistTracks: result?.playlist ? loadedTracks : null,
+          expiresAt: Date.now() + (playlist ? PLAYER_PLAYLIST_CACHE_TTL_MS : PLAYER_SEARCH_CACHE_TTL_MS),
+        });
+        prunePlayerSearchCache();
+        return res.json({ success: true, tracks, playlist });
       }
 
       if (action === 'join') {
@@ -1474,12 +1571,13 @@ function createApiServer(client) {
         'seek',
         'move',
         'playnow',
+        'playlist',
       ]);
       if (!privileged && djOnlyActions.has(action)) {
         return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
       }
 
-      const isPlaybackAction = ['play', 'playnow'].includes(action);
+      const isPlaybackAction = ['play', 'playnow', 'playlist'].includes(action);
       const requestedPlaybackChannelId = isPlaybackAction
         ? req.body?.channelId || memberVoiceChannelId || connectedBotVoiceChannelId || null
         : null;
@@ -1558,6 +1656,48 @@ function createApiServer(client) {
       }
 
       switch (action) {
+        case 'playlist': {
+          const cacheKey = typeof req.body?.cacheKey === 'string' ? req.body.cacheKey : '';
+          if (!cacheKey.startsWith(`${guildId}:`)) {
+            return res.status(400).json({ error: 'Invalid playlist selection' });
+          }
+          const cachedSearch = playerSearchCache.get(cacheKey);
+          const playlistTracks = cachedSearch?.playlistTracks;
+          if (!cachedSearch || cachedSearch.expiresAt <= Date.now() || !cachedSearch.playlist || !Array.isArray(playlistTracks) || playlistTracks.length === 0) {
+            return res.status(410).json({ error: 'Playlist search expired. Search for the playlist again.' });
+          }
+
+          const requester = getDashboardRequester(req, client);
+          const tracksToAdd = playlistTracks.map((track) => ({
+            ...track,
+            requester,
+          }));
+          tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
+          clearAutoplayPrefetch(guildId);
+
+          const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
+          if (autoplayIndex !== -1) {
+            player.queue.tracks.splice(autoplayIndex, 0, ...tracksToAdd);
+          } else {
+            await player.queue.add(tracksToAdd);
+          }
+
+          if (!player.queue.current && !player.playing && !player.paused) {
+            await player.play();
+          }
+          await client.musicUI?.refresh(player).catch(() => {});
+          const { savePlayerState } = require('./state/queueStore');
+          await savePlayerState(player).catch(() => {});
+          playerSearchCache.delete(cacheKey);
+          return res.json({
+            success: true,
+            title: cachedSearch.playlist.name,
+            count: tracksToAdd.length,
+            mode: 'queue',
+            truncated: cachedSearch.playlist.truncated,
+          });
+        }
+
         case 'pause':
           if (player && !player.paused) await player.pause();
           break;
@@ -2424,7 +2564,9 @@ async function renameFileWithRetry(source, destination, attempts = 5) {
 async function safeDeleteFile(filePath) {
   try {
     await fs.promises.unlink(filePath);
+    return true;
   } catch {}
+  return false;
 }
 
 async function fileExists(filePath) {
@@ -2443,31 +2585,107 @@ async function touchFile(filePath) {
   } catch {}
 }
 
-async function cleanupExpiredAudioUploads() {
+function getProtectedAudioUploadPaths(client) {
+  const protectedPaths = new Set();
+  const players = client?.lavalink?.players;
+  if (players) {
+    for (const player of players.values()) {
+      const tracks = [player.queue?.current, ...(player.queue?.tracks || [])].filter(Boolean);
+      for (const track of tracks) {
+        const filePath = track.localUpload?.filePath;
+        if (!filePath) continue;
+        const resolvedPath = path.resolve(filePath);
+        if (isPathInside(resolvedPath, UPLOAD_DIR)) protectedPaths.add(resolvedPath);
+      }
+    }
+  }
+
+  for (const filePath of getStoredLocalUploadPaths()) {
+    const resolvedPath = path.resolve(filePath);
+    if (isPathInside(resolvedPath, UPLOAD_DIR)) protectedPaths.add(resolvedPath);
+  }
+  return protectedPaths;
+}
+
+async function listAudioUploadFiles() {
   let guildDirs = [];
   try {
     guildDirs = await fs.promises.readdir(UPLOAD_DIR, { withFileTypes: true });
   } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-    return;
+    if (error.code === 'ENOENT') return [];
+    throw error;
   }
 
-  const cutoff = Date.now() - AUDIO_UPLOAD_TTL_MS;
+  const files = [];
   for (const guildDir of guildDirs) {
     if (!guildDir.isDirectory() || !isSafeId(guildDir.name)) continue;
 
     const guildPath = path.join(UPLOAD_DIR, guildDir.name);
-    const files = await fs.promises.readdir(guildPath, { withFileTypes: true }).catch(() => []);
-    for (const file of files) {
+    const entries = await fs.promises.readdir(guildPath, { withFileTypes: true }).catch(() => []);
+    for (const file of entries) {
       if (!file.isFile()) continue;
 
       const filePath = path.join(guildPath, file.name);
       const stats = await fs.promises.stat(filePath).catch(() => null);
-      if (stats && stats.mtimeMs < cutoff) {
-        await safeDeleteFile(filePath);
+      if (stats?.isFile()) {
+        const incoming = file.name.startsWith('.incoming-');
+        files.push({
+          path: filePath,
+          size: stats.size,
+          mtimeMs: stats.mtimeMs,
+          incoming,
+          activeIncoming: incoming && activeUploadTempPaths.has(path.resolve(filePath)),
+        });
       }
     }
   }
+  return files;
+}
+
+async function cleanupExpiredAudioUploads(client) {
+  const files = await listAudioUploadFiles();
+  const protectedPaths = getProtectedAudioUploadPaths(client);
+  const now = Date.now();
+  for (const file of files) {
+    if (file.activeIncoming) continue;
+    const cutoff = now - (file.incoming ? AUDIO_UPLOAD_TEMP_TTL_MS : AUDIO_UPLOAD_TTL_MS);
+    if (file.mtimeMs < cutoff && !protectedPaths.has(path.resolve(file.path))) {
+      await safeDeleteFile(file.path);
+    }
+  }
+}
+
+async function runAudioUploadCleanup(client) {
+  const releaseQuota = await acquireUploadQuotaMutex();
+  try {
+    await cleanupExpiredAudioUploads(client);
+  } finally {
+    releaseQuota();
+  }
+}
+
+async function makeRoomForAudioUpload(requiredBytes, client, incomingPath = null) {
+  const files = await listAudioUploadFiles();
+  const protectedPaths = getProtectedAudioUploadPaths(client);
+  const excludedIncomingPath = incomingPath ? path.resolve(incomingPath) : null;
+  let totalBytes = files.reduce(
+    (total, file) => total + (path.resolve(file.path) === excludedIncomingPath ? 0 : file.size),
+    0,
+  );
+  if (totalBytes + requiredBytes <= AUDIO_UPLOAD_QUOTA_BYTES) return true;
+
+  const candidates = files
+    .filter((file) => !file.incoming && !protectedPaths.has(path.resolve(file.path)))
+    .sort((left, right) => left.mtimeMs - right.mtimeMs);
+
+  for (const file of candidates) {
+    if (totalBytes + requiredBytes <= AUDIO_UPLOAD_QUOTA_BYTES) break;
+    if (await safeDeleteFile(file.path)) {
+      totalBytes -= file.size;
+    }
+  }
+
+  return totalBytes + requiredBytes <= AUDIO_UPLOAD_QUOTA_BYTES;
 }
 
 function resolvePlayerTextChannelId(guild, preferredChannelId = null, fallbackChannelId = null) {
@@ -2579,12 +2797,13 @@ function buildPlayerStatusSnapshot(client, guildId) {
 function buildQueueSnapshot(client, guildId, page = 0) {
   const player = client.lavalink?.players?.get(guildId);
   if (!player) {
-    return { current: null, tracks: [], total: 0, page, totalPages: 0 };
+    return { current: null, tracks: [], total: 0, page, totalPages: 0, revision: 'empty' };
   }
 
   const perPage = 20;
   const allTracks = player.queue.tracks;
   const start = page * perPage;
+  const revision = buildQueueRevision(allTracks);
 
   const current = player.queue.current
     ? formatQueueTrack(player.queue.current)
@@ -2600,7 +2819,27 @@ function buildQueueSnapshot(client, guildId, page = 0) {
     total: allTracks.length,
     page,
     totalPages: Math.ceil(allTracks.length / perPage),
+    revision,
   };
+}
+
+function buildQueueRevision(tracks) {
+  const hash = crypto.createHash('sha1');
+  hash.update(String(tracks.length));
+  for (const track of tracks) {
+    const info = track?.info || {};
+    hash.update('\0');
+    hash.update(String(info.identifier || info.uri || track?.localUpload?.uploadId || ''));
+    hash.update('\0');
+    hash.update(String(info.title || ''));
+    hash.update('\0');
+    hash.update(String(info.author || ''));
+    hash.update('\0');
+    hash.update(String(track?.requester?.id || track?.requester?.username || ''));
+    hash.update('\0');
+    hash.update(track?.isAutoplay ? '1' : '0');
+  }
+  return hash.digest('base64url').slice(0, 16);
 }
 
 function formatQueueTrack(track) {

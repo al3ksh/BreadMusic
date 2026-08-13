@@ -1105,6 +1105,34 @@ a { color: inherit; text-decoration: none; }
   border-color: rgba(231, 76, 60, 0.22);
 }
 
+.activity-queue-load-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  margin: 6px 5px 0;
+  padding: 7px 10px;
+  color: #b9b5e9;
+  background: rgba(93, 86, 163, 0.14);
+  border: 1px solid rgba(143, 134, 224, 0.28);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.activity-queue-load-more:hover:not(:disabled) {
+  color: #f0efff;
+  background: rgba(93, 86, 163, 0.28);
+  border-color: rgba(143, 134, 224, 0.5);
+}
+
+.activity-queue-load-more:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .activity-queue-remove:disabled,
 .activity-utility-button:disabled,
 .activity-lyrics-refresh:disabled {
@@ -1375,6 +1403,64 @@ a { color: inherit; text-decoration: none; }
 
 .activity-search-result:hover {
   background: rgba(255, 255, 255, 0.05);
+}
+
+.activity-search-playlist {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(143, 134, 224, 0.42);
+  border-radius: 8px;
+  background: rgba(91, 80, 153, 0.18);
+}
+
+.activity-search-playlist > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.activity-search-playlist strong,
+.activity-search-playlist small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-search-playlist strong {
+  color: #f0efff;
+  font-size: 12px;
+}
+
+.activity-search-playlist small {
+  color: #aaa6c9;
+  font-size: 11px;
+}
+
+.activity-search-playlist > button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: #f0efff;
+  background: #5d56a3;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.activity-search-playlist > button:hover:not(:disabled) {
+  background: #7169c3;
+  transform: translateY(-1px);
+}
+
+.activity-search-playlist > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .activity-search-result > svg {
@@ -1918,7 +2004,7 @@ a { color: inherit; text-decoration: none; }
 .activity-karaoke-lines {
   display: grid;
   min-height: 0;
-  grid-template-rows: auto auto auto;
+  grid-template-rows: minmax(min-content, 1fr) auto minmax(min-content, 1fr);
   align-content: center;
   gap: clamp(10px, 1.8vh, 18px);
   padding: clamp(8px, 1.8vh, 18px) 20px;
@@ -1935,7 +2021,8 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: center;
   margin: 0 auto;
-  overflow: hidden;
+  padding-block: 0.12em 0.18em;
+  overflow: visible;
   text-wrap: balance;
   will-change: transform, opacity;
 }
@@ -2119,16 +2206,16 @@ a { color: inherit; text-decoration: none; }
 }
 
 .activity-karaoke-lines p {
-  min-height: 2.5em;
-  max-height: 2.5em;
+  min-height: 0;
+  max-height: none;
   color: #5f626c;
   font-size: clamp(16px, min(1.8vw, 3vh), 24px);
   line-height: 1.25;
 }
 
 .activity-karaoke-lines strong {
-  min-height: 2.16em;
-  max-height: 3.24em;
+  min-height: 1.08em;
+  max-height: 4.4em;
   color: #f4f3ff;
   font-size: clamp(28px, min(4vw, 6vh), 54px);
   line-height: 1.08;
@@ -2448,7 +2535,7 @@ a { color: inherit; text-decoration: none; }
   .activity-karaoke-track strong { font-size: 12px; }
   .activity-karaoke-track span { font-size: 10px; }
   .activity-karaoke-lines {
-    grid-template-rows: auto auto auto;
+    grid-template-rows: minmax(min-content, 1fr) auto minmax(min-content, 1fr);
     gap: clamp(10px, 2.5vh, 18px);
     padding: 8px 4px;
   }

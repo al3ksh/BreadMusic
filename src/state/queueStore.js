@@ -142,6 +142,18 @@ function clearStoredQueue(guildId) {
   queueStore.delete(guildId);
 }
 
+function getStoredLocalUploadPaths() {
+  const paths = new Set();
+  for (const [, payload] of queueStore.entries()) {
+    const tracks = [payload?.current, ...(payload?.tracks || []), ...(payload?.previous || [])];
+    for (const track of tracks) {
+      const filePath = track?.localUpload?.filePath;
+      if (typeof filePath === 'string' && filePath) paths.add(filePath);
+    }
+  }
+  return paths;
+}
+
 function flushQueueStore() {
   return queueStore.flush();
 }
@@ -150,5 +162,6 @@ module.exports = {
   savePlayerState,
   hydratePlayer,
   clearStoredQueue,
+  getStoredLocalUploadPaths,
   flushQueueStore,
 };

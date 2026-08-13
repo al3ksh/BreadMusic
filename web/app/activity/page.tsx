@@ -53,8 +53,17 @@ type QueueSnapshot = {
   total: number;
   page: number;
   totalPages: number;
+  revision: string;
 };
 type SearchTrack = QueueTrack & { encoded?: string };
+type SearchPlaylist = {
+  key: string;
+  name: string;
+  trackCount: number;
+  totalDuration: number;
+  artwork?: string | null;
+  truncated?: boolean;
+};
 type SyncedLine = { time: number; text: string };
 type PlayerClock = {
   trackKey: string;
@@ -151,6 +160,9 @@ export default function ActivityPage() {
   const clockRef = useRef<PlayerClock>({ trackKey: '', base: 0, startedAt: Date.now(), paused: true });
   const lyricsListRef = useRef<HTMLDivElement | null>(null);
   const activeLyricRef = useRef<HTMLParagraphElement | null>(null);
+  const queueScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const queueAutoScrollFrameRef = useRef<number | null>(null);
+  const queueAutoScrollSpeedRef = useRef(0);
   const [phase, setPhase] = useState<ActivityPhase>('starting');
   const [introExiting, setIntroExiting] = useState(false);
   const [message, setMessage] = useState('Connecting to Discord...');
@@ -159,6 +171,12 @@ export default function ActivityPage() {
   const [capabilities, setCapabilities] = useState<DashboardCapabilities | null>(null);
   const [status, setStatus] = useState<PlayerStatus>(EMPTY_STATUS);
   const [queue, setQueue] = useState<QueueSnapshot | null>(null);
+  const queueLoadedPageRef = useRef(0);
+  const queueDesiredPageRef = useRef(0);
+  const queueRevisionRef = useRef('empty');
+  const queueRestoreIdRef = useRef(0);
+  const [queueLoadingMore, setQueueLoadingMore] = useState(false);
+  const [queueRestore, setQueueRestore] = useState<{ id: number; revision: string; throughPage: number } | null>(null);
   const [position, setPosition] = useState(0);
   const [activePanel, setActivePanel] = useState<ActivityPanel>(null);
   const [drawerClosing, setDrawerClosing] = useState(false);
@@ -167,6 +185,7 @@ export default function ActivityPage() {
   const [seekPreview, setSeekPreview] = useState<{ position: number; percent: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchTrack[]>([]);
+  const [searchPlaylist, setSearchPlaylist] = useState<SearchPlaylist | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchCompletedQuery, setSearchCompletedQuery] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -321,8 +340,79 @@ export default function ActivityPage() {
         setStatus({ ...incomingStatus, currentTrack: { ...track, position: stablePosition } });
       }
     }
-    if (payload.queue) setQueue(payload.queue);
+    if (payload.queue) {
+      const incomingQueue = payload.queue;
+      const sameRevision = queueRevisionRef.current === incomingQueue.revision;
+      const desiredPage = Math.min(queueDesiredPageRef.current, Math.max(0, incomingQueue.totalPages - 1));
+      queueRevisionRef.current = incomingQueue.revision;
+      if (incomingQueue.page === 0 && queueLoadedPageRef.current > 0 && sameRevision) {
+        setQueue((current) => {
+          if (!current || current.revision !== incomingQueue.revision) return incomingQueue;
+          const retainedPages = current.tracks.slice(incomingQueue.tracks.length);
+          return {
+            ...incomingQueue,
+            page: queueLoadedPageRef.current,
+            tracks: [...incomingQueue.tracks, ...retainedPages].slice(0, incomingQueue.total),
+          };
+        });
+      } else if (incomingQueue.page === 0 && sameRevision && desiredPage > 0) {
+        // A restore is already rebuilding the requested pages for this revision.
+        setQueue(incomingQueue);
+      } else if (incomingQueue.page === 0 && !sameRevision && desiredPage > 0) {
+        queueLoadedPageRef.current = 0;
+        queueDesiredPageRef.current = desiredPage;
+        setQueue(incomingQueue);
+        setQueueRestore({
+          id: ++queueRestoreIdRef.current,
+          revision: incomingQueue.revision,
+          throughPage: desiredPage,
+        });
+      } else {
+        queueLoadedPageRef.current = incomingQueue.page;
+        queueDesiredPageRef.current = incomingQueue.page;
+        setQueueRestore(null);
+        setQueue(incomingQueue);
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    if (!guildId || !queueRestore) return;
+    const restore = queueRestore;
+    let cancelled = false;
+
+    async function restoreLoadedQueuePages() {
+      try {
+        const pages: QueueSnapshot[] = [];
+        for (let page = 0; page <= restore.throughPage; page += 1) {
+          const snapshot = await activityFetch<QueueSnapshot>(`/api/guilds/${guildId}/queue?page=${page}`);
+          if (cancelled || snapshot.revision !== restore.revision) return;
+          pages.push(snapshot);
+        }
+
+        const first = pages[0];
+        const last = pages[pages.length - 1];
+        if (!first || !last || cancelled || restore.id !== queueRestoreIdRef.current) return;
+        queueLoadedPageRef.current = last.page;
+        queueDesiredPageRef.current = last.page;
+        setQueue({
+          ...first,
+          page: last.page,
+          tracks: pages.flatMap((page) => page.tracks).slice(0, first.total),
+        });
+        setQueueRestore((current) => (current?.id === restore.id ? null : current));
+      } catch (error) {
+        if (cancelled || restore.id !== queueRestoreIdRef.current) return;
+        setQueueRestore(null);
+        notify(error instanceof Error ? error.message : 'Could not restore loaded queue tracks', 'error');
+      }
+    }
+
+    restoreLoadedQueuePages();
+    return () => {
+      cancelled = true;
+    };
+  }, [activityFetch, guildId, notify, queueRestore]);
 
   useEffect(() => {
     let cancelled = false;
@@ -769,20 +859,23 @@ export default function ActivityPage() {
     const controller = new AbortController();
     searchAbortRef.current = controller;
     setSearching(true);
+    setSearchPlaylist(null);
     setSearchCompletedQuery('');
     try {
-      const result = await activityFetch<{ tracks: SearchTrack[] }>(`/api/guilds/${guildId}/player/search`, {
+      const result = await activityFetch<{ tracks: SearchTrack[]; playlist?: SearchPlaylist | null }>(`/api/guilds/${guildId}/player/search`, {
         method: 'POST',
         body: JSON.stringify({ query }),
         signal: controller.signal,
       });
       if (!controller.signal.aborted) {
         setSearchResults(result.tracks || []);
+        setSearchPlaylist(result.playlist || null);
         setSearchCompletedQuery(query);
       }
     } catch (error) {
       if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
       setSearchResults([]);
+      setSearchPlaylist(null);
       setSearchCompletedQuery('');
       notify(error instanceof Error ? error.message : 'Search failed', 'error');
     } finally {
@@ -809,6 +902,7 @@ export default function ActivityPage() {
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
       setSearchResults([]);
+      setSearchPlaylist(null);
       setSearching(false);
       setSearchCompletedQuery('');
       return;
@@ -957,6 +1051,23 @@ export default function ActivityPage() {
     }
   }, [channelId, closePanel, notify, playerAction, status.currentTrack]);
 
+  const addSearchPlaylist = useCallback(async () => {
+    if (!searchPlaylist) return;
+    const added = await playerAction('playlist', {
+      cacheKey: searchPlaylist.key,
+      channelId,
+    });
+    if (!added) return;
+    notify(
+      `${status.currentTrack ? 'Added to queue' : 'Playing'}: ${searchPlaylist.name} (${searchPlaylist.trackCount} tracks)`,
+      'success',
+    );
+    setSearchResults([]);
+    setSearchPlaylist(null);
+    setSearchQuery('');
+    closePanel();
+  }, [channelId, closePanel, notify, playerAction, searchPlaylist, status.currentTrack]);
+
   const canDj = capabilities?.canControlPlayer === true;
   const hasTrack = Boolean(status.connected && status.currentTrack);
   const canSeekTrack = Boolean(canDj && status.currentTrack?.seekable);
@@ -1000,7 +1111,50 @@ export default function ActivityPage() {
     notify('Synced lyrics are unavailable for this track. Karaoke was closed.', 'warning');
   }, [currentTrackUri, karaokeEnabled, lyricsLoading, lyricsTrackUri, notify, syncedLyrics.length]);
 
+  const stopQueueAutoScroll = useCallback(() => {
+    queueAutoScrollSpeedRef.current = 0;
+    if (queueAutoScrollFrameRef.current !== null) {
+      cancelAnimationFrame(queueAutoScrollFrameRef.current);
+      queueAutoScrollFrameRef.current = null;
+    }
+  }, []);
+
+  const updateQueueAutoScroll = useCallback((clientY: number) => {
+    const container = queueScrollContainerRef.current;
+    if (!container) return;
+
+    const bounds = container.getBoundingClientRect();
+    const edgeSize = Math.min(72, bounds.height * 0.24);
+    const distanceFromTop = clientY - bounds.top;
+    const distanceFromBottom = bounds.bottom - clientY;
+    let speed = 0;
+
+    if (distanceFromTop < edgeSize) {
+      speed = -Math.ceil(18 * (1 - Math.max(0, distanceFromTop) / edgeSize));
+    } else if (distanceFromBottom < edgeSize) {
+      speed = Math.ceil(18 * (1 - Math.max(0, distanceFromBottom) / edgeSize));
+    }
+
+    queueAutoScrollSpeedRef.current = speed;
+    if (speed === 0 || queueAutoScrollFrameRef.current !== null) return;
+
+    const scroll = () => {
+      const scrollContainer = queueScrollContainerRef.current;
+      const currentSpeed = queueAutoScrollSpeedRef.current;
+      if (!scrollContainer || currentSpeed === 0) {
+        queueAutoScrollFrameRef.current = null;
+        return;
+      }
+      scrollContainer.scrollTop += currentSpeed;
+      queueAutoScrollFrameRef.current = requestAnimationFrame(scroll);
+    };
+    queueAutoScrollFrameRef.current = requestAnimationFrame(scroll);
+  }, []);
+
+  useEffect(() => stopQueueAutoScroll, [stopQueueAutoScroll]);
+
   const handleQueueDrop = useCallback(async (targetIndex: number) => {
+    stopQueueAutoScroll();
     if (!canDj || dragIndex === null || dragIndex === targetIndex) {
       setDragIndex(null);
       setDropIndex(null);
@@ -1009,11 +1163,40 @@ export default function ActivityPage() {
     await playerAction('move', { from: dragIndex, to: targetIndex });
     setDragIndex(null);
     setDropIndex(null);
-  }, [canDj, dragIndex, playerAction]);
+  }, [canDj, dragIndex, playerAction, stopQueueAutoScroll]);
 
   const handleQueueRemove = useCallback((index: number) => {
     if (canDj) playerAction('remove', { start: index });
   }, [canDj, playerAction]);
+
+  const loadMoreQueue = useCallback(async () => {
+    if (!guildId || !queue || queueLoadingMore || queue.tracks.length >= queue.total) return;
+    const nextPage = queueLoadedPageRef.current + 1;
+    if (nextPage >= queue.totalPages) return;
+
+    setQueueLoadingMore(true);
+    try {
+      const nextQueue = await activityFetch<QueueSnapshot>(`/api/guilds/${guildId}/queue?page=${nextPage}`);
+      if (nextQueue.revision !== queueRevisionRef.current || nextQueue.revision !== queue.revision) {
+        const refreshedQueue = await activityFetch<QueueSnapshot>(`/api/guilds/${guildId}/queue?page=0`);
+        queueLoadedPageRef.current = 0;
+        queueRevisionRef.current = refreshedQueue.revision;
+        setQueue(refreshedQueue);
+        notify('Queue changed while loading. Showing the latest tracks.', 'info');
+      } else {
+        queueLoadedPageRef.current = nextQueue.page;
+        queueDesiredPageRef.current = nextQueue.page;
+        setQueue((current) => ({
+          ...nextQueue,
+          tracks: [...(current?.tracks || []), ...nextQueue.tracks],
+        }));
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not load more queue tracks', 'error');
+    } finally {
+      setQueueLoadingMore(false);
+    }
+  }, [activityFetch, guildId, notify, queue, queueLoadingMore]);
 
   const renderSeek = (variant: 'player' | 'karaoke' = 'player') => !hasTrack ? null : (
     <div className={`activity-seek-group activity-seek-group-${variant}`}>
@@ -1361,7 +1544,21 @@ export default function ActivityPage() {
                 <button type="button" onClick={closePanel} aria-label="Close panel"><X size={18} /></button>
               </div>
 
-              <div className="activity-drawer-body">
+              <div
+                className="activity-drawer-body"
+                ref={activePanel === 'queue' ? queueScrollContainerRef : undefined}
+                onDragOver={(event) => {
+                  if (dragIndex === null) return;
+                  event.preventDefault();
+                  updateQueueAutoScroll(event.clientY);
+                }}
+                onDragLeave={(event) => {
+                  const nextTarget = event.relatedTarget;
+                  if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                    stopQueueAutoScroll();
+                  }
+                }}
+              >
                 {activePanel === 'queue' && (
                   <div className="activity-queue-list">
                     <button
@@ -1379,11 +1576,11 @@ export default function ActivityPage() {
                       <div
                         className={`activity-queue-row ${dropIndex === index ? 'drop-target' : ''}`}
                         key={`${track.uri}-${index}`}
-                        draggable={canDj}
-                        onDragStart={() => { setDragIndex(index); setDropIndex(index); }}
-                        onDragOver={(event) => { if (canDj) { event.preventDefault(); setDropIndex(index); } }}
+                        draggable={canDj && !queueRestore}
+                        onDragStart={() => { stopQueueAutoScroll(); setDragIndex(index); setDropIndex(index); }}
+                        onDragOver={(event) => { if (canDj && !queueRestore) { event.preventDefault(); setDropIndex(index); } }}
                         onDrop={() => handleQueueDrop(index)}
-                        onDragEnd={() => { setDragIndex(null); setDropIndex(null); }}
+                        onDragEnd={() => { stopQueueAutoScroll(); setDragIndex(null); setDropIndex(null); }}
                       >
                         <GripVertical size={15} className="activity-drag-icon" />
                         <div className="activity-queue-index">{index + 1}</div>
@@ -1393,6 +1590,17 @@ export default function ActivityPage() {
                         <button type="button" className="activity-queue-remove" disabled={!canDj} onClick={(event) => { event.stopPropagation(); handleQueueRemove(index); }} aria-label={`Remove ${track.title}`} title="Remove from queue"><Trash2 size={14} /></button>
                       </div>
                     ))}
+                    {queue && queue.tracks.length < queue.total && (
+                      <button
+                        type="button"
+                        className="activity-queue-load-more"
+                        disabled={queueLoadingMore || Boolean(queueRestore)}
+                        onClick={loadMoreQueue}
+                      >
+                        {queueLoadingMore || queueRestore ? <ActivitySpinner /> : <ChevronDown size={15} />}
+                        {queueRestore ? 'Syncing loaded tracks' : queueLoadingMore ? 'Loading queue' : `Load more (${queue.tracks.length}/${queue.total})`}
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -1427,8 +1635,29 @@ export default function ActivityPage() {
                         </>
                       )}
                     </div>
-                    {searchResults.length > 0 && (
+                    {(searchPlaylist || searchResults.length > 0) && (
                       <div className="activity-search-results">
+                        {searchPlaylist && (
+                          <div className="activity-search-playlist">
+                            <ActivityArtwork src={searchPlaylist.artwork} />
+                            <span>
+                              <strong>{searchPlaylist.name}</strong>
+                              <small>
+                                {searchPlaylist.trackCount} tracks - {formatMs(searchPlaylist.totalDuration)}
+                                {searchPlaylist.truncated ? ' - first 500 loaded' : ''}
+                              </small>
+                            </span>
+                            <button
+                              type="button"
+                              disabled={!canDj || Boolean(actionBusy)}
+                              onClick={addSearchPlaylist}
+                              title={hasTrack ? 'Add playlist to queue' : 'Play playlist'}
+                              aria-label={hasTrack ? `Add ${searchPlaylist.name} to queue` : `Play ${searchPlaylist.name}`}
+                            >
+                              {hasTrack ? <ListPlus size={15} /> : <Play size={15} />}
+                            </button>
+                          </div>
+                        )}
                         {searchResults.map((track, index) => (
                           <div key={`${track.uri}-${index}`} className="activity-search-result">
                             <ActivityArtwork src={track.artwork} />

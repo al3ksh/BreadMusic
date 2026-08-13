@@ -131,6 +131,44 @@ const activityRotation = [
   { type: ActivityType.Watching,  name: "/dashboard • take the wheel" },
   { type: ActivityType.Listening, name: "/help • commands, no ceremony" },
   { type: ActivityType.Playing,   name: "/play • finding your next song" },
+
+  { type: ActivityType.Playing,   name: "/play • no skips, only consequences" },
+  { type: ActivityType.Listening, name: "/play • autoplay has opinions" },
+  { type: ActivityType.Playing,   name: "/play • pressing play emotionally" },
+  { type: ActivityType.Watching,  name: "/play • queueing your character arc" },
+  { type: ActivityType.Listening, name: "/play • source? trust me" },
+  { type: ActivityType.Watching,  name: "/play • seekable in theory" },
+  { type: ActivityType.Playing,   name: "/play • the vibe is buffering" },
+  { type: ActivityType.Listening, name: "/play • skip responsibly" },
+  { type: ActivityType.Playing,   name: "/play • playlist? say less" },
+  { type: ActivityType.Watching,  name: "/play • one more song" },
+
+  { type: ActivityType.Playing,   name: "Discord Activity • shared aux unlocked" },
+  { type: ActivityType.Watching,  name: "Discord Activity • the queue has witnesses" },
+  { type: ActivityType.Listening, name: "Discord Activity • buttons with consequences" },
+  { type: ActivityType.Playing,   name: "Discord Activity • the aux cord is public" },
+  { type: ActivityType.Watching,  name: "Discord Activity • one queue, many DJs" },
+  { type: ActivityType.Listening, name: "Discord Activity • music, but social" },
+  { type: ActivityType.Playing,   name: "Discord Activity • no DJ degree required" },
+  { type: ActivityType.Watching,  name: "Discord Activity • click play, blame the DJ" },
+  { type: ActivityType.Listening, name: "Discord Activity • synced with the chaos" },
+  { type: ActivityType.Playing,   name: "Discord Activity • server-wide soundcheck" },
+  { type: ActivityType.Watching,  name: "Discord Activity • queueing together" },
+  { type: ActivityType.Listening, name: "Discord Activity • music with witnesses" },
+
+  { type: ActivityType.Listening, name: "/dashboard • controlling the chaos" },
+  { type: ActivityType.Playing,   name: "/dashboard • queue management simulator" },
+  { type: ActivityType.Watching,  name: "/dashboard • live controls, questionable decisions" },
+
+  { type: ActivityType.Playing,   name: "/lyrics • karaoke without the rent" },
+  { type: ActivityType.Watching,  name: "/lyrics • words pending" },
+  { type: ActivityType.Listening, name: "/lyrics • singing is optional" },
+  { type: ActivityType.Playing,   name: "/lyrics • reading between the beats" },
+
+  { type: ActivityType.Playing,   name: "/help • ask nicely" },
+  { type: ActivityType.Watching,  name: "/stats • keeping receipts" },
+  { type: ActivityType.Listening, name: "/stats • counting the damage" },
+  { type: ActivityType.Watching,  name: "/stats • playback paperwork" },
 ];
 
 let activityIntervalId;

@@ -42,6 +42,7 @@ services:
       - LAVALINK_SECURE=false
       - DEFAULT_SOURCE=${DEFAULT_SOURCE:-ytsearch}
       - IDLE_TIMEOUT_MS=${IDLE_TIMEOUT_MS:-300000}
+      - UPLOAD_STORAGE_LIMIT_MB=${UPLOAD_STORAGE_LIMIT_MB:-1024}
       - WEB_PORT=3001
       - WEB_HOST=0.0.0.0
       - WEB_URL=${WEB_URL:-http://localhost:3000}

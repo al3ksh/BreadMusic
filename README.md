@@ -188,6 +188,17 @@ SPOTIFY_CLIENT_ID=spotify_client_id
 SPOTIFY_CLIENT_SECRET=spotify_client_secret
 ```
 
+### Local upload storage
+
+Audio uploads are limited to 256 MB per file and 1 GB for the shared
+`data/uploads` directory by default. When the quota is reached, the oldest
+uploads are removed first, except files currently used by a player or queue.
+Persistent queues are protected as well, including while the bot is restarting.
+
+```ini
+UPLOAD_STORAGE_LIMIT_MB=1024
+```
+
 ### Private guild access
 
 Bread can remain publicly installable while refusing commands and dashboard access
