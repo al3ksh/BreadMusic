@@ -173,14 +173,32 @@ const activityRotation = [
 
 let activityIntervalId;
 
+function shuffleActivities(entries) {
+  const shuffled = [...entries];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
 function startActivityRotation() {
   if (!activityRotation.length) return;
-  let index = Math.floor(Math.random() * activityRotation.length);
-  
+  let index = 0;
+  let rotation = shuffleActivities(activityRotation);
+  let previousName = '';
+
   const applyPresence = () => {
     if (isShuttingDown) return;
     try {
-      const current = activityRotation[index % activityRotation.length];
+      if (index >= rotation.length) {
+        rotation = shuffleActivities(activityRotation);
+        index = 0;
+        if (rotation.length > 1 && rotation[0].name === previousName) {
+          [rotation[0], rotation[1]] = [rotation[1], rotation[0]];
+        }
+      }
+      const current = rotation[index];
       client.user.setPresence({
         status: 'online',
         activities: [{
@@ -189,6 +207,7 @@ function startActivityRotation() {
           url: current.url,
         }],
       });
+      previousName = current.name;
       index += 1;
     } catch (error) {
       console.error('Failed to update presence:', error.message);
