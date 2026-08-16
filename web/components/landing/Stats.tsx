@@ -39,6 +39,7 @@ export function Stats() {
       color: 'red',
       label: 'Uptime',
       value: stats?.uptime || '--',
+      compact: true,
     },
   ];
 
@@ -56,14 +57,14 @@ export function Stats() {
           {items.map((item) => (
             <div
               key={item.label}
-              className="flex items-center gap-4 p-5 rounded-lg bg-bg-card border border-border"
+              className="flex min-w-0 items-center gap-4 p-5 rounded-lg bg-bg-card border border-border"
               style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}
             >
               <div className={`stat-icon ${colorMap[item.color]} rounded-lg`}>
                 {item.icon}
               </div>
-              <div>
-                <div className="text-2xl sm:text-3xl font-bold tabular-nums">
+              <div className="min-w-0">
+                <div className={`${item.compact ? 'text-xl sm:text-2xl xl:text-3xl' : 'text-2xl sm:text-3xl'} whitespace-nowrap font-bold tabular-nums`}>
                   {item.value}
                 </div>
                 <div className="text-xs text-text-secondary uppercase tracking-wider font-medium mt-1">

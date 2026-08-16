@@ -5,6 +5,7 @@ const {
   Events,
   ActivityType,
   MessageFlags,
+  Partials,
 } = require('discord.js');
 const { LavalinkManager } = require('lavalink-client');
 const { loadConfig } = require('./config');
@@ -32,6 +33,8 @@ const { getConfig, listConfigs, assertDJ, hasDJPermissions } = require('./state/
 const { createSelection } = require('./state/searchCache');
 const { deleteInteractionReply } = require('./utils/interactions');
 const { buildDashboardUrl } = require('./dashboard/url');
+const { createDmResponder } = require('./utils/dmResponder');
+const { createPresenceRotation } = require('./utils/presenceRotation');
 const {
   buildQueueEmbed,
   buildQueueComponents,
@@ -53,6 +56,7 @@ const { hasBalance, addBalance, removeBalance, getBalance } = require('./games/e
 const { handleAutoplay, scheduleAutoplayPrefetch, clearAutoplayState, addToRecentTracks } = require('./music/autoplay');
 const {
   clearVoiceTrackStatus,
+  handleVoiceStatusGatewayEvent,
   setVoiceTrackStatus,
 } = require('./music/voiceStatus');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
@@ -105,7 +109,15 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.MessageContent,
   ],
+  partials: [Partials.Channel],
+});
+
+const handleDirectMessage = createDmResponder({
+  dashboardUrl: `${String(process.env.WEB_URL || 'https://breadmusic.aleksh.xyz').replace(/\/$/, '')}/dashboard`,
+  contact: process.env.PRIVATE_ACCESS_CONTACT || 'aleksh8',
 });
 
 const activityRotation = [
@@ -143,62 +155,65 @@ const activityRotation = [
   { type: ActivityType.Playing,   name: "/play • playlist? say less" },
   { type: ActivityType.Watching,  name: "/play • one more song" },
 
-  { type: ActivityType.Playing,   name: "Discord Activity • shared aux unlocked" },
-  { type: ActivityType.Watching,  name: "Discord Activity • the queue has witnesses" },
-  { type: ActivityType.Listening, name: "Discord Activity • buttons with consequences" },
-  { type: ActivityType.Playing,   name: "Discord Activity • the aux cord is public" },
-  { type: ActivityType.Watching,  name: "Discord Activity • one queue, many DJs" },
-  { type: ActivityType.Listening, name: "Discord Activity • music, but social" },
-  { type: ActivityType.Playing,   name: "Discord Activity • no DJ degree required" },
-  { type: ActivityType.Watching,  name: "Discord Activity • click play, blame the DJ" },
-  { type: ActivityType.Listening, name: "Discord Activity • synced with the chaos" },
-  { type: ActivityType.Playing,   name: "Discord Activity • server-wide soundcheck" },
-  { type: ActivityType.Watching,  name: "Discord Activity • queueing together" },
-  { type: ActivityType.Listening, name: "Discord Activity • music with witnesses" },
+  { type: ActivityType.Playing,   name: "Activity • shared aux unlocked" },
+  { type: ActivityType.Watching,  name: "Activity • the queue has witnesses" },
+  { type: ActivityType.Listening, name: "Activity • buttons with consequences" },
+  { type: ActivityType.Playing,   name: "Activity • the aux cord is public" },
+  { type: ActivityType.Watching,  name: "Activity • one queue, many DJs" },
+  { type: ActivityType.Listening, name: "Activity • music, but social" },
+  { type: ActivityType.Playing,   name: "Activity • no DJ degree required" },
+  { type: ActivityType.Watching,  name: "Activity • click play, blame the DJ" },
+  { type: ActivityType.Listening, name: "Activity • synced with the chaos" },
+  { type: ActivityType.Playing,   name: "Activity • server-wide soundcheck" },
+  { type: ActivityType.Watching,  name: "Activity • queueing together" },
+  { type: ActivityType.Listening, name: "Activity • music with witnesses" },
 
   { type: ActivityType.Listening, name: "/dashboard • controlling the chaos" },
   { type: ActivityType.Playing,   name: "/dashboard • queue management simulator" },
   { type: ActivityType.Watching,  name: "/dashboard • live controls, questionable decisions" },
+  { type: ActivityType.Listening, name: "/dashboard • control issues, resolved" },
+  { type: ActivityType.Playing,   name: "/dashboard • knobs without the booth" },
+  { type: ActivityType.Watching,  name: "/dashboard • browser-based DJ decisions" },
 
   { type: ActivityType.Playing,   name: "/lyrics • karaoke without the rent" },
   { type: ActivityType.Watching,  name: "/lyrics • words pending" },
   { type: ActivityType.Listening, name: "/lyrics • singing is optional" },
   { type: ActivityType.Playing,   name: "/lyrics • reading between the beats" },
+  { type: ActivityType.Watching,  name: "/lyrics • subtitles for your shower concert" },
+  { type: ActivityType.Listening, name: "/lyrics • vocals not included" },
+  { type: ActivityType.Playing,   name: "/lyrics • words before the beat drops" },
 
   { type: ActivityType.Playing,   name: "/help • ask nicely" },
+  { type: ActivityType.Listening, name: "/help • professionally confused" },
+  { type: ActivityType.Watching,  name: "/help • answers sold separately" },
+  { type: ActivityType.Playing,   name: "/help • plot twist: documentation" },
   { type: ActivityType.Watching,  name: "/stats • keeping receipts" },
   { type: ActivityType.Listening, name: "/stats • counting the damage" },
   { type: ActivityType.Watching,  name: "/stats • playback paperwork" },
+  { type: ActivityType.Playing,   name: "/stats • your listening alibi" },
+  { type: ActivityType.Listening, name: "/stats • numbers with rhythm" },
+  { type: ActivityType.Watching,  name: "/stats • evidence of one more song" },
+  { type: ActivityType.Playing,   name: "/stats • quantifying the vibe" },
 ];
 
 let activityIntervalId;
 
-function shuffleActivities(entries) {
-  const shuffled = [...entries];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-  }
-  return shuffled;
-}
-
 function startActivityRotation() {
   if (!activityRotation.length) return;
-  let index = 0;
-  let rotation = shuffleActivities(activityRotation);
-  let previousName = '';
+  const nextActivity = createPresenceRotation(activityRotation, [
+    '/play',
+    '/dashboard',
+    '/help',
+    'Activity',
+    '/lyrics',
+    '/stats',
+  ]);
 
   const applyPresence = () => {
     if (isShuttingDown) return;
     try {
-      if (index >= rotation.length) {
-        rotation = shuffleActivities(activityRotation);
-        index = 0;
-        if (rotation.length > 1 && rotation[0].name === previousName) {
-          [rotation[0], rotation[1]] = [rotation[1], rotation[0]];
-        }
-      }
-      const current = rotation[index];
+      const current = nextActivity();
+      if (!current) return;
       client.user.setPresence({
         status: 'online',
         activities: [{
@@ -207,8 +222,6 @@ function startActivityRotation() {
           url: current.url,
         }],
       });
-      previousName = current.name;
-      index += 1;
     } catch (error) {
       console.error('Failed to update presence:', error.message);
     }
@@ -249,7 +262,39 @@ client.lavalink = new LavalinkManager({
   },
 });
 
-client.on('raw', (data) => client.lavalink.sendRawData(data));
+const handledDirectMessageIds = new Set();
+
+async function processDirectMessage(message) {
+  if (
+    !message?.id ||
+    message.guildId ||
+    message.author?.bot ||
+    handledDirectMessageIds.has(message.id)
+  ) return;
+  handledDirectMessageIds.add(message.id);
+  const expiry = setTimeout(() => handledDirectMessageIds.delete(message.id), 60_000);
+  expiry.unref?.();
+  await handleDirectMessage(message);
+}
+
+client.on('raw', (data) => {
+  client.lavalink.sendRawData(data);
+  handleVoiceStatusGatewayEvent(data);
+
+  if (data?.t !== 'MESSAGE_CREATE' || data.d?.guild_id || data.d?.author?.bot) return;
+  setImmediate(() => {
+    if (handledDirectMessageIds.has(data.d.id)) return;
+    client.channels.fetch(data.d.channel_id)
+      .then((channel) => channel?.messages?.fetch(data.d.id))
+      .then((message) => message && processDirectMessage(message))
+      .catch((error) => console.warn('[DirectMessage] Raw fallback failed:', error.message));
+  });
+});
+
+client.on(Events.MessageCreate, safeEventHandler('DirectMessage', async (message) => {
+  if (isShuttingDown) return;
+  await processDirectMessage(message);
+}));
 
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
@@ -534,6 +579,11 @@ async function handleMusicButton(interaction) {
     return;
   }
 
+  if (action === BUTTONS.ACTIVITY) {
+    await interaction.launchActivity();
+    return;
+  }
+
   const handlers = {
     [BUTTONS.PLAY_PAUSE]: togglePlayPause,
     [BUTTONS.SKIP]: skipTrack,
@@ -635,7 +685,9 @@ async function handleHelpButton(interaction) {
   pageIndex = Math.max(0, Math.min(HELP_PAGE_COUNT - 1, pageIndex));
 
   const botAvatar = interaction.client.user?.displayAvatarURL({ size: 1024 }) ?? null;
-  const dashboardUrl = buildDashboardUrl(interaction.guildId, 'player');
+  const dashboardUrl = interaction.guildId
+    ? buildDashboardUrl(interaction.guildId, 'player')
+    : `${String(process.env.WEB_URL || 'https://breadmusic.aleksh.xyz').replace(/\/$/, '')}/dashboard`;
   const embed = buildHelpEmbed(pageIndex, { botAvatar });
   const components = buildHelpComponents(pageIndex, userId, dashboardUrl);
 
@@ -962,6 +1014,7 @@ async function stopPlayback(interaction) {
   await interaction.deferUpdate();
   clearAutoplayState(player.guildId);
   markPlayerStopping(player);
+  await clearVoiceTrackStatus(client, player);
   await player.stopPlaying(true);
   player.queue.tracks.splice(0, player.queue.tracks.length);
   await player.destroy('Stopped via UI', true);

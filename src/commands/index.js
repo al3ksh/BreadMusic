@@ -330,7 +330,9 @@ const commands = [
     async execute(interaction) {
       const pageIndex = 0;
       const botAvatar = interaction.client.user?.displayAvatarURL({ size: 1024 }) ?? null;
-      const dashboardUrl = buildDashboardUrl(interaction.guildId, 'player');
+      const dashboardUrl = interaction.guildId
+        ? buildDashboardUrl(interaction.guildId, 'player')
+        : `${String(process.env.WEB_URL || 'https://breadmusic.aleksh.xyz').replace(/\/$/, '')}/dashboard`;
       const embed = buildHelpEmbed(pageIndex, { botAvatar });
       const components = buildHelpComponents(pageIndex, interaction.user.id, dashboardUrl);
       await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });

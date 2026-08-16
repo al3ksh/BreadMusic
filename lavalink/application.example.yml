@@ -20,6 +20,9 @@ plugins:
   youtube:
     enabled: true
     allowSearch: true
+    remoteCipher:
+      url: "https://cipher.kikkia.dev/"
+      userAgent: "BreadMusic"
   lavasrc:
     providers:
       - "ytsearch:\"%ISRC%\""

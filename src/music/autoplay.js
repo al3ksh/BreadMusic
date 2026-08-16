@@ -1,4 +1,5 @@
 const { getConfig, setConfig } = require('../state/guildConfig');
+const { getDiscoveryArtists, pickCandidateWithGemini, resetGeminiAutoplayState } = require('./autoplayAi');
 
 const recentTracks = new Map();
 const skippedAutoplayTracks = new Map();
@@ -23,6 +24,7 @@ const PICK_SCORE_WINDOW = 20;
 const SELECTION_JITTER = 6;
 const MAX_SEARCH_QUERIES = 6;
 const MAX_SEARCH_TRACKS_PER_QUERY = 12;
+const MAX_DISCOVERY_TRACKS_PER_ARTIST = 4;
 const SKIPPED_ARTIST_REJECT_THRESHOLD = 2;
 const SKIPPED_AUTHOR_REJECT_THRESHOLD = 1;
 const QUICK_SKIP_MAX_MS = 75_000;
@@ -74,6 +76,15 @@ const HARD_REJECT_TERMS = [
   'hour mix',
   '1 hour',
   '10 hours',
+  'blend',
+  'mashup',
+  'megamix',
+  'non stop mix',
+  'radio mix',
+  'dj mix',
+  '8d audio',
+  'nightcore',
+  'bass boosted',
 ];
 
 const SOFT_PENALTIES = [
@@ -95,6 +106,9 @@ const SOFT_PENALTIES = [
   ['8d audio', 24],
   ['bass boosted', 24],
   ['visualizer', 8],
+  ['clean', 18],
+  ['radio edit', 16],
+  ['reupload', 14],
 ];
 
 const POSITIVE_TERMS = [
@@ -118,6 +132,7 @@ function setAutoplay(guildId, enabled) {
     manualSeedPools.delete(guildId);
     manualSeedCursors.delete(guildId);
     currentAutoplaySeed.delete(guildId);
+    resetGeminiAutoplayState(guildId);
   }
 }
 
@@ -443,6 +458,7 @@ function addManualSeed(guildId, trackOrInfo, options = {}) {
   }
 
   manualSeedPools.set(guildId, next);
+  resetGeminiAutoplayState(guildId);
   manualSeedCursors.set(guildId, 0);
   currentAutoplaySeed.delete(guildId);
   autoplayBlockedUntil.delete(guildId);
@@ -557,6 +573,30 @@ function buildSearchQueries(context) {
   return queries.slice(0, MAX_SEARCH_QUERIES);
 }
 
+function buildDiscoveryQueries(artists, context) {
+  const coreArtistKeys = new Set(context.manualSeeds
+    .map((seed) => normalizeComparable(seed.artist || seed.author))
+    .filter(Boolean));
+  const seen = new Set();
+
+  return artists
+    .map((entry) => ({
+      artist: String(entry?.name || '').replace(/\s+/g, ' ').trim(),
+      distance: entry?.distance,
+    }))
+    .filter((entry) => {
+      const key = normalizeComparable(entry.artist);
+      if (!key || coreArtistKeys.has(key) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((entry) => ({
+      query: `${entry.artist} official audio`,
+      artist: entry.artist,
+      distance: entry.distance,
+    }));
+}
+
 async function searchWithTimeout(node, query, requester) {
   let timeout;
   try {
@@ -572,12 +612,12 @@ async function searchWithTimeout(node, query, requester) {
   }
 }
 
-async function searchTracks(node, query, client) {
+async function searchTracks(node, query, client, limit = MAX_SEARCH_TRACKS_PER_QUERY) {
   if (!node?.connected || !query) return [];
 
   try {
     const result = await searchWithTimeout(node, `ytsearch:${query}`, client.user);
-    return result?.tracks?.slice(0, MAX_SEARCH_TRACKS_PER_QUERY) ?? [];
+    return result?.tracks?.slice(0, limit) ?? [];
   } catch (error) {
     logAutoplay('debug', `Search failed for "${query}": ${error.message}`);
     return [];
@@ -629,7 +669,7 @@ async function resolveYouTubeId(node, track, client) {
   return null;
 }
 
-function addCandidate(candidates, track, source, index = 0, anchorKey = null, anchorRank = 0) {
+function addCandidate(candidates, track, source, index = 0, anchorKey = null, anchorRank = 0, discoveryDistance = null) {
   const normalized = normalizeTrack(track);
   if (!normalized) return;
 
@@ -643,6 +683,7 @@ function addCandidate(candidates, track, source, index = 0, anchorKey = null, an
     sourceIndex: index,
     anchorKeys,
     anchorRank: Math.min(existing?.anchorRank ?? anchorRank, anchorRank),
+    discoveryDistance: discoveryDistance || existing?.discoveryDistance || null,
   };
 
   if (!existing || sourcePriority(source) > sourcePriority(existing.source)) {
@@ -650,12 +691,14 @@ function addCandidate(candidates, track, source, index = 0, anchorKey = null, an
   } else {
     existing.anchorKeys = anchorKeys;
     existing.anchorRank = Math.min(existing.anchorRank ?? anchorRank, anchorRank);
+    if (!existing.discoveryDistance && discoveryDistance) existing.discoveryDistance = discoveryDistance;
   }
 }
 
 function sourcePriority(source) {
   if (source === 'radio') return 3;
   if (source === 'search') return 2;
+  if (source === 'discovery') return 1;
   return 1;
 }
 
@@ -700,6 +743,9 @@ function scoreCandidate(candidate, context) {
     reasons.push('radio');
   } else if (candidate.source === 'search') {
     score += 6;
+  } else if (candidate.source === 'discovery') {
+    score += 8;
+    reasons.push(`ai-discovery:${candidate.discoveryDistance || 'unknown'}`);
   }
 
   const anchorMatches = candidate.anchorKeys?.size ?? 0;
@@ -729,20 +775,35 @@ function scoreCandidate(candidate, context) {
   if (track.artist) {
     const matchesManualArtist = context.manualSeeds.some((seed) => seed.artist === track.artist);
     if (matchesManualArtist) {
-      score += 4;
+      score += 12;
       reasons.push('manual-artist');
     } else if (context.manualSeeds.length > 0) {
-      score += 8;
-      reasons.push('profile-variety');
+      score += 5;
+      reasons.push('profile-discovery');
     } else if (context.seedArtist) {
       score += track.artist === context.seedArtist ? 8 : 10;
       reasons.push(track.artist === context.seedArtist ? 'same-artist' : 'artist-variety');
     }
   }
 
-  const recentSameArtist = context.recent.filter((entry) => entry.artist && entry.artist === track.artist).length;
+  const matchesManualArtist = context.manualSeeds.some((seed) => seed.artist === track.artist);
+  const recentArtistTail = context.recent
+    .slice(-2)
+    .filter((entry) => entry.artist);
+  if (
+    track.artist &&
+    recentArtistTail.length === 2 &&
+    recentArtistTail.every((entry) => entry.artist === track.artist)
+  ) {
+    return { score: -Infinity, rejected: true, reason: 'artist streak limit' };
+  }
+  const recentSameArtist = context.recent
+    .slice(-8)
+    .filter((entry) => entry.artist && entry.artist === track.artist)
+    .length;
   if (recentSameArtist > 0) {
-    score -= Math.min(24, recentSameArtist * 8);
+    const perTrackPenalty = matchesManualArtist ? 7 : 8;
+    score -= Math.min(matchesManualArtist ? 21 : 24, recentSameArtist * perTrackPenalty);
     reasons.push(`recent-artist:${recentSameArtist}`);
   }
 
@@ -826,7 +887,7 @@ function scoreCandidate(candidate, context) {
   };
 }
 
-function pickCandidate(scoredCandidates) {
+function pickCandidateLocally(scoredCandidates) {
   const eligible = scoredCandidates
     .filter((candidate) => !candidate.rejected)
     .sort((a, b) => b.score - a.score);
@@ -854,6 +915,16 @@ function pickCandidate(scoredCandidates) {
   return pool[0];
 }
 
+async function selectCandidate(
+  scoredCandidates,
+  context,
+  aiSelector = pickCandidateWithGemini,
+  fallbackCandidates = scoredCandidates,
+) {
+  const aiSelected = await aiSelector(scoredCandidates, context, { logger: logAutoplay });
+  return aiSelected || pickCandidateLocally(fallbackCandidates);
+}
+
 function logCandidateSummary(scoredCandidates, selected) {
   const top = scoredCandidates
     .filter((candidate) => Number.isFinite(candidate.score))
@@ -864,9 +935,15 @@ function logCandidateSummary(scoredCandidates, selected) {
 
   if (top) logAutoplay('debug', `Top candidates: ${top}`);
   if (selected) {
+    const selector = Number.isFinite(selected.aiScore) ? 'Gemini' : 'local fallback';
+    const score = Number.isFinite(selected.aiScore) ? selected.aiScore : selected.score;
+    const reason = selected.aiReason || selected.reason;
+    const cacheMarker = selected.aiCached ? ', cached' : '';
+    const laneMarker = selected.aiRelationship ? `, ${selected.aiRelationship}` : '';
+    const orbitMarker = selected.aiOrbitPreference ? `, target:${selected.aiOrbitPreference}` : '';
     logAutoplay(
       'info',
-      `Selected (${selected.score}) from ${selected.source}: "${selected.normalized.title}" by ${selected.normalized.artist || selected.normalized.author || 'unknown'} (${selected.reason})`,
+      `Selected by ${selector} (${score}${cacheMarker}${laneMarker}${orbitMarker}) from ${selected.source}: "${selected.normalized.title}" by ${selected.normalized.artist || selected.normalized.author || 'unknown'} (${reason})`,
     );
   }
 }
@@ -926,6 +1003,7 @@ async function findNextTrack(player, lastTrack, client) {
   }
 
   const candidates = new Map();
+  const discoveryArtistsPromise = getDiscoveryArtists(context, { logger: logAutoplay });
   let videoId = context.seed?.identifier || context.last?.identifier;
 
   if (!isYouTubeIdentifier(videoId)) {
@@ -957,6 +1035,37 @@ async function findNextTrack(player, lastTrack, client) {
     });
   }
 
+  // Preserve the pre-AI pool so a Gemini failure uses the original autoplay unchanged.
+  const fallbackCandidates = [...candidates.values()];
+  const discoveryArtists = await discoveryArtistsPromise;
+  const discoveryQueries = buildDiscoveryQueries(discoveryArtists, context);
+  logAutoplay(
+    'debug',
+    `Discovery queries: ${discoveryQueries.map((entry) => `${entry.artist}:${entry.distance}`).join(' | ') || 'none'}`,
+  );
+
+  for (let offset = 0; offset < discoveryQueries.length; offset += 4) {
+    const batch = discoveryQueries.slice(offset, offset + 4);
+    const results = await Promise.all(batch.map((entry) => searchTracks(
+      node,
+      entry.query,
+      client,
+      MAX_DISCOVERY_TRACKS_PER_ARTIST,
+    )));
+    results.forEach((tracks, batchIndex) => {
+      const query = batch[batchIndex];
+      tracks.forEach((track, index) => addCandidate(
+        candidates,
+        track,
+        'discovery',
+        index,
+        null,
+        0,
+        query.distance,
+      ));
+    });
+  }
+
   if (!candidates.size) {
     logAutoplay('debug', 'No candidates found');
     return null;
@@ -966,8 +1075,17 @@ async function findNextTrack(player, lastTrack, client) {
     ...candidate,
     ...scoreCandidate(candidate, context),
   }));
+  const scoredFallbackCandidates = fallbackCandidates.map((candidate) => ({
+    ...candidate,
+    ...scoreCandidate(candidate, context),
+  }));
 
-  const selected = pickCandidate(scoredCandidates);
+  const selected = await selectCandidate(
+    scoredCandidates,
+    context,
+    pickCandidateWithGemini,
+    scoredFallbackCandidates,
+  );
   logCandidateSummary(scoredCandidates, selected);
 
   if (!selected) {
@@ -1081,6 +1199,7 @@ function clearAutoplayState(guildId) {
   manualSeedPools.delete(guildId);
   manualSeedCursors.delete(guildId);
   currentAutoplaySeed.delete(guildId);
+  resetGeminiAutoplayState(guildId);
 }
 
 const cleanupTimer = setInterval(() => {
@@ -1108,9 +1227,12 @@ module.exports = {
   addManualSeed,
   __testing: {
     buildContext,
+    buildDiscoveryQueries,
     buildSearchQueries,
+    scoreCandidate,
     getManualSeedPool,
     selectManualSeeds,
+    selectCandidate,
     wasRecentlySkipped,
   },
 };

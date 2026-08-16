@@ -1746,6 +1746,7 @@ function createApiServer(client) {
           if (player) {
             clearAutoplayState(guildId);
             markPlayerStopping(player);
+            await clearVoiceTrackStatus(client, player);
             await player.stopPlaying(true);
             player.queue.tracks.splice(0, player.queue.tracks.length);
             await player.destroy('Stopped via dashboard', true);

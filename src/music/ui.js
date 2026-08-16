@@ -1,7 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { buildNowPlayingEmbed } = require('./embeds');
 const { buildPlaybackErrorEmbed } = require('./playbackErrors');
-const { buildDashboardUrl } = require('../dashboard/url');
 
 const BUTTON_PREFIX = 'music';
 const PLAYBACK_ERROR_TTL_MS = 30_000;
@@ -13,6 +12,7 @@ const BUTTONS = {
   SHUFFLE: 'shuffle',
   BACK: 'back',
   LYRICS: 'lyrics',
+  ACTIVITY: 'activity',
 };
 
 const applicationEmojiIds = new Map(
@@ -36,7 +36,7 @@ const EMOJI = {
   LOOP: playerEmoji('loop', '\uD83D\uDD01'),
   SHUFFLE: playerEmoji('shuffle', '\uD83D\uDD00'),
   LYRICS: playerEmoji('lyrics', '\uD83D\uDCD6'),
-  DASHBOARD: playerEmoji('dashboard', '\uD83D\uDDA5\uFE0F'),
+  ACTIVITY: playerEmoji('dashboard', '\uD83C\uDFB5'),
 };
 
 class MusicUI {
@@ -102,9 +102,9 @@ class MusicUI {
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(disabled),
       new ButtonBuilder()
-        .setURL(buildDashboardUrl(player.guildId, 'player'))
-        .setEmoji(EMOJI.DASHBOARD)
-        .setStyle(ButtonStyle.Link),
+        .setCustomId(this.buildCustomId(BUTTONS.ACTIVITY, player.guildId))
+        .setEmoji(EMOJI.ACTIVITY)
+        .setStyle(ButtonStyle.Secondary),
     );
 
     return [rowOne, rowTwo];

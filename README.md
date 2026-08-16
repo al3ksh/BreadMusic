@@ -44,7 +44,7 @@ Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
 
 ```text
 [ playback ]  YouTube / Spotify / SoundCloud / Bandcamp
-[ autoplay ]  prefetch / skip feedback / repetition avoidance
+[ autoplay ]  Gemini discovery + ranking / local fallback / skip feedback
 [ dashboard]  live player / queue drag-and-drop / uploads / controls
 [ lyrics   ]  search / current track / synchronized live mode
 [ history  ]  requester / source / autoplay marker / persistence
@@ -59,9 +59,24 @@ Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
 - Never jumps ahead of tracks manually added to the queue.
 - Builds a rotating session profile from the last 40 manually requested tracks instead of replacing the seed after every request.
 - Searches from up to three manual anchors per cycle and rewards candidates found through multiple anchors.
+- Optionally asks Gemini for fresh close, medium and broad artist directions on every autoplay cycle.
+- Searches real playable tracks for those directions, then asks Gemini to rank a balanced pool of discovery, YouTube Radio and local-search candidates.
+- Returns to manual seed artists after a short exploration arc instead of abandoning them or alternating rigidly.
+- Falls back immediately to the local scorer when Gemini is disabled, unavailable, rate-limited or returns invalid output.
 - Learns from skipped autoplay tracks during the current bot session.
 - Avoids recent tracks, repeated artists and weak recommendations.
 - Ignores local uploads as recommendation seeds.
+
+Enable Gemini discovery and ranking with an API key from Google AI Studio:
+
+```ini
+GEMINI_AUTOPLAY_ENABLED=true
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_AUTOPLAY_MODEL=gemini-3.5-flash-lite
+```
+
+Only music metadata is sent for discovery and ranking. Discord IDs and usernames are not included.
+Discovery is refreshed for each autoplay cycle. The result is prefetched, ranking responses may be cached for an unchanged context, and hard rejection rules and queue ordering remain local.
 
 ### Lyrics
 

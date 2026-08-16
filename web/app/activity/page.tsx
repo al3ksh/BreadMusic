@@ -182,7 +182,11 @@ export default function ActivityPage() {
   const [drawerClosing, setDrawerClosing] = useState(false);
   const [drawerDragY, setDrawerDragY] = useState<number | null>(null);
   const [drawerDragging, setDrawerDragging] = useState(false);
-  const [seekPreview, setSeekPreview] = useState<{ position: number; percent: number } | null>(null);
+  const [seekPreview, setSeekPreview] = useState<{
+    position: number;
+    labelPercent: number;
+    arrowOffset: number;
+  } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchTrack[]>([]);
   const [searchPlaylist, setSearchPlaylist] = useState<SearchPlaylist | null>(null);
@@ -473,16 +477,9 @@ export default function ActivityPage() {
         setMessage('Checking server access...');
         const access = await activityFetch<DashboardCapabilities>(`/api/guilds/${sdk.guildId}/access`);
         if (!access.canAccess) throw new Error('You do not have access to Bread on this server');
-        if (access.canControlPlayer) {
-          setMessage('Joining voice channel...');
-          await activityFetch(`/api/guilds/${sdk.guildId}/player/join`, {
-            method: 'POST',
-            body: JSON.stringify({ channelId: sdk.channelId }),
-          });
-        }
         if (cancelled) return;
         setCapabilities(access);
-        setMessage('Player ready');
+        setMessage('Activity ready');
         setIntroExiting(true);
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         if (!reduceMotion) await new Promise((resolve) => window.setTimeout(resolve, 360));
@@ -645,18 +642,7 @@ export default function ActivityPage() {
           });
           if (!response.ok || !response.body) throw new Error('Live player connection failed');
 
-          if (hasReportedDisconnect && capabilities?.canControlPlayer && channelId) {
-            try {
-              await activityFetch(`/api/guilds/${guildId}/player/join`, {
-                method: 'POST',
-                body: JSON.stringify({ channelId }),
-              });
-              hasReportedDisconnect = false;
-            } catch (error) {
-              notify(error instanceof Error ? error.message : 'Could not restore the voice connection', 'warning');
-            }
-          }
-
+          hasReportedDisconnect = false;
           retryDelay = 1000;
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
@@ -704,7 +690,7 @@ export default function ActivityPage() {
       active = false;
       controller.abort();
     };
-  }, [activityFetch, applySnapshot, capabilities?.canControlPlayer, channelId, guildId, notify, phase]);
+  }, [applySnapshot, guildId, notify, phase]);
 
   useEffect(() => {
     if (phase !== 'ready') return;
@@ -1205,13 +1191,26 @@ export default function ActivityPage() {
         onPointerMove={(event) => {
           if (!canSeekTrack || !currentDuration) return;
           const rect = event.currentTarget.getBoundingClientRect();
-          const previewPercent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-          setSeekPreview({ position: previewPercent * currentDuration, percent: previewPercent * 100 });
+          const pointerX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+          const previewPercent = rect.width > 0 ? pointerX / rect.width : 0;
+          const labelHalfWidth = Math.min(24, rect.width / 2);
+          const labelX = Math.max(labelHalfWidth, Math.min(rect.width - labelHalfWidth, pointerX));
+          setSeekPreview({
+            position: previewPercent * currentDuration,
+            labelPercent: rect.width > 0 ? (labelX / rect.width) * 100 : 0,
+            arrowOffset: pointerX - labelX,
+          });
         }}
         onPointerLeave={() => setSeekPreview(null)}
       >
         {seekPreview && canSeekTrack && (
-          <output className="activity-seek-preview" style={{ '--seek-preview': `${seekPreview.percent}%` } as CSSProperties}>
+          <output
+            className="activity-seek-preview"
+            style={{
+              '--seek-preview-label': `${seekPreview.labelPercent}%`,
+              '--seek-preview-arrow-offset': `${seekPreview.arrowOffset}px`,
+            } as CSSProperties}
+          >
             {formatMs(seekPreview.position)}
           </output>
         )}
