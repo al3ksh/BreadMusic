@@ -18,6 +18,7 @@ import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
 import { ActivitySearchPanel } from '@/components/activity/ActivitySearchPanel';
 import { ActivityLyricsPanel } from '@/components/activity/ActivityLyricsPanel';
 import { activityRequest } from '@/lib/activity/transport';
+import { buildActivityRichPresence, type RichPresenceActivity } from '@/lib/activity/richPresence';
 
 type ActivitySdk = {
   ready: () => Promise<void>;
@@ -27,12 +28,15 @@ type ActivitySdk = {
     authorize: (options: Record<string, unknown>) => Promise<{ code: string }>;
     authenticate: (options: { access_token: string }) => Promise<{ access_token?: string } | null>;
     openExternalLink: (options: { url: string }) => Promise<{ opened: boolean }>;
+    setActivity?: (options: { activity: RichPresenceActivity | null }) => Promise<unknown>;
   };
 };
 
 declare global {
   interface Window {
     __BREAD_TEST_ACTIVITY_SDK__?: ActivitySdk;
+    __BREAD_TEST_ACTIVITY_SCOPES__?: string[];
+    __BREAD_TEST_RICH_PRESENCE_CALLS__?: Array<RichPresenceActivity | null>;
   }
 }
 
@@ -124,6 +128,7 @@ export default function ActivityPage() {
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchDebounceTimerRef = useRef<number | null>(null);
   const lastSearchRef = useRef<{ query: string; at: number } | null>(null);
+  const lastRichPresenceRef = useRef('');
   const lyricsRequestRef = useRef(0);
   const drawerGestureRef = useRef<{ pointerId: number; startY: number; lastY: number; lastAt: number; velocity: number } | null>(null);
   const clockRef = useRef<PlayerClock>({ trackKey: '', base: 0, startedAt: Date.now(), paused: true });
@@ -176,6 +181,7 @@ export default function ActivityPage() {
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
   const [volumeOpen, setVolumeOpen] = useState(false);
   const [seekDraft, setSeekDraft] = useState<number | null>(null);
+  const [richPresenceRevision, setRichPresenceRevision] = useState(0);
   const [notice, setNotice] = useState<ActivityNotice | null>(null);
   const [noticeClosing, setNoticeClosing] = useState(false);
   const noticeQueueRef = useRef<ActivityNotice[]>([]);
@@ -393,7 +399,7 @@ export default function ActivityPage() {
           response_type: 'code',
           state: '',
           prompt: 'none',
-          scope: ['identify', 'guilds'],
+          scope: ['identify', 'guilds', 'rpc.activities.write'],
         });
         const tokenResponse = await fetch('/api/activity/token', {
           method: 'POST',
@@ -420,6 +426,17 @@ export default function ActivityPage() {
         if (!access.canAccess) throw new Error('You do not have access to Bread on this server');
         if (cancelled) return;
         setCapabilities(access);
+
+        const [initialStatus, initialQueue] = await Promise.allSettled([
+          activityFetch<PlayerStatus>(`/api/guilds/${sdk.guildId}/status`),
+          activityFetch<QueueSnapshot>(`/api/guilds/${sdk.guildId}/queue?page=0`),
+        ]);
+        if (cancelled) return;
+        applySnapshot({
+          status: initialStatus.status === 'fulfilled' ? initialStatus.value : undefined,
+          queue: initialQueue.status === 'fulfilled' ? initialQueue.value : undefined,
+        });
+
         setMessage('Activity ready');
         setIntroExiting(true);
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -436,7 +453,7 @@ export default function ActivityPage() {
 
     initialize();
     return () => { cancelled = true; };
-  }, [activityFetch]);
+  }, [activityFetch, applySnapshot]);
 
   useEffect(() => {
     if (phase !== 'ready' || !guildId) return;
@@ -444,6 +461,39 @@ export default function ActivityPage() {
     const timer = window.setInterval(refresh, 5000);
     return () => window.clearInterval(timer);
   }, [guildId, phase, refreshCapabilities]);
+
+  useEffect(() => {
+    if (phase !== 'ready') return;
+    const sdk = sdkRef.current;
+    if (!sdk?.commands.setActivity) return;
+
+    const activity = buildActivityRichPresence(status, getClockPosition());
+    const serialized = JSON.stringify(activity);
+    if (serialized === lastRichPresenceRef.current) return;
+    lastRichPresenceRef.current = serialized;
+
+    void sdk.commands.setActivity({ activity }).catch((error) => {
+      lastRichPresenceRef.current = '';
+      console.warn('Could not update Discord Rich Presence:', error);
+    });
+  }, [
+    getClockPosition,
+    phase,
+    richPresenceRevision,
+    status.connected,
+    status.currentTrack?.artwork,
+    status.currentTrack?.author,
+    status.currentTrack?.duration,
+    status.currentTrack?.title,
+    status.currentTrack?.uri,
+    status.paused,
+    status.voiceChannelName,
+  ]);
+
+  useEffect(() => () => {
+    const setActivity = sdkRef.current?.commands.setActivity;
+    if (setActivity) void setActivity({ activity: null }).catch(() => undefined);
+  }, []);
 
   const closePanel = useCallback(() => {
     if (!activePanel || drawerClosing) return;
@@ -735,6 +785,7 @@ export default function ActivityPage() {
       seekRollbackRef.current = null;
       return;
     }
+    setRichPresenceRevision((current) => current + 1);
 
     if (seekCommitTimerRef.current) window.clearTimeout(seekCommitTimerRef.current);
     seekCommitTimerRef.current = window.setTimeout(() => {

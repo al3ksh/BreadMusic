@@ -144,14 +144,23 @@ test('dashboard mobile layout stays within viewport', async ({ page }) => {
 test('Activity uses mocked SDK and respects read-only access', async ({ page }) => {
   await mockApi(page, { canControlPlayer: false });
   await page.addInitScript(() => {
+    window.__BREAD_TEST_RICH_PRESENCE_CALLS__ = [];
+    window.__BREAD_TEST_ACTIVITY_SCOPES__ = [];
     window.__BREAD_TEST_ACTIVITY_SDK__ = {
       guildId: '123456789012345678',
       channelId: 'voice-1',
       ready: async () => undefined,
       commands: {
-        authorize: async () => ({ code: 'test-code' }),
+        authorize: async (options) => {
+          window.__BREAD_TEST_ACTIVITY_SCOPES__ = Array.isArray(options.scope) ? options.scope : [];
+          return { code: 'test-code' };
+        },
         authenticate: async () => ({ access_token: 'test-activity-token' }),
         openExternalLink: async () => ({ opened: true }),
+        setActivity: async (options) => {
+          window.__BREAD_TEST_RICH_PRESENCE_CALLS__?.push(options.activity);
+          return options.activity;
+        },
       },
     };
   });
@@ -161,6 +170,12 @@ test('Activity uses mocked SDK and respects read-only access', async ({ page }) 
   await expect(activity.getByText('Music Activity')).toBeVisible({ timeout: 30_000 });
   await expect(activity.getByText('View only')).toBeVisible();
   await expect(activity.getByRole('button', { name: 'Add music' })).toBeDisabled();
+  await expect.poll(async () => {
+    const activityFrame = page.frames().find((frame) => frame.url().includes('/activity'));
+    return activityFrame?.evaluate(() => window.__BREAD_TEST_RICH_PRESENCE_CALLS__?.some((entry) => entry?.details === 'Test track'));
+  }).toBe(true);
+  const activityFrame = page.frames().find((frame) => frame.url().includes('/activity'));
+  expect(await activityFrame?.evaluate(() => window.__BREAD_TEST_ACTIVITY_SCOPES__)).toContain('rpc.activities.write');
   await activity.getByRole('button', { name: 'Queue' }).click();
   await expect(activity.getByRole('complementary', { name: 'queue panel' })).toBeVisible();
   await activity.getByRole('complementary', { name: 'queue panel' }).getByRole('button', { name: 'Close panel' }).click();
