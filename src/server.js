@@ -20,7 +20,13 @@ const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('./music/voiceStatus');
 const { createFileSessionStore } = require('./state/sessionStore');
-const { hydratePlayer, getStoredLocalUploadPaths } = require('./state/queueStore');
+const { createHealthRouter } = require('./routes/health');
+const { createActivityRouter } = require('./routes/activity');
+const { createUploadRouter } = require('./routes/uploads');
+const { createAuthRouter } = require('./routes/auth');
+const { hydratePlayer, getStoredLocalUploadPaths, savePlayerState } = require('./state/queueStore');
+const { createGuildConfigRouter } = require('./routes/guildConfig');
+const { createPlayerRouter } = require('./routes/player');
 const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
 const { handleSkipRequest, clearVoteSkip, getVoteSkipSnapshot } = require('./music/skipManager');
@@ -34,6 +40,11 @@ const {
   seekTrack,
 } = require('./music/trackCapabilities');
 const { normalizeSourceName } = require('./music/sourceNames');
+const {
+  createSignedUploadUrl,
+  getUploadPlaybackBaseUrl,
+  hasValidUploadSignature,
+} = require('./music/uploadUrls');
 const { createFixedWindowRateLimiter } = require('./utils/rateLimit');
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -145,7 +156,7 @@ const AUDIO_UPLOAD_TEMP_TTL_MS = 60 * 60 * 1000;
 const AUDIO_UPLOAD_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus', '.webm']);
 const AUDIO_UPLOAD_MIME_PREFIXES = ['audio/'];
 const AUDIO_UPLOAD_MIME_TYPES = new Set(['application/ogg', 'video/webm']);
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = path.resolve(process.env.BREAD_DATA_DIR || path.join(process.cwd(), 'data'));
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const PLAYER_TEXT_CHANNEL_DISABLED = 'disabled';
 const CONTROL_MESSAGE_LIMIT = 50;
@@ -262,6 +273,16 @@ function createApiServer(client) {
   // Behind cloudflared/reverse proxy, trust one hop so secure cookies work correctly.
   app.set('trust proxy', 1);
 
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=()');
+    if (req.path.startsWith('/api/')) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+    next();
+  });
+
   app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser(sessionSecret));
   app.use(
@@ -282,137 +303,22 @@ function createApiServer(client) {
   );
   attachControlMessageCacheListeners(client);
 
-  app.get('/api/activity/config', (_req, res) => {
-    res.json({
-      enabled: process.env.ACTIVITY_ENABLED !== 'false',
-      clientId: process.env.DISCORD_CLIENT_ID || null,
-    });
-  });
-
-  app.get('/api/activity/artwork', async (req, res) => {
-    const artworkLimit = ACTIVITY_ARTWORK_RATE_LIMIT.check(req.ip || req.socket.remoteAddress);
-    if (!artworkLimit.allowed) {
-      res.setHeader('Retry-After', Math.ceil(artworkLimit.retryAfterMs / 1000));
-      return res.status(429).json({ error: 'Too many artwork requests' });
-    }
-
-    const rawUrl = typeof req.query.url === 'string' ? req.query.url : '';
-    let artworkUrl;
-
-    try {
-      artworkUrl = new URL(rawUrl);
-    } catch {
-      return res.status(400).json({ error: 'Invalid artwork URL' });
-    }
-
-    if (artworkUrl.protocol !== 'https:' || !isAllowedActivityArtworkHost(artworkUrl.hostname)) {
-      return res.status(403).json({ error: 'Artwork host is not allowed' });
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    try {
-      const response = await fetch(artworkUrl, {
-        signal: controller.signal,
-        redirect: 'error',
-        headers: { 'User-Agent': 'Bread Discord Activity' },
-      });
-      const contentType = response.headers.get('content-type') || '';
-      const contentLength = Number(response.headers.get('content-length') || 0);
-
-      if (!response.ok || !contentType.startsWith('image/')) {
-        return res.status(404).json({ error: 'Artwork unavailable' });
-      }
-      if (contentLength > ACTIVITY_ARTWORK_MAX_BYTES) {
-        return res.status(413).json({ error: 'Artwork is too large' });
-      }
-
-      const payload = Buffer.from(await response.arrayBuffer());
-      if (payload.length > ACTIVITY_ARTWORK_MAX_BYTES) {
-        return res.status(413).json({ error: 'Artwork is too large' });
-      }
-
-      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-      res.setHeader('Content-Type', contentType);
-      return res.send(payload);
-    } catch (error) {
-      if (error?.name !== 'AbortError') {
-        console.warn('Activity artwork proxy failed:', error.message);
-      }
-      return res.status(502).json({ error: 'Could not load artwork' });
-    } finally {
-      clearTimeout(timeout);
-    }
-  });
-
-  app.post('/api/activity/token', async (req, res) => {
-    if (process.env.ACTIVITY_ENABLED === 'false') {
-      return res.status(404).json({ error: 'Activity is disabled' });
-    }
-
-    const tokenLimit = ACTIVITY_TOKEN_RATE_LIMIT.check(req.ip || req.socket.remoteAddress);
-    if (!tokenLimit.allowed) {
-      res.setHeader('Retry-After', Math.ceil(tokenLimit.retryAfterMs / 1000));
-      return res.status(429).json({ error: 'Too many authorization attempts' });
-    }
-
-    const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
-    if (!code || code.length > 512) {
-      return res.status(400).json({ error: 'Activity authorization code is required' });
-    }
-
-    try {
-      const tokenRes = await fetch(`${DISCORD_API}/oauth2/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: process.env.DISCORD_CLIENT_ID,
-          client_secret: process.env.DISCORD_CLIENT_SECRET,
-          grant_type: 'authorization_code',
-          code,
-        }),
-      });
-      const payload = await tokenRes.json().catch(() => ({}));
-      if (!tokenRes.ok || !payload.access_token) {
-        return res.status(401).json({ error: 'Activity authorization failed' });
-      }
-
-      return res.json({
-        access_token: payload.access_token,
-        expires_in: payload.expires_in || 604800,
-      });
-    } catch (error) {
-      console.error('Activity token exchange failed:', error.message);
-      return res.status(502).json({ error: 'Could not reach Discord authorization service' });
-    }
-  });
-
-  app.get('/api/uploads/:guildId/:fileId/:fileName', async (req, res) => {
-    const { guildId, fileId, fileName } = req.params;
-    if (!isSafeId(guildId) || !isSafeId(fileId)) {
-      return res.status(400).json({ error: 'Invalid upload path' });
-    }
-
-    const ext = path.extname(fileName || '').toLowerCase();
-    if (!AUDIO_UPLOAD_EXTENSIONS.has(ext)) {
-      return res.status(404).json({ error: 'Upload not found' });
-    }
-
-    const filePath = path.join(UPLOAD_DIR, guildId, `${fileId}${ext}`);
-    if (!isPathInside(filePath, UPLOAD_DIR)) {
-      return res.status(400).json({ error: 'Invalid upload path' });
-    }
-
-    try {
-      await fs.promises.access(filePath, fs.constants.R_OK);
-      res.setHeader('Cache-Control', 'private, max-age=86400');
-      res.setHeader('Content-Type', getAudioContentType(ext));
-      res.sendFile(filePath);
-    } catch {
-      res.status(404).json({ error: 'Upload not found' });
-    }
-  });
+  app.use(createHealthRouter(client));
+  app.use(createActivityRouter({
+    discordApi: DISCORD_API,
+    artworkMaxBytes: ACTIVITY_ARTWORK_MAX_BYTES,
+    artworkRateLimit: ACTIVITY_ARTWORK_RATE_LIMIT,
+    tokenRateLimit: ACTIVITY_TOKEN_RATE_LIMIT,
+    isAllowedArtworkHost: isAllowedActivityArtworkHost,
+  }));
+  app.use(createUploadRouter({
+    uploadDir: UPLOAD_DIR,
+    audioExtensions: AUDIO_UPLOAD_EXTENSIONS,
+    hasValidUploadSignature,
+    isSafeId,
+    isPathInside,
+    getAudioContentType,
+  }));
 
   runAudioUploadCleanup(client).catch((error) => {
     console.warn('Audio upload cleanup failed:', error.message);
@@ -578,623 +484,116 @@ function createApiServer(client) {
 
   // ---- Auth ----
 
-  app.get('/api/auth/discord', (req, res) => {
-    const oauthState = crypto.randomBytes(24).toString('hex');
-    req.session.oauthState = oauthState;
-
-    const redirectUri = `${process.env.WEB_URL || 'http://localhost:3000'}/api/auth/callback`;
-    req.session.save((err) => {
-      if (err) {
-        console.error('OAuth state save error:', err);
-        return res.redirect('/?error=session_failed');
-      }
-
-      const params = new URLSearchParams({
-        client_id: process.env.DISCORD_CLIENT_ID,
-        redirect_uri: redirectUri,
-        response_type: 'code',
-        scope: SCOPES,
-        state: oauthState,
-      });
-      res.redirect(`https://discord.com/oauth2/authorize?${params}`);
-    });
-  });
-
-  app.get('/api/auth/callback', async (req, res) => {
-    const code = typeof req.query.code === 'string' ? req.query.code : '';
-    const error = typeof req.query.error === 'string' ? req.query.error : '';
-    const returnedState = typeof req.query.state === 'string' ? req.query.state : '';
-    const expectedState = typeof req.session.oauthState === 'string' ? req.session.oauthState : '';
-
-    delete req.session.oauthState;
-    req.session.save(() => {});
-
-    if (!returnedState || !expectedState || returnedState !== expectedState) {
-      return res.redirect('/?error=invalid_state');
-    }
-
-    if (error) {
-      return res.redirect(`/?error=${encodeURIComponent(error)}`);
-    }
-    if (!code) {
-      return res.redirect('/?error=no_code');
-    }
-
-    const redirectUri = `${process.env.WEB_URL || 'http://localhost:3000'}/api/auth/callback`;
-
-    try {
-      const tokenRes = await fetch(`${DISCORD_API}/oauth2/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: process.env.DISCORD_CLIENT_ID,
-          client_secret: process.env.DISCORD_CLIENT_SECRET,
-          grant_type: 'authorization_code',
-          code,
-          redirect_uri: redirectUri,
-        }),
-      });
-
-      if (!tokenRes.ok) {
-        const errBody = await tokenRes.json().catch(() => ({}));
-        console.error('Token exchange failed:', errBody);
-        return res.redirect('/?error=token_failed');
-      }
-
-      const tokens = await tokenRes.json();
-
-      const userRes = await fetch(`${DISCORD_API}/users/@me`, {
-        headers: { Authorization: `Bearer ${tokens.access_token}` },
-      });
-
-      if (!userRes.ok) {
-        return res.redirect('/?error=user_fetch_failed');
-      }
-
-      const user = await userRes.json();
-      const sessionUser = {
-        id: user.id,
-        username: user.username,
-        discriminator: user.discriminator,
-        avatar: user.avatar,
-        global_name: user.global_name,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        tokenExpires: Date.now() + tokens.expires_in * 1000,
-      };
-
-      await new Promise((resolve, reject) => {
-        req.session.regenerate((sessionError) => (sessionError ? reject(sessionError) : resolve()));
-      });
-      req.session.user = sessionUser;
-      await new Promise((resolve, reject) => {
-        req.session.save((sessionError) => (sessionError ? reject(sessionError) : resolve()));
-      });
-
-      return res.redirect('/dashboard');
-    } catch (err) {
-      console.error('OAuth callback error:', err);
-      return res.redirect('/?error=session_failed');
-    }
-  });
-
-  app.post('/api/auth/logout', requireTrustedOrigin, (req, res) => {
-    req.session.destroy(() => {
-      res.clearCookie('bread.sid');
-      res.json({ success: true });
-    });
-  });
-
-  app.get('/api/auth/logout', (_req, res) => {
-    res.status(405).json({ error: 'Use POST /api/auth/logout' });
-  });
-
-  app.get('/api/me', requireAuth, async (req, res) => {
-    try {
-      let user = req.session.user;
-
-      if (Date.now() > (user.tokenExpires || 0)) {
-        const refreshed = await refreshAccessToken(user.refreshToken);
-        if (refreshed) {
-          user = {
-            ...user,
-            accessToken: refreshed.access_token,
-            refreshToken: refreshed.refresh_token || user.refreshToken,
-            tokenExpires: Date.now() + refreshed.expires_in * 1000,
-          };
-          req.session.user = user;
-          req.session.save(() => {});
-        }
-      }
-
-      res.json({
-        id: user.id,
-        username: user.username,
-        discriminator: user.discriminator,
-        avatar: user.avatar,
-        global_name: user.global_name,
-      });
-    } catch (err) {
-      console.error('Get me error:', err);
-      res.status(500).json({ error: 'Failed to fetch user' });
-    }
-  });
-
-  // ---- Guilds ----
-
-  app.get('/api/guilds', requireAuth, async (req, res) => {
-    try {
-      let accessToken = req.session.user.accessToken;
-
-      const refreshSessionToken = async () => {
-        const refreshed = await refreshAccessToken(req.session.user.refreshToken);
-        if (!refreshed) return null;
-
-        req.session.user = {
-          ...req.session.user,
-          accessToken: refreshed.access_token,
-          refreshToken: refreshed.refresh_token || req.session.user.refreshToken,
-          tokenExpires: Date.now() + refreshed.expires_in * 1000,
-        };
-        await new Promise((resolve, reject) => {
-          req.session.save((error) => (error ? reject(error) : resolve()));
-        });
-        return refreshed.access_token;
-      };
-
-      if (Date.now() > (req.session.user.tokenExpires || 0)) {
-        accessToken = await refreshSessionToken() || accessToken;
-      }
-
-      const MANAGE_GUILD = BigInt(0x20);
-      const botGuildIds = new Set(client.guilds.cache.keys());
-
-      async function mapGuilds(discordGuilds) {
-        const mapped = await Promise.all(discordGuilds.map(async (g) => {
-          const guild = client.guilds.cache.get(g.id);
-          const guildAllowed = isGuildAllowed(client.guildAccess, g.id);
-          if (!guildAllowed) return null;
-
-          const oauthAdmin = (BigInt(g.permissions) & MANAGE_GUILD) === MANAGE_GUILD;
-          let capabilities = {
-            accessLevel: oauthAdmin ? 'admin' : 'member',
-            dashboardAccess: 'admin',
-            canAccess: oauthAdmin,
-          };
-
-          if (guild) {
-            let member = guild.members.cache.get(getRequestUser(req).id);
-            if (!member) member = await guild.members.fetch(getRequestUser(req).id).catch(() => null);
-            if (member) capabilities = resolveDashboardCapabilities(member, getConfig(g.id));
-          }
-
-          return {
-            id: g.id,
-            name: g.name,
-            icon: g.icon,
-            permissions: g.permissions,
-            member_count: g.approximate_member_count || 0,
-            bot_present: botGuildIds.has(g.id),
-            access_level: capabilities.accessLevel,
-            dashboard_access: capabilities.dashboardAccess,
-            can_access: capabilities.canAccess,
-            can_invite: oauthAdmin,
-          };
-        }));
-
-        return mapped
-          .filter(Boolean)
-          .filter((g) => (g.bot_present ? g.can_access : g.can_invite))
-          .sort((a, b) => b.bot_present - a.bot_present);
-      }
-
-      const fetchGuilds = (token) => fetch(`${DISCORD_API}/users/@me/guilds?with_counts=true`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      let guildsRes = await fetchGuilds(accessToken);
-
-      if (guildsRes.status === 401) {
-        const refreshedAccessToken = await refreshSessionToken();
-        if (!refreshedAccessToken) {
-          console.warn('Guilds fetch rejected the access token and session refresh failed');
-          await new Promise((resolve) => req.session.destroy(() => resolve()));
-          res.clearCookie('bread.sid');
-          return res.status(401).json({ error: 'Discord session expired', reauth: true });
-        }
-        accessToken = refreshedAccessToken;
-        guildsRes = await fetchGuilds(accessToken);
-      }
-
-      if (!guildsRes.ok) {
-        if (guildsRes.status === 429) {
-          const body = await guildsRes.json().catch(() => ({}));
-          const retryMs = Math.ceil((body.retry_after || 1) * 1000) + 500;
-          await new Promise((r) => setTimeout(r, retryMs));
-          const retryRes = await fetchGuilds(accessToken);
-          if (retryRes.ok) {
-            return res.json(await mapGuilds(await retryRes.json()));
-          }
-        }
-        const errBody = await guildsRes.json().catch(() => ({}));
-        console.error('Guilds fetch failed:', guildsRes.status, errBody);
-        return res.status(502).json({ error: `Failed to fetch guilds: ${guildsRes.status}` });
-      }
-
-      const guilds = await mapGuilds(await guildsRes.json());
-
-      res.json(guilds);
-    } catch (err) {
-      console.error('Guilds fetch error:', err);
-      res.status(500).json({ error: 'Failed to fetch guilds' });
-    }
-  });
-
-  // ---- Guild Config ----
-
-  app.get('/api/guilds/:guildId/access', requireAuth, requirePlayerAccess, (req, res) => {
-    res.json(req.dashboardCapabilities);
-  });
-
-  app.get('/api/guilds/:guildId/config', requireAuth, requireGuildAdmin, (req, res) => {
-    const config = getConfig(req.params.guildId);
-    const guild = client.guilds.cache.get(req.params.guildId);
-
-    let djRoleName = null;
-    let twentyFourSevenChannelName = null;
-    let playerTextChannelName = null;
-
-    if (config.djRoleId && guild) {
-      const role = guild.roles.cache.get(config.djRoleId);
-      djRoleName = role ? role.name : null;
-    }
-
-    if (config.twentyFourSevenChannelId && guild) {
-      const channel = guild.channels.cache.get(config.twentyFourSevenChannelId);
-      twentyFourSevenChannelName = channel ? channel.name : null;
-    }
-
-    if (config.playerTextChannelId && config.playerTextChannelId !== PLAYER_TEXT_CHANNEL_DISABLED && guild) {
-      const channel = guild.channels.cache.get(config.playerTextChannelId);
-      playerTextChannelName = channel ? channel.name : null;
-    }
-
-    res.json({
-      preferredSource: config.preferredSource,
-      djRoleId: config.djRoleId,
-      djRoleName,
-      maxVolume: config.maxVolume,
-      voteSkipPercent: config.voteSkipPercent,
-      stayInChannel: config.stayInChannel,
-      afkTimeout: config.afkTimeout,
-      persistentQueue: config.persistentQueue,
-      twentyFourSevenChannelId: config.twentyFourSevenChannelId,
-      twentyFourSevenChannelName,
-      playerTextChannelId: config.playerTextChannelId,
-      playerTextChannelName,
-      defaultVolume: config.defaultVolume,
-      autoplay: config.autoplay,
-      voiceChannelStatus: config.voiceChannelStatus,
-      dashboardAccess: config.dashboardAccess,
-    });
-  });
-
-  app.put('/api/guilds/:guildId/config', requireAuth, requireGuildAdmin, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
-    const updates = {};
-    const body = req.body;
-    const guildId = req.params.guildId;
-    const guild = client.guilds.cache.get(guildId);
-    const previousConfig = getConfig(guildId);
-
-    if (typeof body.djRoleId === 'string') updates.djRoleId = body.djRoleId || null;
-    if (Object.prototype.hasOwnProperty.call(body, 'playerTextChannelId')) {
-      const channelId = body.playerTextChannelId || null;
-      if (channelId && channelId !== PLAYER_TEXT_CHANNEL_DISABLED) {
-        const channel = guild?.channels?.cache?.get(channelId);
-        if (!isUsableTextChannel(channel)) {
-          return res.status(400).json({ error: 'Invalid player text channel' });
-        }
-      }
-      updates.playerTextChannelId = channelId;
-    }
-    if (typeof body.maxVolume === 'number') updates.maxVolume = Math.max(10, Math.min(500, body.maxVolume));
-    if (typeof body.voteSkipPercent === 'number') updates.voteSkipPercent = Math.min(Math.max(body.voteSkipPercent, 0.1), 1);
-    if (typeof body.stayInChannel === 'boolean') updates.stayInChannel = body.stayInChannel;
-    if (typeof body.twentyFourSevenChannelId === 'string') updates.twentyFourSevenChannelId = body.twentyFourSevenChannelId || null;
-    if (typeof body.afkTimeout === 'number') updates.afkTimeout = Math.max(60000, body.afkTimeout);
-    if (typeof body.persistentQueue === 'boolean') updates.persistentQueue = body.persistentQueue;
-    if (typeof body.preferredSource === 'string') updates.preferredSource = body.preferredSource || null;
-    if (typeof body.autoplay === 'boolean') updates.autoplay = body.autoplay;
-    if (typeof body.voiceChannelStatus === 'boolean') updates.voiceChannelStatus = body.voiceChannelStatus;
-    if (['admin', 'dj', 'members'].includes(body.dashboardAccess)) updates.dashboardAccess = body.dashboardAccess;
-    if (typeof body.defaultVolume === 'number') updates.defaultVolume = Math.max(0, Math.min(100, body.defaultVolume));
-
-    const updated = setConfig(guildId, updates);
-
-    if (Object.prototype.hasOwnProperty.call(updates, 'maxVolume')) {
-      const player = client.lavalink?.players?.get(guildId);
-      if (player && Number.isFinite(player.volume) && player.volume > updated.maxVolume) {
-        await player.setVolume(updated.maxVolume);
-        const { savePlayerState } = require('./state/queueStore');
-        await savePlayerState(player).catch(() => {});
-        await client.musicUI?.refresh(player).catch(() => {});
-        broadcastPlayerUpdate(guildId);
-      }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(updates, 'playerTextChannelId')) {
-      const player = client.lavalink?.players?.get(guildId);
-      const preferredTextChannelId = resolvePlayerTextChannelId(guild, updated.playerTextChannelId, player?.textChannelId ?? null);
-      if (player && player.textChannelId !== preferredTextChannelId) {
-        player.textChannelId = preferredTextChannelId;
-      }
-
-      if (updates.playerTextChannelId !== previousConfig.playerTextChannelId) {
-        await client.musicUI?.clear(guildId).catch(() => {});
-        if (player && preferredTextChannelId && player.queue.current) {
-          await client.musicUI?.refresh(player).catch(() => {});
-        }
-      }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(updates, 'voiceChannelStatus')) {
-      const player = client.lavalink?.players?.get(guildId);
-      if (!updated.voiceChannelStatus && player) {
-        await clearVoiceTrackStatus(client, player);
-      } else if (updated.voiceChannelStatus && player?.queue.current) {
-        await setVoiceTrackStatus(client, player, player.queue.current);
-      }
-    }
-
-    res.json({ success: true, config: updated });
-  });
-
-  app.post('/api/guilds/:guildId/config/reset', requireAuth, requireGuildAdmin, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
-    const guildId = req.params.guildId;
-    deleteConfig(guildId);
-    const fresh = getConfig(guildId);
-    const player = client.lavalink?.players?.get(guildId);
-    if (player && Number.isFinite(player.volume) && player.volume > fresh.maxVolume) {
-      await player.setVolume(fresh.maxVolume);
-      const { savePlayerState } = require('./state/queueStore');
-      await savePlayerState(player).catch(() => {});
-      await client.musicUI?.refresh(player).catch(() => {});
-      broadcastPlayerUpdate(guildId);
-    }
-    if (fresh.voiceChannelStatus && player?.queue.current) {
-      await setVoiceTrackStatus(client, player, player.queue.current);
-    }
-    res.json({ success: true, config: fresh });
-  });
-
-  // ---- Guild Status / Player ----
-
-  app.get('/api/guilds/:guildId/status', requireAuth, requirePlayerAccess, (req, res) => {
-    res.json(buildPlayerStatusSnapshot(client, req.params.guildId));
-  });
-
-  app.get('/api/guilds/:guildId/player/events', requireAuth, requirePlayerAccess, (req, res) => {
-    const guildId = req.params.guildId;
-    const page = parseQueuePage(req.query.page);
-
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.flushHeaders?.();
-
-    let closed = false;
-    const sendSnapshot = () => {
-      if (closed) return;
-      try {
-        writeSseEvent(res, 'snapshot', {
-          status: buildPlayerStatusSnapshot(client, guildId),
-          queue: buildQueueSnapshot(client, guildId, page),
-          notice: getPlayerNotice(guildId),
-          timestamp: Date.now(),
-        });
-      } catch {
-        closed = true;
-      }
-    };
-
-    const subscribers = playerEventSubscribers.get(guildId) || new Set();
-    subscribers.add(sendSnapshot);
-    playerEventSubscribers.set(guildId, subscribers);
-    sendSnapshot();
-    const heartbeatInterval = setInterval(() => {
-      if (closed) return;
-      try {
-        res.write(': keep-alive\n\n');
-      } catch {
-        closed = true;
-      }
-    }, 15000);
-
-    req.on('close', () => {
-      closed = true;
-      clearInterval(heartbeatInterval);
-      subscribers.delete(sendSnapshot);
-      if (subscribers.size === 0) playerEventSubscribers.delete(guildId);
-    });
-  });
-
-  app.get('/api/guilds/:guildId/player/filters', requireAuth, requirePlayerAccess, (_req, res) => {
-    res.json({ presets: FILTER_PRESET_CHOICES });
-  });
-
-  app.post(
-    '/api/guilds/:guildId/player/upload',
+  app.use(createAuthRouter({
+    discordApi: DISCORD_API,
+    scopes: SCOPES,
     requireAuth,
+    requireTrustedOrigin,
+    refreshAccessToken,
+  }));
+
+  app.use(createGuildConfigRouter({
+    client,
+    discordApi: DISCORD_API,
+    requireAuth,
+    requirePlayerAccess,
+    requireGuildAdmin,
+    requireTrustedOrigin,
+    requireDashboardActionRateLimit,
+    refreshAccessToken,
+    getRequestUser,
+    isGuildAllowed,
+    resolveDashboardCapabilities,
+    getConfig,
+    setConfig,
+    deleteConfig,
+    isUsableTextChannel,
+    resolvePlayerTextChannelId,
+    clearVoiceTrackStatus,
+    setVoiceTrackStatus,
+    savePlayerState,
+    broadcastPlayerUpdate,
+    playerTextChannelDisabled: PLAYER_TEXT_CHANNEL_DISABLED,
+  }));
+
+  app.use(createPlayerRouter({
+    client,
+    requireAuth,
+    requirePlayerAccess,
+    requireGuildAccess,
     requireGuildDJ,
     requireTrustedOrigin,
     requireDashboardActionRateLimit,
-    async (req, res) => {
-      const guildId = req.params.guildId;
-      res.once('finish', () => broadcastPlayerUpdate(guildId));
-      const releaseUpload = await acquireGuildMutex(guildId);
-      const guild = client.guilds.cache.get(guildId);
-      let player = client.lavalink?.players?.get(guildId);
-      let uploadTempPath = null;
-      let activeUploadTempPath = null;
-      let storedFilePath = null;
-
-      try {
-        const guildConfig = getConfig(guildId);
-
-        if (!player && guild) {
-          const botVoiceChannelId = guild.members.me?.voice?.channelId;
-          if (botVoiceChannelId) {
-            player = client.lavalink.createPlayer({
-              guildId,
-              voiceChannelId: botVoiceChannelId,
-              textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player?.textChannelId ?? null),
-              selfDeaf: true,
-              volume: guildConfig.defaultVolume ?? 60,
-            });
-            await player.connect();
-          }
-        }
-
-        if (!player) {
-          return res.status(404).json({ error: 'No active player in this guild' });
-        }
-
-        const originalName = sanitizeUploadName(decodeUploadHeader(req.get('x-file-name')) || 'upload');
-        const ext = path.extname(originalName).toLowerCase();
-        const mimeType = String(req.get('content-type') || '').split(';')[0].toLowerCase();
-
-        if (!isAllowedAudioUpload(ext, mimeType)) {
-          return res.status(400).json({ error: 'Unsupported audio file type' });
-        }
-
-        const guildUploadDir = path.join(UPLOAD_DIR, guildId);
-        await fs.promises.mkdir(guildUploadDir, { recursive: true });
-
-        uploadTempPath = path.join(
-          guildUploadDir,
-          `.incoming-${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.tmp`,
-        );
-        activeUploadTempPath = path.resolve(uploadTempPath);
-        activeUploadTempPaths.add(activeUploadTempPath);
-        const streamedUpload = await streamUploadToFile(req, uploadTempPath, AUDIO_UPLOAD_MAX_BYTES);
-        const streamedUploadId = streamedUpload.uploadId;
-        uploadTempPath = streamedUpload.path;
-        if (!streamedUpload.size) {
-          return res.status(400).json({ error: 'Upload body is empty' });
-        }
-
-        const filePath = path.join(guildUploadDir, `${streamedUploadId}${ext}`);
-        if (!isPathInside(filePath, UPLOAD_DIR)) {
-          return res.status(400).json({ error: 'Invalid upload path' });
-        }
-
-        const releaseQuota = await acquireUploadQuotaMutex();
-        let alreadyStored;
-        try {
-          await cleanupExpiredAudioUploads(client);
-          alreadyStored = await fileExists(filePath);
-          if (alreadyStored) {
-            await safeDeleteFile(uploadTempPath);
-            uploadTempPath = null;
-            await touchFile(filePath);
-          } else {
-            const hasRoom = await makeRoomForAudioUpload(streamedUpload.size, client, uploadTempPath);
-            if (!hasRoom) {
-              await safeDeleteFile(uploadTempPath);
-              uploadTempPath = null;
-              return res.status(507).json({
-                error: `Upload storage limit reached (${Math.floor(AUDIO_UPLOAD_QUOTA_BYTES / (1024 * 1024))} MB); all older files are still in use`,
-              });
-            }
-
-            await renameFileWithRetry(uploadTempPath, filePath);
-            uploadTempPath = null;
-            storedFilePath = filePath;
-          }
-        } finally {
-          releaseQuota();
-        }
-
-        const publicName = encodeURIComponent(originalName);
-        const playbackUrl = `${getUploadPlaybackBaseUrl()}/api/uploads/${encodeURIComponent(guildId)}/${streamedUploadId}/${publicName}`;
-        const requester = getDashboardRequester(req, client);
-        const node = getUsableNode(client);
-        if (!node) {
-          if (storedFilePath) await safeDeleteFile(storedFilePath);
-          return res.status(503).json({ error: 'No Lavalink node available' });
-        }
-
-        let result;
-        try {
-          result = await node.search({ query: playbackUrl }, requester);
-        } catch (error) {
-          if (storedFilePath) await safeDeleteFile(storedFilePath);
-          console.error('Lavalink upload load failed:', error);
-          return res.status(502).json({ error: `Lavalink could not load upload URL: ${error.message}` });
-        }
-
-        const track = result?.tracks?.[0];
-        if (!track) {
-          if (storedFilePath) await safeDeleteFile(storedFilePath);
-          return res.status(400).json({ error: 'Lavalink could not load this audio file' });
-        }
-
-        const uploadTitle = track.info?.title || path.basename(originalName, ext);
-        const uploadAuthor = isUnknownTrackAuthor(track.info?.author) ? 'Local upload' : track.info.author;
-        const queuedTrack = {
-          ...track,
-          info: {
-            ...track.info,
-            title: uploadTitle,
-            author: uploadAuthor,
-            uri: track.info?.uri || playbackUrl,
-            sourceName: 'localUpload',
-            isLocalUpload: true,
-          },
-        };
-        queuedTrack.localUpload = {
-          guildId,
-          uploadId: streamedUploadId,
-          fileName: originalName,
-          filePath,
-          expiresAt: Date.now() + AUDIO_UPLOAD_TTL_MS,
-          cached: alreadyStored,
-        };
-
-        const startedFromIdle = !player.playing && !player.paused;
-        await addManualTrackToQueue(player, queuedTrack);
-
-        if (startedFromIdle) {
-          await player.play();
-          await client.musicUI?.refresh(player).catch(() => {});
-        }
-
-        const { savePlayerState } = require('./state/queueStore');
-        await savePlayerState(player).catch(() => {});
-
-        res.json({
-          success: true,
-          title: queuedTrack.info.title,
-          author: queuedTrack.info.author,
-          size: streamedUpload.size,
-          cached: alreadyStored,
-        });
-      } catch (err) {
-        console.error('Player upload error:', err);
-        await safeDeleteFile(uploadTempPath);
-        if (!res.headersSent) {
-          const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : err.code === 'ECONNABORTED' ? 400 : 500;
-          res.status(status).json({ error: `Upload failed: ${err.message}` });
-        }
-      } finally {
-        if (activeUploadTempPath) activeUploadTempPaths.delete(activeUploadTempPath);
-        releaseUpload();
-      }
-    },
-  );
+    buildPlayerStatusSnapshot,
+    parseQueuePage,
+    writeSseEvent,
+    buildQueueSnapshot,
+    getPlayerNotice,
+    playerEventSubscribers,
+    filterPresetChoices: FILTER_PRESET_CHOICES,
+    acquireGuildMutex,
+    resolvePlayerTextChannelId,
+    getConfig,
+    sanitizeUploadName,
+    decodeUploadHeader,
+    isAllowedAudioUpload,
+    uploadDir: UPLOAD_DIR,
+    uploadMaxBytes: AUDIO_UPLOAD_MAX_BYTES,
+    activeUploadTempPaths,
+    streamUploadToFile,
+    isPathInside,
+    acquireUploadQuotaMutex,
+    cleanupExpiredAudioUploads,
+    fileExists,
+    safeDeleteFile,
+    touchFile,
+    makeRoomForAudioUpload,
+    renameFileWithRetry,
+    createSignedUploadUrl,
+    getUploadPlaybackBaseUrl,
+    getDashboardRequester,
+    getUsableNode,
+    isUnknownTrackAuthor,
+    addManualTrackToQueue,
+    audioUploadTtlMs: AUDIO_UPLOAD_TTL_MS,
+    audioUploadQuotaBytes: AUDIO_UPLOAD_QUOTA_BYTES,
+    savePlayerState,
+    getGuildHistory,
+    findLyrics,
+    trackToLyricsQuery,
+    playerSearchCache,
+    prunePlayerSearchCache,
+    playerPlaylistMaxTracks: PLAYER_PLAYLIST_MAX_TRACKS,
+    playerPlaylistCacheTtlMs: PLAYER_PLAYLIST_CACHE_TTL_MS,
+    playerSearchCacheTtlMs: PLAYER_SEARCH_CACHE_TTL_MS,
+    applyPreferredSource,
+    classifyPlaybackError,
+    describeSearchFailure,
+    extractArtwork,
+    normalizeSourceName,
+    getTrackCapabilityMetadata,
+    waitForPlayerVoice,
+    activityVoiceReconnectDelayMs: ACTIVITY_VOICE_RECONNECT_DELAY_MS,
+    hydratePlayer,
+    addManualSeed,
+    clearAutoplayPrefetch,
+    addRequestedTrackToQueue,
+    clearAutoplayState,
+    markPlayerStopping,
+    clearVoiceTrackStatus,
+    recordAutoplaySkip,
+    clearVoteSkip,
+    handleAutoplay,
+    handleSkipRequest,
+    getRequestUser,
+    setAutoplay,
+    filterPresets: FILTER_PRESETS,
+    isTrackSeekable,
+    seekTrack,
+    isUnseekableTrackError,
+    audioUploadDirectory: UPLOAD_DIR,
+    broadcastPlayerUpdate,
+  }));
 
   app.get('/api/guilds/:guildId/health', requireAuth, requireGuildAccess, (req, res) => {
     const guildId = req.params.guildId;
@@ -1254,36 +653,6 @@ function createApiServer(client) {
     res.json(getGuildInsights(guildId, { limit, range }));
   });
 
-  app.get('/api/guilds/:guildId/queue', requireAuth, requirePlayerAccess, (req, res) => {
-    res.json(buildQueueSnapshot(client, req.params.guildId, parseQueuePage(req.query.page)));
-  });
-
-  app.get('/api/guilds/:guildId/history', requireAuth, requireGuildAccess, (req, res) => {
-    res.json(getGuildHistory(req.params.guildId, {
-      page: req.query.page,
-      limit: req.query.limit,
-    }));
-  });
-
-  app.get('/api/guilds/:guildId/lyrics', requireAuth, requirePlayerAccess, async (req, res) => {
-    try {
-      const player = client.lavalink?.players?.get(req.params.guildId);
-      const requestedTitle = typeof req.query.title === 'string' ? req.query.title.trim() : '';
-      const requestedArtist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
-      const query = requestedTitle && requestedArtist
-        ? { title: requestedTitle, artist: requestedArtist, duration: Number(req.query.duration) || 0 }
-        : trackToLyricsQuery(player?.queue?.current);
-      if (!query.title || !query.artist) {
-        return res.status(404).json({ error: 'Nothing is playing and no song was provided' });
-      }
-      const lyrics = await findLyrics(query);
-      if (!lyrics) return res.status(404).json({ error: 'Lyrics not found' });
-      res.json(lyrics);
-    } catch (error) {
-      console.error('Lyrics lookup failed:', error.message);
-      res.status(502).json({ error: 'Lyrics provider is temporarily unavailable' });
-    }
-  });
 
   // ---- Economy ----
 
@@ -1402,588 +771,6 @@ function createApiServer(client) {
 
   // ---- Player Controls ----
 
-  app.post('/api/guilds/:guildId/player/:action', requireAuth, requirePlayerAccess, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
-    const guildId = req.params.guildId;
-    const action = req.params.action;
-    let player = client.lavalink?.players?.get(guildId);
-    const guild = client.guilds.cache.get(guildId);
-    const releaseAction = await acquireGuildMutex(guildId);
-    res.once('finish', () => broadcastPlayerUpdate(guildId));
-
-    try {
-      const guildConfig = getConfig(guildId);
-      const member = req.guildMember;
-      const capabilities = req.dashboardCapabilities;
-      const memberVoiceChannelId = member?.voice?.channelId || null;
-      const connectedBotVoiceChannelId = guild?.members?.me?.voice?.channelId || null;
-      let botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
-      const privileged = capabilities.accessLevel === 'admin' || capabilities.accessLevel === 'dj';
-      if (!capabilities.canControlPlayer && action !== 'skip') {
-        return res.status(403).json({ error: 'Player control is not enabled for your role' });
-      }
-
-      // Searching does not require an active voice connection. Activity playback
-      // creates and connects the player only after the user chooses a result.
-      if (action === 'search') {
-        const query = req.body.query;
-        if (!query || typeof query !== 'string') {
-          return res.status(400).json({ error: 'Query is required' });
-        }
-        const node = getUsableNode(client);
-        if (!node) {
-          return res.status(503).json({ error: 'No Lavalink node available' });
-        }
-        const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform || 'ytsearch';
-        const preparedQuery = applyPreferredSource(query, guildConfig, defaultSource);
-        const searchCacheKey = `${guildId}:${preparedQuery.trim().toLowerCase()}`;
-        const cachedSearch = playerSearchCache.get(searchCacheKey);
-        if (cachedSearch && cachedSearch.expiresAt > Date.now()) {
-          playerSearchCache.delete(searchCacheKey);
-          playerSearchCache.set(searchCacheKey, cachedSearch);
-          return res.json({
-            success: true,
-            tracks: cachedSearch.tracks,
-            playlist: cachedSearch.playlist,
-          });
-        }
-        const requester = getDashboardRequester(req, client);
-        let result;
-        try {
-          result = await node.search({ query: preparedQuery }, requester);
-        } catch (error) {
-          const failure = classifyPlaybackError(error);
-          return res.status(502).json({
-            error: failure.description,
-            code: failure.code,
-          });
-        }
-        if (result?.loadType === 'error' || result?.exception) {
-          const failure = describeSearchFailure(result);
-          return res.status(502).json({
-            error: failure.description,
-            code: failure.code,
-          });
-        }
-        const loadedTracks = (result?.tracks || []).slice(0, PLAYER_PLAYLIST_MAX_TRACKS);
-        const tracks = loadedTracks.slice(0, 10).map((track) => ({
-          encoded: track.encoded,
-          title: track.info.title,
-          author: track.info.author,
-          uri: track.info.uri,
-          duration: track.info.duration,
-          artwork: extractArtwork(track.info),
-          source: normalizeSourceName(track.info),
-          ...getTrackCapabilityMetadata(track),
-        }));
-        const playlist = result?.playlist
-          ? {
-            key: searchCacheKey,
-            name: result.playlist.name || 'Playlist',
-            trackCount: loadedTracks.length,
-            totalDuration: loadedTracks.reduce((total, track) => total + (Number(track.info?.duration) || 0), 0),
-            artwork: extractArtwork(loadedTracks[0]?.info),
-            truncated: (result.tracks || []).length > loadedTracks.length,
-          }
-          : null;
-        playerSearchCache.delete(searchCacheKey);
-        playerSearchCache.set(searchCacheKey, {
-          tracks,
-          playlist,
-          playlistTracks: result?.playlist ? loadedTracks : null,
-          expiresAt: Date.now() + (playlist ? PLAYER_PLAYLIST_CACHE_TTL_MS : PLAYER_SEARCH_CACHE_TTL_MS),
-        });
-        prunePlayerSearchCache();
-        return res.json({ success: true, tracks, playlist });
-      }
-
-      if (action === 'join') {
-        const activityChannelId = req.body?.channelId || null;
-        if (!memberVoiceChannelId || activityChannelId !== memberVoiceChannelId) {
-          return res.status(403).json({ error: 'Open the Activity from the voice channel you are currently in' });
-        }
-
-        const channel = guild?.channels?.cache?.get(memberVoiceChannelId);
-        if (!channel?.isVoiceBased()) {
-          return res.status(400).json({ error: 'The Activity channel is not a voice channel' });
-        }
-        if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== memberVoiceChannelId) {
-          return res.status(409).json({ error: 'Bread is already active in another voice channel' });
-        }
-
-        const preferredTextChannelId = resolvePlayerTextChannelId(
-          guild,
-          guildConfig.playerTextChannelId,
-          player?.textChannelId ?? null,
-        );
-        const createdActivityPlayer = !player;
-        if (!player) {
-          player = client.lavalink.createPlayer({
-            guildId,
-            voiceChannelId: memberVoiceChannelId,
-            textChannelId: preferredTextChannelId,
-            selfDeaf: true,
-            volume: guildConfig.defaultVolume ?? 60,
-          });
-        } else {
-          player.voiceChannelId = memberVoiceChannelId;
-          player.textChannelId = preferredTextChannelId;
-        }
-
-        if (createdActivityPlayer) {
-          // Discord may still report the old voice state while Lavalink has no player
-          // after a bot restart. Reconnect explicitly before restoring persisted audio.
-          if (connectedBotVoiceChannelId) {
-            await player.disconnect(true).catch(() => {});
-            await new Promise((resolve) => setTimeout(resolve, ACTIVITY_VOICE_RECONNECT_DELAY_MS));
-          }
-          await player.connect();
-          const voiceReady = await waitForPlayerVoice(player);
-          if (!voiceReady) {
-            console.warn(`[Activity] Voice handshake still pending for guild ${guildId}; restoring player anyway.`);
-          }
-          await hydratePlayer(player, client).catch((error) => {
-            console.error(`Failed to restore Activity player for ${guildId}:`, error.message);
-          });
-          if (!player.queue.current && player.queue.tracks.length === 0) {
-            await player.node.updatePlayer({
-              guildId,
-              playerOptions: { track: { encoded: null }, paused: false },
-            });
-            player.playing = false;
-            player.paused = false;
-          }
-        } else if (!connectedBotVoiceChannelId) {
-          await player.connect();
-        }
-        return res.json({ success: true, channelId: memberVoiceChannelId, channelName: channel.name });
-      }
-
-      const djOnlyActions = new Set([
-        'stop',
-        'clearqueue',
-        'shuffle',
-        'loop',
-        'back',
-        'volume',
-        'filter',
-        'autoplay',
-        'remove',
-        'seek',
-        'move',
-        'playnow',
-        'playlist',
-      ]);
-      if (!privileged && djOnlyActions.has(action)) {
-        return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
-      }
-
-      const isPlaybackAction = ['play', 'playnow', 'playlist'].includes(action);
-      const requestedPlaybackChannelId = isPlaybackAction
-        ? req.body?.channelId || memberVoiceChannelId || connectedBotVoiceChannelId || null
-        : null;
-      if (requestedPlaybackChannelId) {
-        if (req.activityUser && (!memberVoiceChannelId || requestedPlaybackChannelId !== memberVoiceChannelId)) {
-          return res.status(403).json({ error: 'Open the Activity from the voice channel you are currently in' });
-        }
-        const channel = guild?.channels?.cache?.get(requestedPlaybackChannelId);
-        if (!channel?.isVoiceBased()) {
-          return res.status(400).json({ error: 'The Activity channel is not a voice channel' });
-        }
-        if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== requestedPlaybackChannelId) {
-          return res.status(409).json({ error: 'Bread is already active in another voice channel' });
-        }
-
-        const createdPlaybackPlayer = !player;
-        if (!player) {
-          player = client.lavalink.createPlayer({
-            guildId,
-            voiceChannelId: requestedPlaybackChannelId,
-            textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, null),
-            selfDeaf: true,
-            volume: guildConfig.defaultVolume ?? 60,
-          });
-        } else {
-          player.voiceChannelId = requestedPlaybackChannelId;
-          player.textChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player.textChannelId ?? null);
-        }
-        if (createdPlaybackPlayer) {
-          if (connectedBotVoiceChannelId) {
-            await player.disconnect(true).catch(() => {});
-            await new Promise((resolve) => setTimeout(resolve, ACTIVITY_VOICE_RECONNECT_DELAY_MS));
-          }
-          await player.connect();
-          const voiceReady = await waitForPlayerVoice(player);
-          if (!voiceReady) {
-            console.warn(`[Player] Voice handshake still pending for guild ${guildId}; continuing playback request.`);
-          }
-          await hydratePlayer(player, client).catch((error) => {
-            console.error(`Failed to restore player for ${guildId}:`, error.message);
-          });
-        } else if (!connectedBotVoiceChannelId) {
-          await player.connect();
-        }
-        botVoiceChannelId = requestedPlaybackChannelId;
-      }
-
-      if (!privileged && (!memberVoiceChannelId || memberVoiceChannelId !== botVoiceChannelId)) {
-        return res.status(403).json({ error: 'Join the same voice channel as the bot to control playback' });
-      }
-
-      // Allow dashboard play when the bot is already in voice but player object is missing.
-      if (!player && action === 'play' && guild) {
-        const botVoiceChannelId = guild.members.me?.voice?.channelId;
-        if (botVoiceChannelId) {
-          player = client.lavalink.createPlayer({
-            guildId,
-            voiceChannelId: botVoiceChannelId,
-            textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player?.textChannelId ?? null),
-            selfDeaf: true,
-            volume: guildConfig.defaultVolume ?? 60,
-          });
-          await player.connect();
-        }
-      }
-
-      if (!player) {
-        return res.status(404).json({ error: 'No active player in this guild' });
-      }
-
-      if (guild) {
-        const preferredTextChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player.textChannelId ?? null);
-        if (player.textChannelId !== preferredTextChannelId) {
-          player.textChannelId = preferredTextChannelId;
-        }
-      }
-
-      switch (action) {
-        case 'playlist': {
-          const cacheKey = typeof req.body?.cacheKey === 'string' ? req.body.cacheKey : '';
-          if (!cacheKey.startsWith(`${guildId}:`)) {
-            return res.status(400).json({ error: 'Invalid playlist selection' });
-          }
-          const cachedSearch = playerSearchCache.get(cacheKey);
-          const playlistTracks = cachedSearch?.playlistTracks;
-          if (!cachedSearch || cachedSearch.expiresAt <= Date.now() || !cachedSearch.playlist || !Array.isArray(playlistTracks) || playlistTracks.length === 0) {
-            return res.status(410).json({ error: 'Playlist search expired. Search for the playlist again.' });
-          }
-
-          const requester = getDashboardRequester(req, client);
-          const tracksToAdd = playlistTracks.map((track) => ({
-            ...track,
-            requester,
-          }));
-          tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
-          clearAutoplayPrefetch(guildId);
-
-          const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
-          if (autoplayIndex !== -1) {
-            player.queue.tracks.splice(autoplayIndex, 0, ...tracksToAdd);
-          } else {
-            await player.queue.add(tracksToAdd);
-          }
-
-          if (!player.queue.current && !player.playing && !player.paused) {
-            await player.play();
-          }
-          await client.musicUI?.refresh(player).catch(() => {});
-          const { savePlayerState } = require('./state/queueStore');
-          await savePlayerState(player).catch(() => {});
-          playerSearchCache.delete(cacheKey);
-          return res.json({
-            success: true,
-            title: cachedSearch.playlist.name,
-            count: tracksToAdd.length,
-            mode: 'queue',
-            truncated: cachedSearch.playlist.truncated,
-          });
-        }
-
-        case 'pause':
-          if (player && !player.paused) await player.pause();
-          break;
-
-        case 'resume':
-          if (player && player.paused) await player.resume();
-          break;
-
-        case 'toggle':
-          if (player) {
-            if (player.paused) await player.resume();
-            else await player.pause();
-          }
-          break;
-
-        case 'skip':
-          if (player) {
-            if (privileged) {
-              const currentTrack = player.queue.current;
-              recordAutoplaySkip(guildId, currentTrack, { position: player.position });
-              await clearVoteSkip(guildId);
-              if (player.queue.tracks.length === 0 && player.queue.current) {
-                await player.stopPlaying(false, false);
-                if (guildConfig.autoplay && currentTrack) {
-                  await handleAutoplay(player, currentTrack, client);
-                }
-              } else {
-                await player.skip();
-              }
-            } else {
-              const result = await handleSkipRequest({
-                member,
-                guild,
-                user: { id: getRequestUser(req).id },
-              }, player, guildConfig, client);
-              if (result.needsAutoplay && result.lastTrack) {
-                await handleAutoplay(player, result.lastTrack, client);
-              }
-              broadcastPlayerUpdate(guildId);
-              return res.json({ success: true, skipped: result.skipped, message: result.message, voteSkip: result.vote || null });
-            }
-          }
-          break;
-
-        case 'stop':
-          if (player) {
-            clearAutoplayState(guildId);
-            markPlayerStopping(player);
-            await clearVoiceTrackStatus(client, player);
-            await player.stopPlaying(true);
-            player.queue.tracks.splice(0, player.queue.tracks.length);
-            await player.destroy('Stopped via dashboard', true);
-            await client.musicUI?.clear(guildId).catch(() => {});
-          }
-          return res.json({ success: true, stopped: true });
-
-        case 'clearqueue': {
-          if (!player) return res.status(404).json({ error: 'No active player' });
-          const removed = player.queue.tracks.length;
-          if (removed > 0) {
-            player.queue.tracks.splice(0, removed);
-          }
-          await client.musicUI?.refresh(player).catch(() => {});
-          const { savePlayerState } = require('./state/queueStore');
-          await savePlayerState(player).catch(() => {});
-          return res.json({ success: true, removed });
-        }
-
-        case 'shuffle':
-          if (player && player.queue.tracks.length > 0) {
-            await player.queue.shuffle();
-          }
-          break;
-
-        case 'loop': {
-          if (player) {
-            const order = ['off', 'track', 'queue'];
-            const current = order.indexOf(player.repeatMode ?? 'off');
-            const next = order[(current + 1) % order.length];
-            await player.setRepeatMode(next);
-            await client.musicUI?.refresh(player).catch(() => {});
-            return res.json({ success: true, repeatMode: next });
-          }
-          break;
-        }
-
-        case 'back': {
-          const previous = await player.queue.shiftPrevious();
-          if (!previous) return res.status(404).json({ error: 'No previous tracks' });
-          await player.play({ clientTrack: previous });
-          await client.musicUI?.refresh(player).catch(() => {});
-          break;
-        }
-
-        case 'volume': {
-          const volume = parseInt(req.body.volume, 10);
-          if (isNaN(volume) || volume < 0 || volume > 500) {
-            return res.status(400).json({ error: 'Invalid volume value' });
-          }
-          const clamped = Math.min(guildConfig.maxVolume, Math.max(0, volume));
-          if (player) {
-            await player.setVolume(clamped);
-            await client.musicUI?.refresh(player).catch(() => {});
-          }
-          return res.json({ success: true, volume: clamped });
-        }
-
-        case 'playnow':
-        case 'play': {
-          const { encoded, query, track: metadata } = req.body;
-          const playImmediately = action === 'playnow';
-          const requester = getDashboardRequester(req, client);
-
-          if (encoded) {
-            const track = {
-              encoded,
-              info: {
-                title: typeof metadata?.title === 'string' ? metadata.title : 'Unknown title',
-                author: typeof metadata?.author === 'string' ? metadata.author : 'Unknown artist',
-                uri: typeof metadata?.uri === 'string' ? metadata.uri : null,
-                duration: Number.isFinite(metadata?.duration) ? metadata.duration : 0,
-                artworkUrl: typeof metadata?.artwork === 'string' ? metadata.artwork : null,
-                sourceName: typeof metadata?.source === 'string'
-                  ? metadata.source
-                  : normalizeSourceName(metadata),
-                isSeekable: metadata?.seekable === true,
-                isStream: metadata?.isStream === true,
-              },
-              requester,
-            };
-            addManualSeed(guildId, track);
-            await addRequestedTrackToQueue(player, track, playImmediately);
-            if (playImmediately && player.queue.current) {
-              await player.skip();
-            } else if (!player.queue.current || (!player.playing && !player.paused)) {
-              await player.play();
-            }
-            await client.musicUI?.refresh(player).catch(() => {});
-            const { savePlayerState } = require('./state/queueStore');
-            await savePlayerState(player).catch(() => {});
-            return res.json({ success: true, mode: playImmediately ? 'now' : 'queue' });
-          }
-
-          if (query) {
-            const searchNode = getUsableNode(client);
-            if (!searchNode) return res.status(503).json({ error: 'No Lavalink node available' });
-            const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform || 'ytsearch';
-            const preparedQuery = applyPreferredSource(query, guildConfig, defaultSource);
-            let result;
-            try {
-              result = await searchNode.search({ query: preparedQuery }, requester);
-            } catch (error) {
-              const failure = classifyPlaybackError(error);
-              return res.status(502).json({
-                error: failure.description,
-                code: failure.code,
-              });
-            }
-            const track = result?.tracks?.[0];
-            if (!track) {
-              const failure = describeSearchFailure(result);
-              const status = failure.code === 'not_found' ? 404 : 502;
-              return res.status(status).json({
-                error: failure.description,
-                code: failure.code,
-              });
-            }
-            addManualSeed(guildId, track);
-            await addRequestedTrackToQueue(player, track, playImmediately);
-            if (playImmediately && player.queue.current) {
-              await player.skip();
-            } else if (!player.queue.current || (!player.playing && !player.paused)) {
-              await player.play();
-            }
-            await client.musicUI?.refresh(player).catch(() => {});
-            const { savePlayerState } = require('./state/queueStore');
-            await savePlayerState(player).catch(() => {});
-            return res.json({ success: true, title: track.info.title, mode: playImmediately ? 'now' : 'queue' });
-          }
-
-          return res.status(400).json({ error: 'Provide encoded track or query' });
-        }
-
-        case 'filter': {
-          if (!player) return res.status(404).json({ error: 'No active player' });
-          const preset = typeof req.body?.preset === 'string' ? req.body.preset.toLowerCase() : '';
-          if (!preset) {
-            return res.status(400).json({ error: 'preset is required' });
-          }
-
-          if (preset === 'clear' || preset === 'off' || preset === 'none') {
-            await player.filterManager.resetFilters();
-            await player.filterManager.clearEQ();
-            await player.filterManager.applyPlayerFilters();
-            player.filterManager.activePreset = null;
-            await client.musicUI?.refresh(player).catch(() => {});
-            return res.json({ success: true, filter: null });
-          }
-
-          const handler = FILTER_PRESETS[preset];
-          if (!handler) {
-            return res.status(400).json({ error: 'Unknown filter preset' });
-          }
-
-          await handler(player.filterManager);
-          await player.filterManager.applyPlayerFilters();
-          player.filterManager.activePreset = preset;
-          await client.musicUI?.refresh(player).catch(() => {});
-          return res.json({ success: true, filter: preset });
-        }
-
-        case 'autoplay': {
-          const enabled = typeof req.body?.enabled === 'boolean'
-            ? req.body.enabled
-            : !Boolean(guildConfig.autoplay);
-          setAutoplay(guildId, enabled);
-          if (player) {
-            await client.musicUI?.refresh(player).catch(() => {});
-          }
-          return res.json({ success: true, autoplay: enabled });
-        }
-
-        case 'remove': {
-          if (!player) return res.status(404).json({ error: 'No active player' });
-          const start = parseInt(req.body.start, 10);
-          const end = req.body.end != null ? parseInt(req.body.end, 10) : start;
-          if (isNaN(start) || isNaN(end) || start < 0 || end < start || end >= player.queue.tracks.length) {
-            return res.status(400).json({ error: 'Invalid range' });
-          }
-          const count = end - start + 1;
-          player.queue.tracks.splice(start, count);
-          await client.musicUI?.refresh(player).catch(() => {});
-          return res.json({ success: true, removed: count });
-        }
-
-        case 'seek': {
-          const position = parseInt(req.body.position, 10);
-          if (isNaN(position) || position < 0) return res.status(400).json({ error: 'Invalid position' });
-          if (!player) return res.status(404).json({ error: 'No active player' });
-          if (!isTrackSeekable(player.queue.current)) {
-            return res.status(409).json({ error: 'This track cannot be seeked.' });
-          }
-          try {
-            await seekTrack(player, position);
-          } catch (error) {
-            if (isUnseekableTrackError(error)) {
-              return res.status(409).json({ error: 'This track cannot be seeked.' });
-            }
-            throw error;
-          }
-          return res.json({ success: true, position });
-        }
-
-        case 'move': {
-          if (!player) return res.status(404).json({ error: 'No active player' });
-          const from = parseInt(req.body.from, 10);
-          const to = parseInt(req.body.to, 10);
-          if (isNaN(from) || isNaN(to) || from < 0 || to < 0 || from >= player.queue.tracks.length || to >= player.queue.tracks.length) {
-            return res.status(400).json({ error: 'Invalid index' });
-          }
-          const removed = player.queue.tracks.splice(from, 1)[0];
-          player.queue.tracks.splice(to, 0, removed);
-          await client.musicUI?.refresh(player).catch(() => {});
-          return res.json({ success: true });
-        }
-
-        default:
-          return res.status(400).json({ error: `Unknown action: ${action}` });
-      }
-
-      if (player && ['pause', 'resume', 'toggle', 'skip', 'shuffle'].includes(action)) {
-        await client.musicUI?.refresh(player).catch(() => {});
-      }
-
-      // Save state for non-terminal actions
-      const { savePlayerState } = require('./state/queueStore');
-      if (player) await savePlayerState(player).catch(() => {});
-
-      res.json({ success: true });
-    } catch (err) {
-      console.error(`Player action ${action} error:`, err);
-      if (!res.headersSent) res.status(500).json({ error: `Action failed: ${err.message}` });
-    } finally {
-      releaseAction();
-    }
-  });
 
   // ---- Remote Control ----
 
@@ -2474,19 +1261,6 @@ function normalizeAllowedMentions(input) {
   if (input?.roles) parse.push('roles');
   if (input?.everyone) parse.push('everyone');
   return { parse };
-}
-
-function getUploadPlaybackBaseUrl() {
-  const configured = process.env.UPLOAD_BASE_URL || process.env.LOCAL_AUDIO_BASE_URL;
-  if (configured) return configured.replace(/\/+$/, '');
-
-  const port = process.env.WEB_PORT || 3001;
-  const lavalinkHost = String(process.env.LAVALINK_HOST || '').toLowerCase();
-  if (lavalinkHost === 'lavalink') {
-    return `http://bot:${port}`;
-  }
-
-  return `http://127.0.0.1:${port}`;
 }
 
 function streamUploadToFile(request, filePath, maxBytes) {

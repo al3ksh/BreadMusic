@@ -1,35 +1,23 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   AlertTriangle,
-  AudioLines,
-  BookOpenText,
   CheckCircle2,
-  ChevronDown,
   Disc3,
-  FileAudio,
   GripVertical,
   Info,
-  ListMusic,
-  ListPlus,
-  Mic2,
-  Music2,
-  Pause,
-  Play,
-  Radio,
-  Repeat,
-  Search,
-  Shuffle,
-  SkipBack,
-  SkipForward,
-  Square,
   Trash2,
-  Upload,
-  Volume2,
   X,
 } from 'lucide-react';
 import type { DashboardCapabilities, LyricsResult, PlayerStatus, QueueTrack } from '@/lib/api';
+import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
+import { ActivityPlayerControls } from '@/components/activity/ActivityPlayerControls';
+import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
+import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
+import { ActivitySearchPanel } from '@/components/activity/ActivitySearchPanel';
+import { ActivityLyricsPanel } from '@/components/activity/ActivityLyricsPanel';
+import { activityRequest } from '@/lib/activity/transport';
 
 type ActivitySdk = {
   ready: () => Promise<void>;
@@ -41,6 +29,12 @@ type ActivitySdk = {
     openExternalLink: (options: { url: string }) => Promise<{ opened: boolean }>;
   };
 };
+
+declare global {
+  interface Window {
+    __BREAD_TEST_ACTIVITY_SDK__?: ActivitySdk;
+  }
+}
 
 type ActivityPhase = 'starting' | 'ready' | 'error' | 'unsupported';
 type ActivityPanel = 'queue' | 'search' | 'lyrics' | null;
@@ -110,31 +104,6 @@ function parseSyncedLyrics(value: string | null | undefined): SyncedLine[] {
     .filter((line): line is SyncedLine => Boolean(line))
     .sort((a, b) => a.time - b.time);
 }
-
-function activityArtworkSrc(value: string | null | undefined) {
-  if (!value || value.startsWith('/')) return value || '';
-  return `/api/activity/artwork?url=${encodeURIComponent(value)}`;
-}
-
-function ActivitySpinner() {
-  return <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />;
-}
-
-const ActivityArtwork = memo(function ActivityArtwork({ src, large = false }: { src?: string | null; large?: boolean }) {
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => setFailed(false), [src]);
-
-  if (!src || failed) {
-    return (
-      <div className={large ? 'activity-art-fallback' : 'activity-queue-art'}>
-        <Music2 size={large ? 46 : 15} />
-      </div>
-    );
-  }
-
-  return <img src={activityArtworkSrc(src)} alt="" onError={() => setFailed(true)} />;
-});
 
 export default function ActivityPage() {
   const sdkRef = useRef<ActivitySdk | null>(null);
@@ -235,38 +204,7 @@ export default function ActivityPage() {
   }, []);
 
   const activityFetch = useCallback(async <T,>(path: string, options: RequestInit = {}) => {
-    const token = activityTokenRef.current;
-    if (!token) throw new Error('Activity authentication is not ready');
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 15_000);
-    const forwardAbort = () => controller.abort();
-    options.signal?.addEventListener('abort', forwardAbort, { once: true });
-    try {
-      const response = await fetch(path, {
-        ...options,
-        signal: controller.signal,
-        headers: {
-          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-          Authorization: `Bearer ${token}`,
-          ...options.headers,
-        },
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const error = new Error(body.error || `Request failed: ${response.status}`) as Error & { status?: number };
-        error.status = response.status;
-        throw error;
-      }
-      return body as T;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError' && !options.signal?.aborted) {
-        throw new Error('Request timed out');
-      }
-      throw error;
-    } finally {
-      window.clearTimeout(timeout);
-      options.signal?.removeEventListener('abort', forwardAbort);
-    }
+    return activityRequest<T>(path, activityTokenRef.current, options);
   }, []);
 
   const refreshCapabilities = useCallback(async () => {
@@ -442,7 +380,10 @@ export default function ActivityPage() {
 
         setMessage('Connecting to Discord...');
         const { DiscordSDK } = await import('@discord/embedded-app-sdk');
-        const sdk = new DiscordSDK(config.clientId) as unknown as ActivitySdk;
+        const injectedSdk = process.env.NODE_ENV !== 'production'
+          ? window.__BREAD_TEST_ACTIVITY_SDK__
+          : undefined;
+        const sdk = injectedSdk || new DiscordSDK(config.clientId) as unknown as ActivitySdk;
         sdkRef.current = sdk;
         await sdk.ready();
 
@@ -1254,77 +1195,29 @@ export default function ActivityPage() {
   );
 
   const renderPlayerControls = (iconOnly = false) => (
-    <div className={`activity-controls-panel${iconOnly ? ' activity-icon-controls' : ''}`}>
-      <div className="activity-primary-controls">
-        <ControlButton label="Previous" feedback={controlFeedback === 'back'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('back')}><SkipBack size={18} /></ControlButton>
-        <ControlButton label={status.paused ? 'Resume' : 'Pause'} primary disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => playerAction('toggle')}>
-          {actionBusy === 'toggle' ? <ActivitySpinner /> : status.paused ? <Play size={20} /> : <Pause size={20} />}
-        </ControlButton>
-        <ControlButton label={status.voteSkip ? `Skip ${status.voteSkip.votes}/${status.voteSkip.requiredVotes}` : 'Skip'} feedback={controlFeedback === 'skip'} disabled={!hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('skip')}><SkipForward size={18} /></ControlButton>
-        <ControlButton label="Stop" feedback={controlFeedback === 'stop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('stop')}><Square size={16} /></ControlButton>
-      </div>
-      <div className="activity-secondary-controls">
-        <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queue?.total || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
-        <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
-        {iconOnly && <ControlButton label={`Autoplay ${status.autoplay ? 'on' : 'off'}`} active={status.autoplay} feedback={controlFeedback === 'autoplay'} disabled={!canDj || Boolean(actionBusy)} onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}><Radio size={16} /></ControlButton>}
-        <div className={`activity-volume-control ${volumeOpen ? 'is-open' : ''}`} ref={volumeControlRef}>
-          <button
-            type="button"
-            className="activity-volume-trigger"
-            disabled={!canDj || !status.connected}
-            onClick={() => setVolumeOpen((open) => !open)}
-            aria-label={`Volume ${displayedVolume}%`}
-            aria-expanded={volumeOpen}
-            title={`Volume ${displayedVolume}%`}
-          >
-            <Volume2 size={17} />
-            <i style={{ transform: `scaleX(${displayedVolume / volumeLimit})` }} />
-          </button>
-          {volumeOpen && (
-            <div className="activity-volume-popover" role="group" aria-label="Volume control">
-              <div className="activity-volume-popover-header">
-                <span><Volume2 size={16} /> Volume</span>
-                <output>{displayedVolume}%</output>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={volumeLimit}
-                value={displayedVolume}
-                disabled={!canDj || !status.connected}
-                onPointerDown={(event) => {
-                  if (volumeCommitTimerRef.current) window.clearTimeout(volumeCommitTimerRef.current);
-                  volumeCommitTimerRef.current = null;
-                  volumePendingRef.current = null;
-                  volumeDraggingRef.current = true;
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  setVolumeDraft(Number(event.currentTarget.value));
-                }}
-                onChange={(event) => setVolumeDraft(Number(event.target.value))}
-                onPointerUp={(event) => commitVolume(Number(event.currentTarget.value))}
-                onPointerCancel={() => {
-                  volumeDraggingRef.current = false;
-                  volumePendingRef.current = null;
-                  setVolumeDraft(null);
-                }}
-                onKeyUp={(event) => {
-                  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
-                    commitVolume(Number(event.currentTarget.value));
-                  }
-                }}
-                onBlur={(event) => {
-                  if (volumeDraft !== null && volumePendingRef.current === null) commitVolume(Number(event.currentTarget.value));
-                }}
-                style={{ '--range-progress': `${(displayedVolume / volumeLimit) * 100}%` } as CSSProperties}
-                aria-label="Volume"
-                aria-valuetext={`${displayedVolume}%`}
-              />
-              <div className="activity-volume-scale" aria-hidden="true"><span>0</span><span>{volumeLimit}</span></div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    <ActivityPlayerControls
+      iconOnly={iconOnly}
+      status={status}
+      queueTotal={queue?.total || 0}
+      canDj={canDj}
+      hasTrack={hasTrack}
+      actionBusy={actionBusy}
+      controlFeedback={controlFeedback}
+      loopActive={loopActive}
+      runControlAction={runControlAction}
+      playerAction={playerAction}
+      volumeOpen={volumeOpen}
+      setVolumeOpen={setVolumeOpen}
+      volumeControlRef={volumeControlRef}
+      displayedVolume={displayedVolume}
+      volumeLimit={volumeLimit}
+      volumeCommitTimerRef={volumeCommitTimerRef}
+      volumeDraggingRef={volumeDraggingRef}
+      volumePendingRef={volumePendingRef}
+      volumeDraft={volumeDraft}
+      setVolumeDraft={setVolumeDraft}
+      commitVolume={commitVolume}
+    />
   );
 
   if (phase === 'starting') {
@@ -1499,17 +1392,13 @@ export default function ActivityPage() {
         </>
         )}
 
-        <nav className="activity-panel-nav" aria-label="Player panels">
-          <button type="button" className={activePanel === 'queue' ? 'active' : ''} aria-pressed={activePanel === 'queue'} onClick={() => togglePanel('queue')}>
-            <ListMusic size={18} /><span>Queue</span><em>{queue?.total || 0}</em>
-          </button>
-          <button type="button" className={activePanel === 'search' ? 'active' : ''} aria-pressed={activePanel === 'search'} disabled={!canDj} onClick={() => togglePanel('search')}>
-            <Search size={18} /><span>Add music</span>
-          </button>
-          <button type="button" className={activePanel === 'lyrics' ? 'active' : ''} aria-pressed={activePanel === 'lyrics'} disabled={!hasTrack} onClick={() => togglePanel('lyrics')}>
-            <BookOpenText size={18} /><span>Lyrics</span>
-          </button>
-        </nav>
+        <ActivityPanelNav
+          activePanel={activePanel}
+          queueTotal={queue?.total || 0}
+          canDj={canDj}
+          hasTrack={hasTrack}
+          togglePanel={togglePanel}
+        />
 
         {activePanel && (
           <>
@@ -1553,188 +1442,70 @@ export default function ActivityPage() {
                 }}
                 onDragLeave={(event) => {
                   const nextTarget = event.relatedTarget;
-                  if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                    stopQueueAutoScroll();
-                  }
+                  if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) stopQueueAutoScroll();
                 }}
               >
                 {activePanel === 'queue' && (
-                  <div className="activity-queue-list">
-                    <button
-                      type="button"
-                      className={`activity-queue-state activity-autoplay-toggle ${status.autoplay ? 'active' : ''}`}
-                      disabled={!canDj || Boolean(actionBusy)}
-                      aria-pressed={status.autoplay}
-                      onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}
-                    >
-                      <Radio size={15} /> Autoplay {status.autoplay ? 'on' : 'off'}
-                    </button>
-                    {!queue?.tracks.length ? (
-                      <div className="activity-empty"><Disc3 size={20} /><span>Queue is empty</span></div>
-                    ) : queue.tracks.map((track, index) => (
-                      <div
-                        className={`activity-queue-row ${dropIndex === index ? 'drop-target' : ''}`}
-                        key={`${track.uri}-${index}`}
-                        draggable={canDj && !queueRestore}
-                        onDragStart={() => { stopQueueAutoScroll(); setDragIndex(index); setDropIndex(index); }}
-                        onDragOver={(event) => { if (canDj && !queueRestore) { event.preventDefault(); setDropIndex(index); } }}
-                        onDrop={() => handleQueueDrop(index)}
-                        onDragEnd={() => { stopQueueAutoScroll(); setDragIndex(null); setDropIndex(null); }}
-                      >
-                        <GripVertical size={15} className="activity-drag-icon" />
-                        <div className="activity-queue-index">{index + 1}</div>
-                        <ActivityArtwork src={track.artwork} />
-                        <div className="activity-queue-copy"><strong>{track.title}</strong><span>{track.author} - {track.requester || 'Unknown requester'}</span></div>
-                        <time>{formatMs(track.duration)}</time>
-                        <button type="button" className="activity-queue-remove" disabled={!canDj} onClick={(event) => { event.stopPropagation(); handleQueueRemove(index); }} aria-label={`Remove ${track.title}`} title="Remove from queue"><Trash2 size={14} /></button>
-                      </div>
-                    ))}
-                    {queue && queue.tracks.length < queue.total && (
-                      <button
-                        type="button"
-                        className="activity-queue-load-more"
-                        disabled={queueLoadingMore || Boolean(queueRestore)}
-                        onClick={loadMoreQueue}
-                      >
-                        {queueLoadingMore || queueRestore ? <ActivitySpinner /> : <ChevronDown size={15} />}
-                        {queueRestore ? 'Syncing loaded tracks' : queueLoadingMore ? 'Loading queue' : `Load more (${queue.tracks.length}/${queue.total})`}
-                      </button>
-                    )}
-                  </div>
+                  <ActivityQueuePanel
+                    queue={queue}
+                    status={status}
+                    canDj={canDj}
+                    actionBusy={actionBusy}
+                    queueRestore={queueRestore}
+                    dragIndex={dragIndex}
+                    dropIndex={dropIndex}
+                    queueLoadingMore={queueLoadingMore}
+                    setDragIndex={setDragIndex}
+                    setDropIndex={setDropIndex}
+                    stopQueueAutoScroll={stopQueueAutoScroll}
+                    runControlAction={runControlAction}
+                    handleQueueDrop={handleQueueDrop}
+                    handleQueueRemove={handleQueueRemove}
+                    loadMoreQueue={loadMoreQueue}
+                  />
                 )}
 
                 {activePanel === 'search' && (
-                  <div className="activity-search-panel">
-                    <div className="activity-search-box">
-                      <Search size={18} />
-                      <input
-                        value={searchQuery}
-                        onChange={(event) => setSearchQuery(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'Enter') return;
-                          event.preventDefault();
-                          submitSearch();
-                        }}
-                        placeholder="Search YouTube or paste a link"
-                        aria-label="Search for a track"
-                      />
-                      <button type="button" onClick={submitSearch} disabled={searching || !searchQuery.trim()} aria-label="Search">
-                        {searching ? <ActivitySpinner /> : <ChevronDown size={17} className="activity-search-arrow" />}
-                      </button>
-                    </div>
-                    <div className="activity-upload-row">
-                      <input type="file" accept=".mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.webm,audio/*" className="sr-only" id="activity-upload" disabled={!canDj} onChange={handleUploadSelection} />
-                      <label htmlFor="activity-upload" className={`activity-upload-picker ${!canDj ? 'disabled' : ''}`}><Upload size={15} /> Choose audio</label>
-                      {uploadFile && (
-                        <>
-                          <span className="activity-upload-name" title={uploadFile.name}>{uploadFile.name}</span>
-                          <button type="button" className="activity-upload-submit" disabled={uploading || !canDj} onClick={handleUpload}>
-                            {uploading ? <ActivitySpinner /> : <FileAudio size={15} />} {uploading ? 'Uploading' : 'Queue'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    {(searchPlaylist || searchResults.length > 0) && (
-                      <div className="activity-search-results">
-                        {searchPlaylist && (
-                          <div className="activity-search-playlist">
-                            <ActivityArtwork src={searchPlaylist.artwork} />
-                            <span>
-                              <strong>{searchPlaylist.name}</strong>
-                              <small>
-                                {searchPlaylist.trackCount} tracks - {formatMs(searchPlaylist.totalDuration)}
-                                {searchPlaylist.truncated ? ' - first 500 loaded' : ''}
-                              </small>
-                            </span>
-                            <button
-                              type="button"
-                              disabled={!canDj || Boolean(actionBusy)}
-                              onClick={addSearchPlaylist}
-                              title={hasTrack ? 'Add playlist to queue' : 'Play playlist'}
-                              aria-label={hasTrack ? `Add ${searchPlaylist.name} to queue` : `Play ${searchPlaylist.name}`}
-                            >
-                              {hasTrack ? <ListPlus size={15} /> : <Play size={15} />}
-                            </button>
-                          </div>
-                        )}
-                        {searchResults.map((track, index) => (
-                          <div key={`${track.uri}-${index}`} className="activity-search-result">
-                            <ActivityArtwork src={track.artwork} />
-                            <span><strong>{track.title}</strong><small>{track.author} - {formatMs(track.duration)}</small></span>
-                            <div className="activity-search-actions">
-                              {hasTrack && (
-                                <button type="button" disabled={!canDj || Boolean(actionBusy)} onClick={() => playSearchResult(track, 'now')} title="Play now" aria-label={`Play ${track.title} now`}><Play size={15} /></button>
-                              )}
-                              <button type="button" disabled={!canDj || Boolean(actionBusy)} onClick={() => playSearchResult(track, 'queue')} title={hasTrack ? 'Add to queue' : 'Play'} aria-label={hasTrack ? `Add ${track.title} to queue` : `Play ${track.title}`}>
-                                {hasTrack ? <ListPlus size={15} /> : <Play size={15} />}
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {!searching && searchResults.length === 0 && searchCompletedQuery === searchQuery.trim() && searchCompletedQuery && (
-                      <div className="activity-search-empty" role="status">
-                        <span><Search size={21} /></span>
-                        <strong>No results found</strong>
-                        <p>Try another title or artist, or paste a direct track link.</p>
-                      </div>
-                    )}
-                  </div>
+                  <ActivitySearchPanel
+                    canDj={canDj}
+                    hasTrack={hasTrack}
+                    actionBusy={actionBusy}
+                    searchQuery={searchQuery}
+                    searching={searching}
+                    searchPlaylist={searchPlaylist}
+                    searchResults={searchResults}
+                    searchCompletedQuery={searchCompletedQuery}
+                    uploadFile={uploadFile}
+                    uploading={uploading}
+                    onQueryChange={setSearchQuery}
+                    submitSearch={submitSearch}
+                    handleUploadSelection={handleUploadSelection}
+                    handleUpload={handleUpload}
+                    addSearchPlaylist={addSearchPlaylist}
+                    playSearchResult={playSearchResult}
+                  />
                 )}
 
                 {activePanel === 'lyrics' && (
-                  <div className="activity-lyrics-panel">
-                    <div className="activity-lyrics-actions">
-                      <button
-                        type="button"
-                        className={`activity-lyrics-refresh ${lyricsSyncEnabled ? 'active' : ''}`}
-                        onClick={() => setLyricsSyncEnabled((enabled) => !enabled)}
-                        disabled={lyricsLoading || syncedLyrics.length === 0}
-                      >
-                        <AudioLines size={15} /> {lyricsSyncEnabled ? 'Live sync on' : 'Live sync'}
-                      </button>
-                      <button
-                        type="button"
-                        className={`activity-lyrics-refresh ${karaokeEnabled ? 'active' : ''}`}
-                        onClick={() => {
-                          const nextEnabled = !karaokeEnabled;
-                          setLyricsSyncEnabled(nextEnabled);
-                          setKaraokeEnabled(nextEnabled);
-                          closePanel();
-                        }}
-                        disabled={lyricsLoading || syncedLyrics.length === 0}
-                      >
-                        <Mic2 size={15} /> {karaokeEnabled ? 'Karaoke on' : 'Karaoke'}
-                      </button>
-                      <button type="button" className="activity-lyrics-refresh" onClick={loadLyrics} disabled={lyricsLoading}>{lyricsLoading ? <ActivitySpinner /> : 'Refresh'}</button>
-                    </div>
-                    {lyricsLoading ? (
-                      <div className="activity-empty"><ActivitySpinner /><span>Loading lyrics</span></div>
-                    ) : lyricsError ? (
-                      <div className="activity-lyrics-error">
-                        <span><BookOpenText size={20} /></span>
-                        <strong>Lyrics unavailable</strong>
-                        <p>{lyricsError}</p>
-                      </div>
-                    ) : lyricsSyncEnabled && syncedLyrics.length ? (
-                      <div className="activity-lyrics-list" ref={lyricsListRef} aria-live="polite">
-                        {syncedLyrics.map((line, index) => (
-                          <p
-                            key={`${line.time}-${index}`}
-                            ref={index === activeLyricIndex ? activeLyricRef : null}
-                            className={index === activeLyricIndex ? 'active' : ''}
-                          >
-                            {line.text}
-                          </p>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="activity-lyrics-plain">
-                        {lyrics?.plainLyrics || syncedLyrics.map((line) => line.text).join('\n') || 'No lyrics available for this track.'}
-                      </div>
-                    )}
-                  </div>
+                  <ActivityLyricsPanel
+                    lyricsSyncEnabled={lyricsSyncEnabled}
+                    karaokeEnabled={karaokeEnabled}
+                    lyricsLoading={lyricsLoading}
+                    syncedLyrics={syncedLyrics}
+                    lyricsError={lyricsError}
+                    plainLyrics={lyrics?.plainLyrics}
+                    activeLyricIndex={activeLyricIndex}
+                    lyricsListRef={lyricsListRef}
+                    activeLyricRef={activeLyricRef}
+                    onToggleSync={() => setLyricsSyncEnabled((enabled) => !enabled)}
+                    onToggleKaraoke={() => {
+                      const nextEnabled = !karaokeEnabled;
+                      setLyricsSyncEnabled(nextEnabled);
+                      setKaraokeEnabled(nextEnabled);
+                      closePanel();
+                    }}
+                    loadLyrics={loadLyrics}
+                  />
                 )}
               </div>
             </aside>
@@ -1742,38 +1513,5 @@ export default function ActivityPage() {
         )}
       </div>
     </main>
-  );
-}
-
-function ControlButton({
-  label,
-  disabled,
-  primary,
-  active,
-  feedback,
-  onClick,
-  children,
-}: {
-  label: string;
-  disabled?: boolean;
-  primary?: boolean;
-  active?: boolean;
-  feedback?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      className={`activity-control-button${primary ? ' primary' : ''}${active ? ' is-active' : ''}${feedback ? ' is-feedback' : ''}`}
-      disabled={disabled}
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      aria-pressed={active === undefined ? undefined : active}
-    >
-      {children}
-      <span>{label}</span>
-    </button>
   );
 }

@@ -5,6 +5,11 @@ services:
       dockerfile: Dockerfile
     container_name: breadmusic-lavalink
     restart: always
+    init: true
+    mem_limit: ${LAVALINK_MEMORY_LIMIT:-1024m}
+    mem_reservation: ${LAVALINK_MEMORY_RESERVATION:-512m}
+    cpus: ${LAVALINK_CPU_LIMIT:-2.0}
+    pids_limit: 256
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml
       - ./lavalink/plugins:/opt/Lavalink/plugins
@@ -28,6 +33,11 @@ services:
       target: bot
     container_name: breadmusic-bot
     restart: always
+    init: true
+    mem_limit: ${BOT_MEMORY_LIMIT:-768m}
+    mem_reservation: ${BOT_MEMORY_RESERVATION:-256m}
+    cpus: ${BOT_CPU_LIMIT:-1.5}
+    pids_limit: 256
     depends_on:
       lavalink:
         condition: service_healthy
@@ -47,6 +57,7 @@ services:
       - WEB_HOST=0.0.0.0
       - WEB_URL=${WEB_URL:-http://localhost:3000}
       - SESSION_SECRET=${SESSION_SECRET}
+      - UPLOAD_SIGNING_SECRET=${UPLOAD_SIGNING_SECRET:-}
       - AUTOPLAY_LOG_LEVEL=${AUTOPLAY_LOG_LEVEL:-warn}
       - GEMINI_AUTOPLAY_ENABLED=${GEMINI_AUTOPLAY_ENABLED:-true}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -63,6 +74,12 @@ services:
       - ./data:/app/data
     networks:
       - breadmusic-network
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/api/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   web:
     build:
@@ -71,8 +88,14 @@ services:
       target: web
     container_name: breadmusic-web
     restart: always
+    init: true
+    mem_limit: ${WEB_MEMORY_LIMIT:-512m}
+    mem_reservation: ${WEB_MEMORY_RESERVATION:-128m}
+    cpus: ${WEB_CPU_LIMIT:-1.0}
+    pids_limit: 256
     depends_on:
-      - bot
+      bot:
+        condition: service_healthy
     environment:
       - NEXT_PUBLIC_API_URL=http://bot:3001
       - NODE_ENV=production
@@ -80,6 +103,12 @@ services:
       - "3000:3000"
     networks:
       - breadmusic-network
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 networks:
   breadmusic-network:

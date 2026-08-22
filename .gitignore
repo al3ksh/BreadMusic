@@ -33,6 +33,7 @@ coverage/
 .cache/
 .tmp/
 .next/
+web/test-results/
 out/
 
 # Bot data (queues/config backups)

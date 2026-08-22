@@ -53,7 +53,14 @@ const {
   BUTTON_PREFIX: BLACKJACK_BUTTON_PREFIX,
 } = require('./games/blackjack');
 const { hasBalance, addBalance, removeBalance, getBalance } = require('./games/economy');
-const { handleAutoplay, scheduleAutoplayPrefetch, clearAutoplayState, addToRecentTracks } = require('./music/autoplay');
+const {
+  handleAutoplay,
+  scheduleAutoplayPrefetch,
+  clearAutoplayState,
+  addToRecentTracks,
+  blockAutoplayAfterPlaybackFailure,
+  resumeAutoplayAfterPlaybackSuccess,
+} = require('./music/autoplay');
 const {
   clearVoiceTrackStatus,
   handleVoiceStatusGatewayEvent,
@@ -296,7 +303,7 @@ client.on(Events.MessageCreate, safeEventHandler('DirectMessage', async (message
   await processDirectMessage(message);
 }));
 
-client.once(Events.ClientReady, async (readyClient) => {
+client.once(Events.ClientReady, safeEventHandler('ClientReady', async (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   client.lavalink.init({
     id: readyClient.user.id,
@@ -321,9 +328,9 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   startActivityRotation();
   await restoreTwentyFourSevenPlayers();
-});
+}));
 
-client.on(Events.InteractionCreate, async (interaction) => {
+client.on(Events.InteractionCreate, safeEventHandler('InteractionCreate', async (interaction) => {
   if (isShuttingDown) return;
 
   if (interaction.guildId && !isGuildAllowed(config.guildAccess, interaction.guildId)) {
@@ -410,9 +417,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } catch (error) {
     await handleInteractionError(interaction, error);
   }
-});
+}));
 
-client.on(Events.GuildCreate, async (guild) => {
+client.on(Events.GuildCreate, safeEventHandler('GuildCreate', async (guild) => {
   if (isGuildAllowed(config.guildAccess, guild.id)) return;
 
   console.warn(`[GuildAccess] Unauthorized guild joined: ${guild.name} (${guild.id})`);
@@ -427,7 +434,7 @@ client.on(Events.GuildCreate, async (guild) => {
   await channel.send({
     content: buildAccessDeniedMessage(config.guildAccess),
   }).catch(() => {});
-});
+}));
 
 client.on(Events.VoiceStateUpdate, safeEventHandler('VoiceStateUpdate', async (oldState, newState) => {
   const guildId = newState.guild?.id ?? oldState.guild?.id;
@@ -449,6 +456,7 @@ client.on(Events.VoiceStateUpdate, safeEventHandler('VoiceStateUpdate', async (o
 }));
 
 client.lavalink.on('trackStart', safeEventHandler('trackStart', async (player, track) => {
+  resumeAutoplayAfterPlaybackSuccess(player.guildId);
   await clearVoteSkip(player.guildId);
   clearIdleTimer(player.guildId);
   addToRecentTracks(player.guildId, track);
@@ -526,7 +534,7 @@ client.lavalink.nodeManager.on('disconnect', (node, reason) => {
   
   nodeReconnectAttempts.set(node.id, attempts + 1);
   
-  setTimeout(() => {
+  const reconnectTimer = setTimeout(() => {
     if (isShuttingDown) return;
     if (node?.connected === false && typeof node?.connect === 'function') {
       const result = node.connect();
@@ -535,6 +543,7 @@ client.lavalink.nodeManager.on('disconnect', (node, reason) => {
       }
     }
   }, delay);
+  reconnectTimer.unref?.();
 });
 
 client.lavalink.nodeManager.on('connect', (node) => {
@@ -557,6 +566,7 @@ const recoverPlaybackFailure = createPlaybackRecovery({
   refreshPlayer: (player) => client.musicUI.refresh(player),
   scheduleIdleLeave: (player) => scheduleIdleLeave(player, client),
   broadcastPlayerUpdate,
+  suspendAutoplay: blockAutoplayAfterPlaybackFailure,
 });
 
 client

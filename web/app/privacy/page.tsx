@@ -4,7 +4,7 @@ export default function PrivacyPage() {
       <div className="max-w-3xl mx-auto rounded-xl border border-border bg-bg-card p-6 sm:p-8">
         <p className="text-xs uppercase tracking-wider text-text-muted">Legal</p>
         <h1 className="text-2xl font-bold mt-2 text-text-primary">Privacy Policy</h1>
-        <p className="text-sm text-text-secondary mt-2">Last updated: 2026-06-14</p>
+        <p className="text-sm text-text-secondary mt-2">Last updated: 2026-08-17</p>
 
         <div className="mt-6 space-y-5 text-sm text-text-secondary leading-relaxed">
           <section>
@@ -24,6 +24,7 @@ export default function PrivacyPage() {
               <li>Economy balances and cooldown timestamps associated with Discord user IDs.</li>
               <li>Uploaded audio files, original filenames, and technical metadata.</li>
               <li>Messages and attachments briefly fetched for live chat, plus Remote Control content sent to Discord.</li>
+              <li>Direct messages sent to Bread, used only to return the automated help response.</li>
               <li>Request, error, and security logs that may include timestamps, routes, and IP addresses.</li>
             </ul>
           </section>
@@ -57,9 +58,12 @@ export default function PrivacyPage() {
             <h2 className="text-base font-semibold text-text-primary">Third-party services</h2>
             <p className="mt-2">
               Bread communicates with Discord for authentication and bot functionality, LRCLIB for lyrics,
-              and configured providers such as YouTube, Spotify, SoundCloud, and Bandcamp for search and playback.
-              These providers receive the requests and connection data needed to answer them and process data under
-              their own privacy terms. Hosting and reverse-proxy providers may also process network and operational data.
+              Google Gemini for optional autoplay discovery and ranking, and configured providers such as YouTube,
+              Spotify, SoundCloud, and Bandcamp for search and playback.
+              For Gemini autoplay, Bread sends music metadata such as the title, artist and source context, not
+              Discord IDs or usernames. These providers receive the requests and connection data needed to answer
+              them and process data under their own privacy terms. Hosting and reverse-proxy providers may also
+              process network and operational data.
             </p>
           </section>
 
@@ -67,7 +71,8 @@ export default function PrivacyPage() {
             <h2 className="text-base font-semibold text-text-primary">Sharing and automated decisions</h2>
             <p className="mt-2">
               We do not sell personal data or use it for advertising. Data is shared only with providers needed
-              to operate Bread, when an authorized server user invokes a feature, or when required by law.
+              to operate Bread, when an authorized server user invokes a feature, or when required by law. Gemini
+              produces music suggestions and rankings only; it does not make decisions about users or access.
               Bread does not make decisions that produce legal or similarly significant effects.
             </p>
           </section>

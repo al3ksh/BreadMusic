@@ -2,6 +2,9 @@ server:
   port: 2333
 
 lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:f45bbb7aebfcbc1c553769e04af6cd43afa8b7c3"
+      snapshot: true
   server:
     password: "${LAVALINK_PASSWORD}"
     bufferDurationMs: 400
@@ -20,6 +23,14 @@ plugins:
   youtube:
     enabled: true
     allowSearch: true
+    clients:
+      - MUSIC
+      - TV
+      - TVHTML5_SIMPLY
+      - MWEB
+      - WEB
+      - ANDROID_VR
+      - WEBEMBEDDED
     remoteCipher:
       url: "https://cipher.kikkia.dev/"
       userAgent: "BreadMusic"

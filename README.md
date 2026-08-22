@@ -96,7 +96,7 @@ Discovery is refreshed for each autoplay cycle. The result is prefetched, rankin
 
 ### Discord Activity
 
-- Opens from a voice channel and joins that channel automatically.
+- Opens from a voice channel without joining automatically; the first playback action joins the selected/current voice channel.
 - Shows the live player, queue, artwork, requester, seek position and volume.
 - Provides a compact mini-player with queue, search and lyrics drawers.
 - Searches while typing after a one-second pause; YouTube, Spotify, SoundCloud and other supported URLs can be pasted directly.
@@ -209,10 +209,22 @@ Audio uploads are limited to 256 MB per file and 1 GB for the shared
 `data/uploads` directory by default. When the quota is reached, the oldest
 uploads are removed first, except files currently used by a player or queue.
 Persistent queues are protected as well, including while the bot is restarting.
+Playback URLs are HMAC-signed and expire after 24 hours. Persistent queue entries
+receive a fresh signed URL when they are restored after a restart. Set a dedicated
+secret when the upload endpoint should not share the session secret:
 
 ```ini
 UPLOAD_STORAGE_LIMIT_MB=1024
+UPLOAD_SIGNING_SECRET=long_random_value
 ```
+
+The Compose deployment also applies bounded CPU and memory defaults to Lavalink,
+the bot and the web process. Override `LAVALINK_*_LIMIT`, `BOT_*_LIMIT` or
+`WEB_*_LIMIT` variables only when the host needs different limits.
+
+The API exposes `GET /api/healthz` for container monitoring. It returns `200`
+only when Discord is ready and at least one Lavalink node is connected; otherwise
+it returns `503` without exposing guild or user data.
 
 ### Private guild access
 

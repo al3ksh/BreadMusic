@@ -45,3 +45,38 @@ test('playback recovery starts autoplay when a failed track was last in queue', 
   assert.equal(await recover({ player, track: {}, payload: {}, label: 'TrackStuck' }), true);
   assert.deepEqual(events, ['notice', 'stop', 'clear', 'refresh', 'idle', 'broadcast:guild']);
 });
+
+test('playback recovery suspends autoplay before stopping a failed final track', async () => {
+  const events = [];
+  const recover = createPlaybackRecovery({
+    recoverySet: new Set(),
+    isPlayerStopping: () => false,
+    suspendAutoplay: (guildId) => events.push(`suspend:${guildId}`),
+    sendPlaybackError: () => events.push('notice'),
+    handleAutoplay: async () => {
+      events.push('autoplay');
+      return false;
+    },
+    clearVoiceTrackStatus: async () => events.push('clear'),
+    refreshPlayer: async () => events.push('refresh'),
+    scheduleIdleLeave: () => events.push('idle'),
+    broadcastPlayerUpdate: (guildId) => events.push(`broadcast:${guildId}`),
+  });
+  const player = {
+    guildId: 'guild',
+    queue: { tracks: [] },
+    stopPlaying: async () => events.push('stop'),
+  };
+
+  assert.equal(await recover({ player, track: {}, payload: {}, label: 'TrackError' }), true);
+  assert.deepEqual(events, [
+    'suspend:guild',
+    'notice',
+    'stop',
+    'autoplay',
+    'clear',
+    'refresh',
+    'idle',
+    'broadcast:guild',
+  ]);
+});

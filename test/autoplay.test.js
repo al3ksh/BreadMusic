@@ -2,8 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   addManualSeed,
+  blockAutoplayAfterPlaybackFailure,
   clearAutoplayState,
   recordAutoplaySkip,
+  resumeAutoplayAfterPlaybackSuccess,
   __testing,
 } = require('../src/music/autoplay');
 
@@ -20,6 +22,23 @@ function track(title, author, identifier, overrides = {}) {
     },
   };
 }
+
+test('playback failures suspend autoplay until playback succeeds or a manual seed is added', () => {
+  const guildId = 'autoplay-playback-failure';
+  clearAutoplayState(guildId);
+
+  blockAutoplayAfterPlaybackFailure(guildId);
+  assert.equal(__testing.isPlaybackFailureBlocked(guildId), true);
+
+  resumeAutoplayAfterPlaybackSuccess(guildId);
+  assert.equal(__testing.isPlaybackFailureBlocked(guildId), false);
+
+  blockAutoplayAfterPlaybackFailure(guildId);
+  addManualSeed(guildId, track('Manual retry', 'Artist', 'aaaaaaaaaaa'));
+  assert.equal(__testing.isPlaybackFailureBlocked(guildId), false);
+
+  clearAutoplayState(guildId);
+});
 
 test('manual autoplay seeds accumulate and rotate instead of replacing each other', () => {
   const guildId = 'autoplay-manual-pool';

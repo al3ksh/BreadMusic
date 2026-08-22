@@ -1,5 +1,7 @@
+const fs = require('fs');
 const { FileStore } = require('./fileStore');
 const { getConfig } = require('./guildConfig');
+const { createSignedUploadUrl, getUploadPlaybackBaseUrl } = require('../music/uploadUrls');
 
 const queueStore = new FileStore('queues.json', {});
 
@@ -40,6 +42,11 @@ function packLocalUpload(localUpload) {
 }
 
 async function decodeTrack(node, entry, fallbackRequester) {
+  if (entry?.localUpload) {
+    const refreshed = await refreshLocalUploadTrack(node, entry, fallbackRequester);
+    if (refreshed) return refreshed;
+  }
+
   const encoded = typeof entry === 'string' ? entry : entry?.encoded;
   if (!encoded) return null;
   try {
@@ -57,6 +64,42 @@ async function decodeTrack(node, entry, fallbackRequester) {
     if (entry?.localUpload) decoded.localUpload = entry.localUpload;
     if (entry?.isAutoplay) decoded.isAutoplay = true;
     return decoded;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshLocalUploadTrack(node, entry, fallbackRequester) {
+  const localUpload = entry?.localUpload;
+  if (!localUpload || typeof localUpload !== 'object') return null;
+  if (!localUpload.guildId || !localUpload.uploadId || !localUpload.fileName) return null;
+
+  try {
+    await fs.promises.access(localUpload.filePath, fs.constants.R_OK);
+    const playbackUrl = createSignedUploadUrl({
+      baseUrl: getUploadPlaybackBaseUrl(),
+      guildId: localUpload.guildId,
+      uploadId: localUpload.uploadId,
+      fileName: localUpload.fileName,
+    });
+    const requester = entry.requester || fallbackRequester;
+    const result = await node.search({ query: playbackUrl }, requester);
+    const track = result?.tracks?.[0];
+    if (!track) return null;
+
+    return {
+      ...track,
+      info: {
+        ...track.info,
+        ...entry.info,
+        uri: playbackUrl,
+        sourceName: 'localUpload',
+        isLocalUpload: true,
+      },
+      requester: entry.requester || track.requester,
+      localUpload,
+      isAutoplay: Boolean(entry.isAutoplay),
+    };
   } catch {
     return null;
   }
@@ -161,6 +204,7 @@ function flushQueueStore() {
 module.exports = {
   savePlayerState,
   hydratePlayer,
+  refreshLocalUploadTrack,
   clearStoredQueue,
   getStoredLocalUploadPaths,
   flushQueueStore,

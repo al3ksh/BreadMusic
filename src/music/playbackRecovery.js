@@ -7,6 +7,7 @@ function createPlaybackRecovery({
   refreshPlayer,
   scheduleIdleLeave,
   broadcastPlayerUpdate,
+  suspendAutoplay = () => {},
   onError = (error, label, guildId) => console.error(`[${label}] Failed to recover guild ${guildId}:`, error),
 }) {
   if (!(recoverySet instanceof Set)) {
@@ -19,6 +20,8 @@ function createPlaybackRecovery({
 
     recoverySet.add(guildId);
     try {
+      suspendAutoplay(guildId, { player, track, payload, label });
+
       await Promise.resolve(sendPlaybackError(player, track, payload)).catch((error) => {
         console.warn(`[${label}] Failed to send playback error for guild ${guildId}:`, error.message);
       });

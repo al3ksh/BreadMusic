@@ -9,6 +9,7 @@ const currentAutoplaySeed = new Map();
 const autoplayInProgress = new Set();
 const autoplayEpoch = new Map();
 const autoplayBlockedUntil = new Map();
+const autoplayPlaybackFailureBlocks = new Set();
 const autoplayPrefetch = new Map();
 
 const MAX_RECENT_TRACKS = 40;
@@ -125,6 +126,7 @@ function isAutoplayEnabled(guildId) {
 
 function setAutoplay(guildId, enabled) {
   setConfig(guildId, { autoplay: enabled });
+  if (enabled) autoplayPlaybackFailureBlocks.delete(guildId);
   if (!enabled) {
     clearAutoplayPrefetch(guildId);
     recentTracks.delete(guildId);
@@ -462,6 +464,7 @@ function addManualSeed(guildId, trackOrInfo, options = {}) {
   manualSeedCursors.set(guildId, 0);
   currentAutoplaySeed.delete(guildId);
   autoplayBlockedUntil.delete(guildId);
+  autoplayPlaybackFailureBlocks.delete(guildId);
   if (options.invalidatePrefetch !== false) clearAutoplayPrefetch(guildId);
   logAutoplay('debug', `Manual seed added (${next.length}/${MAX_MANUAL_SEEDS}): "${info.title}" by ${info.author || 'unknown'}`);
   return true;
@@ -1155,6 +1158,7 @@ async function handleAutoplay(player, lastTrack, client) {
   const epoch = autoplayEpoch.get(guildId) || 0;
 
   if (!isAutoplayEnabled(guildId)) return false;
+  if (autoplayPlaybackFailureBlocks.has(guildId)) return false;
   if ((autoplayBlockedUntil.get(guildId) || 0) > Date.now()) return false;
   if (player.queue.tracks.length > 0) return false;
   if (player.queue.current && player.playing) return false;
@@ -1190,6 +1194,24 @@ async function handleAutoplay(player, lastTrack, client) {
   }
 }
 
+function blockAutoplayAfterPlaybackFailure(guildId) {
+  if (!guildId) return;
+
+  const wasBlocked = autoplayPlaybackFailureBlocks.has(guildId);
+  autoplayPlaybackFailureBlocks.add(guildId);
+  autoplayEpoch.set(guildId, (autoplayEpoch.get(guildId) || 0) + 1);
+  clearAutoplayPrefetch(guildId);
+
+  if (!wasBlocked) {
+    logAutoplay('warn', `Suspended for guild ${guildId} after a playback failure; waiting for a successful or manual track`);
+  }
+}
+
+function resumeAutoplayAfterPlaybackSuccess(guildId) {
+  if (!guildId) return;
+  autoplayPlaybackFailureBlocks.delete(guildId);
+}
+
 function clearAutoplayState(guildId) {
   autoplayEpoch.set(guildId, (autoplayEpoch.get(guildId) || 0) + 1);
   autoplayBlockedUntil.set(guildId, Date.now() + 15_000);
@@ -1199,6 +1221,7 @@ function clearAutoplayState(guildId) {
   manualSeedPools.delete(guildId);
   manualSeedCursors.delete(guildId);
   currentAutoplaySeed.delete(guildId);
+  autoplayPlaybackFailureBlocks.delete(guildId);
   resetGeminiAutoplayState(guildId);
 }
 
@@ -1222,6 +1245,8 @@ module.exports = {
   scheduleAutoplayPrefetch,
   clearAutoplayPrefetch,
   clearAutoplayState,
+  blockAutoplayAfterPlaybackFailure,
+  resumeAutoplayAfterPlaybackSuccess,
   addToRecentTracks,
   recordAutoplaySkip,
   addManualSeed,
@@ -1234,5 +1259,6 @@ module.exports = {
     selectManualSeeds,
     selectCandidate,
     wasRecentlySkipped,
+    isPlaybackFailureBlocked: (guildId) => autoplayPlaybackFailureBlocks.has(guildId),
   },
 };
