@@ -3,7 +3,10 @@ const NOT_FOUND_CACHE_TTL_MS = 15 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 500;
 const REQUEST_TIMEOUT_MS = 12_000;
 const REQUEST_ATTEMPTS = 3;
+const MAX_QUERY_VARIANTS = 5;
 const LRCLIB_BASE_URL = 'https://lrclib.net/api';
+const MUSICBRAINZ_BASE_URL = 'https://musicbrainz.org/ws/2';
+const ISRC_PATTERN = /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/;
 const cache = new Map();
 const inFlight = new Map();
 
@@ -14,18 +17,91 @@ class LyricsProviderError extends Error {
   }
 }
 
+const BRACKET_NOISE_PATTERN = /[\[(][^\])]*(official|video|audio|lyric|visualizer|m\/v|\bmv\b|\bhd\b|\bhq\b|4k|color\s*coded|performance|stage\s*(mix|video)|comeback)[^\])]*[\])]/gi;
+const DASHED_VIDEO_PATTERN = /\s*[-–—|]\s*(official\s+)?(music\s+)?(video|audio|lyric(s)?(\s+video)?|visualizer|performance\s+video)\s*$/i;
+const PROD_BRACKET_PATTERN = /\s*[\[(]\s*prod(?:uced)?\.?(?:\s*by\b[^\])]*)?[\])]/gi;
+const PROD_DASH_PATTERN = /\s+[-–—]\s+prod(?:uced)?\.?(?:\s*by\b\s+.+)?$/i;
+const FEAT_PATTERN = /\s*[\[(]?\s*\b(?:ft|feat|featuring)\b\.?\s+[^\])]+[\])]?/gi;
+const CHANNEL_SUFFIXES = [
+  /\s+-\s+topic$/i,
+  /\s*vevo$/i,
+  /\s+official(\s+artist(\s+channel)?)?$/i,
+  /\s+offizielles?\s+kanal$/i,
+];
+
 function cleanTrackTitle(value) {
   return String(value || '')
-    .replace(/\s*[\[(](official\s+)?(music\s+)?(video|audio|lyric(s)?|visualizer)[\])]\s*/gi, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(PROD_DASH_PATTERN, ' ')
+    .replace(BRACKET_NOISE_PATTERN, ' ')
+    .replace(PROD_BRACKET_PATTERN, ' ')
+    .replace(DASHED_VIDEO_PATTERN, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function stripFeaturedArtists(value) {
+  return String(value || '')
+    .replace(FEAT_PATTERN, ' ')
+    .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
 function cleanArtist(value) {
+  let artist = String(value || '');
+  for (const pattern of CHANNEL_SUFFIXES) artist = artist.replace(pattern, '');
+  return stripFeaturedArtists(artist.replace(/\s{2,}/g, ' ').trim());
+}
+
+function primaryArtistName(value) {
+  const cleaned = cleanArtist(value);
+  if (!cleaned) return '';
+  const primary = cleaned.split(/\s*,\s*|\s*&\s*/)[0].trim();
+  return primary || cleaned;
+}
+
+function stripBracketedContent(value) {
   return String(value || '')
-    .replace(/\s*-\s*topic$/i, '')
-    .replace(/\s+/g, ' ')
+    .replace(/[\[(][^\])]*[\])]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+function splitArtistFromTitle(title) {
+  const match = String(title || '').match(/^(.{2,40}?)\s+[-–—]\s+(.+)$/);
+  if (!match) return null;
+  const candidate = cleanArtist(match[1]);
+  const remainder = cleanTrackTitle(match[2]);
+  if (!candidate || !remainder) return null;
+  return { artist: candidate, title: remainder };
+}
+
+function buildQueryVariants(normalized) {
+  const variants = [];
+  const push = (artist, title) => {
+    const cleanArtistValue = String(artist || '').trim();
+    const cleanTitleValue = cleanTrackTitle(title);
+    if (!cleanArtistValue || !cleanTitleValue) return;
+    const key = `${cleanArtistValue.toLowerCase()}|${cleanTitleValue.toLowerCase()}`;
+    if (variants.some((variant) => variant.key === key)) return;
+    variants.push({ key, artist: cleanArtistValue, title: cleanTitleValue });
+  };
+
+  push(normalized.artist, normalized.title);
+
+  if (normalized.isrc && Array.isArray(normalized.isrcMetadata)) {
+    for (const metadata of normalized.isrcMetadata) push(metadata.artist, metadata.title);
+  }
+
+  const embedded = splitArtistFromTitle(normalized.title);
+  if (embedded) push(embedded.artist, embedded.title);
+
+  const withoutBrackets = stripBracketedContent(normalized.title);
+  if (withoutBrackets !== normalized.title) push(normalized.artist, withoutBrackets);
+
+  push(primaryArtistName(normalized.artist), stripFeaturedArtists(cleanTrackTitle(normalized.title)));
+  if (embedded) push(primaryArtistName(embedded.artist), stripFeaturedArtists(embedded.title));
+
+  return variants.slice(0, MAX_QUERY_VARIANTS).map(({ artist, title }) => ({ artist, title }));
 }
 
 function makeCacheKey(artist, title, duration) {
@@ -80,7 +156,7 @@ async function fetchJson(url, options = {}) {
         signal: controller.signal,
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'Bread Discord Music Bot',
+          'User-Agent': options.userAgent || 'Bread Discord Music Bot',
         },
       });
       if (response.status === 404) return null;
@@ -111,13 +187,35 @@ async function fetchJson(url, options = {}) {
   throw new LyricsProviderError('Lyrics provider did not respond in time.', lastError);
 }
 
-async function lookupLyrics(normalized) {
-  const durationSeconds = Math.round(normalized.duration / 1000);
-  const exactParams = new URLSearchParams({
-    artist_name: normalized.artist,
-    track_name: normalized.title,
+function isIsrc(value) {
+  return ISRC_PATTERN.test(String(value || '').toUpperCase());
+}
+
+async function resolveIsrcMetadata(isrc) {
+  if (!isIsrc(isrc)) return null;
+  const params = new URLSearchParams({ fmt: 'json', inc: 'artist-credits' });
+  const data = await fetchJson(`${MUSICBRAINZ_BASE_URL}/isrc/${encodeURIComponent(isrc.toUpperCase())}?${params}`, {
+    attempts: 1,
+    userAgent: 'Bread Discord Music Bot (github.com/al3ksh/BreadMusic)',
   });
-  if (normalized.album) exactParams.set('album_name', normalized.album);
+  const recordings = Array.isArray(data?.recordings) ? data.recordings : [];
+  for (const recording of recordings) {
+    const credit = recording?.['artist-credit']?.find((entry) => entry?.artist?.name);
+    if (!recording?.title || !credit) continue;
+    return { artist: credit.artist.name, title: cleanTrackTitle(recording.title) };
+  }
+  return null;
+}
+
+async function lookupLyrics(normalized, variant, index) {
+  const durationSeconds = index === 0 && normalized.duration > 0
+    ? Math.round(normalized.duration / 1000)
+    : 0;
+  const exactParams = new URLSearchParams({
+    artist_name: variant.artist,
+    track_name: variant.title,
+  });
+  if (variant.album) exactParams.set('album_name', variant.album);
   if (durationSeconds > 0) exactParams.set('duration', String(durationSeconds));
 
   let data = await fetchJson(`${LRCLIB_BASE_URL}/get?${exactParams}`);
@@ -125,8 +223,8 @@ async function lookupLyrics(normalized) {
 
   if (!result) {
     const searchParams = new URLSearchParams({
-      artist_name: normalized.artist,
-      track_name: normalized.title,
+      artist_name: variant.artist,
+      track_name: variant.title,
     });
     data = await fetchJson(`${LRCLIB_BASE_URL}/search?${searchParams}`);
     if (Array.isArray(data)) {
@@ -137,14 +235,25 @@ async function lookupLyrics(normalized) {
   return result;
 }
 
-async function findLyrics({ artist, title, duration = 0, album = '' }) {
+async function findLyrics({ artist, title, duration = 0, album = '', isrc = '' }) {
   const normalized = {
     artist: cleanArtist(artist),
     title: cleanTrackTitle(title),
     duration: Number.isFinite(duration) ? duration : 0,
     album: String(album || '').trim(),
+    isrc: String(isrc || '').toUpperCase(),
+    isrcMetadata: [],
   };
   if (!normalized.artist || !normalized.title) return null;
+
+  if (isIsrc(normalized.isrc)) {
+    try {
+      const metadata = await resolveIsrcMetadata(normalized.isrc);
+      if (metadata) normalized.isrcMetadata = [metadata];
+    } catch {
+      normalized.isrcMetadata = [];
+    }
+  }
 
   const durationSeconds = Math.round(normalized.duration / 1000);
   const key = makeCacheKey(normalized.artist, normalized.title, durationSeconds);
@@ -152,18 +261,28 @@ async function findLyrics({ artist, title, duration = 0, album = '' }) {
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   if (inFlight.has(key)) return inFlight.get(key);
 
-  const request = lookupLyrics(normalized)
-    .then((result) => {
-      pruneCache();
-      cache.set(key, {
-        value: result,
-        expiresAt: Date.now() + (result ? CACHE_TTL_MS : NOT_FOUND_CACHE_TTL_MS),
-      });
-      return result;
-    })
-    .finally(() => {
-      inFlight.delete(key);
-    });
+  const request = (async () => {
+    const variants = buildQueryVariants(normalized);
+    let providerError = null;
+    for (let index = 0; index < variants.length; index += 1) {
+      try {
+        const result = await lookupLyrics(normalized, variants[index], index);
+        if (result) {
+          pruneCache();
+          cache.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS });
+          return result;
+        }
+      } catch (error) {
+        if (error instanceof LyricsProviderError) providerError = error;
+      }
+    }
+    if (providerError) throw providerError;
+    pruneCache();
+    cache.set(key, { value: null, expiresAt: Date.now() + NOT_FOUND_CACHE_TTL_MS });
+    return null;
+  })().finally(() => {
+    inFlight.delete(key);
+  });
 
   inFlight.set(key, request);
   return request;
@@ -171,11 +290,19 @@ async function findLyrics({ artist, title, duration = 0, album = '' }) {
 
 function trackToLyricsQuery(track) {
   const info = track?.info || track || {};
+  const identifierCandidates = [
+    info.identifier,
+    info.pluginInfo?.originalIdentifier,
+    info.pluginInfo?.isrc,
+    info.externalId?.isrc,
+  ];
+  const isrc = identifierCandidates.find((value) => isIsrc(value)) || '';
   return {
     artist: info.author || '',
     title: info.title || '',
     duration: Number.isFinite(info.duration) ? info.duration : 0,
     album: info.albumName || info.pluginInfo?.albumName || '',
+    isrc,
   };
 }
 
@@ -216,7 +343,12 @@ function findActiveLyricIndex(lines, position) {
 
 module.exports = {
   cleanTrackTitle,
+  stripFeaturedArtists,
+  stripBracketedContent,
   cleanArtist,
+  primaryArtistName,
+  buildQueryVariants,
+  isIsrc,
   findLyrics,
   trackToLyricsQuery,
   parseSyncedLyrics,

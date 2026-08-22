@@ -83,10 +83,10 @@ test('activity capabilities expose the configured volume limit', () => {
 test('default volume cannot exceed the configured maximum', () => {
   assert.deepEqual(
     normalizeVolumeConfig({ defaultVolume: 90, maxVolume: 40 }),
-    { defaultVolume: 40, maxVolume: 40 },
+    { defaultVolume: 40, maxVolume: 40, autoplayMode: 'ai_assisted' },
   );
   assert.deepEqual(
     normalizeVolumeConfig({ defaultVolume: 300, maxVolume: 900 }),
-    { defaultVolume: 100, maxVolume: 500 },
+    { defaultVolume: 100, maxVolume: 500, autoplayMode: 'ai_assisted' },
   );
 });

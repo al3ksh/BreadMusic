@@ -1,6 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { buildNowPlayingEmbed } = require('./embeds');
-const { buildPlaybackErrorEmbed } = require('./playbackErrors');
+const { buildPlaybackErrorEmbed, buildReplacementEmbed } = require('./playbackErrors');
 
 const BUTTON_PREFIX = 'music';
 const PLAYBACK_ERROR_TTL_MS = 30_000;
@@ -148,6 +148,31 @@ class MusicUI {
       timeout.unref?.();
     } catch (error) {
       console.error('Failed to send playback error message:', error);
+    }
+  }
+
+  async sendReplacementNotice(player, failedTrack, replacement) {
+    const channelId = player?.textChannelId;
+    if (!channelId) return;
+
+    const channel =
+      this.client.channels.cache.get(channelId) ??
+      await this.client.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased()) return;
+
+    const embed = buildReplacementEmbed(failedTrack, replacement);
+    try {
+      const message = await channel.send({ embeds: [embed] });
+      const timeout = setTimeout(() => {
+        message.delete().catch((error) => {
+          if (error.code !== 10008) {
+            console.warn('Failed to delete replacement notice:', error.message);
+          }
+        });
+      }, PLAYBACK_ERROR_TTL_MS);
+      timeout.unref?.();
+    } catch (error) {
+      console.error('Failed to send replacement notice:', error);
     }
   }
 

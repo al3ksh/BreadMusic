@@ -75,6 +75,10 @@ function loadConfig() {
 
   const enabledSources = ['youtube', 'soundcloud', 'bandcamp', 'spotify'];
 
+  const alertUserId = String(process.env.DISCORD_ALERT_DM_USER_ID || '').trim();
+  const diskMinMb = Number(process.env.ALERT_DISK_MIN_MB ?? 512);
+  const rssMaxMb = Number(process.env.ALERT_RSS_MAX_MB ?? 650);
+
   return {
     token: DISCORD_TOKEN,
     clientId: DISCORD_CLIENT_ID,
@@ -94,6 +98,12 @@ function loadConfig() {
     },
     behavior: {
       idleTimeoutMs: Number(IDLE_TIMEOUT_MS ?? 300000),
+    },
+    alerts: {
+      enabled: String(process.env.ALERTS_ENABLED ?? 'true').toLowerCase() !== 'false',
+      dmUserId: /^\d{17,20}$/.test(alertUserId) ? alertUserId : null,
+      diskMinBytes: Math.max(64, Number.isFinite(diskMinMb) ? diskMinMb : 512) * 1024 * 1024,
+      rssMaxBytes: Math.max(128, Number.isFinite(rssMaxMb) ? rssMaxMb : 650) * 1024 * 1024,
     },
     guildAccess: createGuildAccessPolicy(process.env),
   };

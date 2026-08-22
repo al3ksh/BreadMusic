@@ -1,6 +1,15 @@
 const { EmbedBuilder } = require('discord.js');
 
 const ERROR_COLOR = '#ef4444';
+const FALLBACK_COLOR = '#22c55e';
+
+function buildTrackField(track) {
+  const title = track?.info?.title || track?.localUpload?.fileName || 'Unknown track';
+  const author = track?.info?.author;
+  const label = author ? `${author} - ${title}` : title;
+  const uri = track?.info?.uri;
+  return uri ? `[${label}](${uri})` : label;
+}
 
 function classifyPlaybackError(payload = {}) {
   const raw = [
@@ -80,22 +89,30 @@ function classifyPlaybackError(payload = {}) {
 
 function buildPlaybackErrorEmbed(track, payload) {
   const classification = classifyPlaybackError(payload);
-  const title = track?.info?.title || track?.localUpload?.fileName || 'Unknown track';
-  const author = track?.info?.author;
-  const trackLabel = author ? `${author} - ${title}` : title;
-  const uri = track?.info?.uri;
+  const trackLabel = buildTrackField(track);
 
   const embed = new EmbedBuilder()
     .setTitle(classification.title)
-    .setDescription(classification.description)
-    .addFields({
-      name: 'Track',
-      value: uri ? `[${trackLabel}](${uri})` : trackLabel,
-    })
+    .setDescription(`${classification.description} Looking for a replacement…`)
+    .addFields({ name: 'Track', value: trackLabel })
     .setColor(ERROR_COLOR)
     .setTimestamp();
 
   return { embed, classification };
+}
+
+function buildReplacementEmbed(failedTrack, replacement) {
+  const embed = new EmbedBuilder()
+    .setTitle('Source skipped – playing a replacement')
+    .setDescription('The original source was unavailable, so a matching track was found instead.')
+    .addFields(
+      { name: 'Failed track', value: buildTrackField(failedTrack) },
+      { name: 'Replacement', value: buildTrackField(replacement) },
+    )
+    .setColor(FALLBACK_COLOR)
+    .setTimestamp();
+
+  return embed;
 }
 
 function describeSearchFailure(searchResult) {
@@ -111,6 +128,7 @@ function describeSearchFailure(searchResult) {
 
 module.exports = {
   buildPlaybackErrorEmbed,
+  buildReplacementEmbed,
   classifyPlaybackError,
   describeSearchFailure,
 };

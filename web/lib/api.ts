@@ -80,6 +80,7 @@ export interface GuildConfig {
   twentyFourSevenChannelName: string | null;
   defaultVolume: number;
   autoplay: boolean;
+  autoplayMode: 'classic' | 'ai_assisted' | 'discovery';
   voiceChannelStatus: boolean;
   dashboardAccess: 'admin' | 'dj' | 'members';
 }
@@ -145,6 +146,7 @@ export interface PlayerStatus {
   volume: number;
   filters: string | null;
   autoplay: boolean;
+  autoplayMode?: string;
   voteSkip: {
     votes: number;
     requiredVotes: number;

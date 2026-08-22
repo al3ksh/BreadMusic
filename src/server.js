@@ -1511,6 +1511,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
       volume: 100,
       filters: null,
       autoplay: config.autoplay ?? false,
+      autoplayMode: config.autoplayMode ?? 'ai_assisted',
       voteSkip: null,
       sessionHistory: [],
     };
@@ -1564,6 +1565,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
     volume: player.volume ?? 100,
     filters: player.filterManager?.activePreset || null,
     autoplay: config.autoplay ?? false,
+    autoplayMode: config.autoplayMode ?? 'ai_assisted',
     voteSkip: getVoteSkipSnapshot(player, config, guild),
     sessionHistory,
   };

@@ -198,11 +198,6 @@ const createStatsCommands = (context) => {
           },
           { name: '\u{1F3A7} Top Tracks', value: tracks.slice(0, 1024) },
           { name: '\u{1F3A4} Top Artists', value: formatCompactRankedCounts(insights.details.topArtists, 'No artist data recorded.'), inline: true },
-          {
-            name: '\u{1F30D} Favorite Source',
-            value: `**${formatSourceLabel(insights.details.topSources[0]?.name)}**`,
-            inline: true,
-          },
         );
       if (member?.joinedTimestamp || insights.lastRequestAt) {
         const footerParts = [];

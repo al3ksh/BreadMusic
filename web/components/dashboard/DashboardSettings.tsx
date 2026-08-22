@@ -191,6 +191,17 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
         <Row label="Autoplay" desc="Play similar tracks when queue ends">
           <ToggleSwitch checked={config.autoplay} onChange={(v) => setConfig({ ...config, autoplay: v })} />
         </Row>
+        <Row label="Autoplay Mode" desc="Recommendation engine used when autoplay is on">
+          <select
+            value={config.autoplayMode || 'ai_assisted'}
+            onChange={(e) => setConfig({ ...config, autoplayMode: e.target.value as 'classic' | 'ai_assisted' | 'discovery' })}
+            className={selectClass + ' w-full sm:w-48'}
+          >
+            <option value="classic">Classic (no AI)</option>
+            <option value="ai_assisted">AI assisted</option>
+            <option value="discovery">Discovery radio</option>
+          </select>
+        </Row>
         <Row label="Stay in Channel (24/7)" desc="Bot stays connected even when idle">
           <ToggleSwitch checked={config.stayInChannel} onChange={(v) => setConfig({ ...config, stayInChannel: v })} />
         </Row>

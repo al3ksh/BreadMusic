@@ -14,9 +14,12 @@ const DEFAULT_CONFIG = {
   twentyFourSevenChannelId: null,
   defaultVolume: 100,
   autoplay: false,
+  autoplayMode: 'ai_assisted',
   voiceChannelStatus: true,
   dashboardAccess: 'admin',
 };
+
+const AUTOPLAY_MODES = new Set(['classic', 'ai_assisted', 'discovery']);
 
 const OLD_DEFAULT_AFK_TIMEOUT = 5 * 60 * 1000;
 
@@ -30,6 +33,9 @@ function normalizeVolumeConfig(config) {
     normalized.maxVolume,
     Number.isFinite(normalized.defaultVolume) ? normalized.defaultVolume : DEFAULT_CONFIG.defaultVolume,
   ));
+  if (!AUTOPLAY_MODES.has(normalized.autoplayMode)) {
+    normalized.autoplayMode = DEFAULT_CONFIG.autoplayMode;
+  }
   return normalized;
 }
 
@@ -97,6 +103,7 @@ function formatConfig(config) {
     `twentyFourSevenChannelId: ${config.twentyFourSevenChannelId ?? 'none'}`,
     `defaultVolume: ${config.defaultVolume}`,
     `autoplay: ${config.autoplay ? 'yes' : 'no'}`,
+    `autoplayMode: ${config.autoplayMode}`,
     `voiceChannelStatus: ${config.voiceChannelStatus ? 'yes' : 'no'}`,
     `dashboardAccess: ${config.dashboardAccess}`,
   ].join('\n');
@@ -116,4 +123,5 @@ module.exports = {
   listConfigs,
   DEFAULT_CONFIG,
   normalizeVolumeConfig,
+  AUTOPLAY_MODES,
 };

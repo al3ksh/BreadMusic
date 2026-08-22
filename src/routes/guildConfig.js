@@ -174,6 +174,7 @@ function createGuildConfigRouter({
       playerTextChannelName,
       defaultVolume: config.defaultVolume,
       autoplay: config.autoplay,
+      autoplayMode: config.autoplayMode,
       voiceChannelStatus: config.voiceChannelStatus,
       dashboardAccess: config.dashboardAccess,
     });
@@ -205,6 +206,9 @@ function createGuildConfigRouter({
     if (typeof body.persistentQueue === 'boolean') updates.persistentQueue = body.persistentQueue;
     if (typeof body.preferredSource === 'string') updates.preferredSource = body.preferredSource || null;
     if (typeof body.autoplay === 'boolean') updates.autoplay = body.autoplay;
+    if (typeof body.autoplayMode === 'string' && ['classic', 'ai_assisted', 'discovery'].includes(body.autoplayMode)) {
+      updates.autoplayMode = body.autoplayMode;
+    }
     if (typeof body.voiceChannelStatus === 'boolean') updates.voiceChannelStatus = body.voiceChannelStatus;
     if (['admin', 'dj', 'members'].includes(body.dashboardAccess)) updates.dashboardAccess = body.dashboardAccess;
     if (typeof body.defaultVolume === 'number') updates.defaultVolume = Math.max(0, Math.min(100, body.defaultVolume));

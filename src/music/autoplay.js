@@ -1,5 +1,5 @@
-const { getConfig, setConfig } = require('../state/guildConfig');
-const { getDiscoveryArtists, pickCandidateWithGemini, resetGeminiAutoplayState } = require('./autoplayAi');
+const { getConfig, setConfig, AUTOPLAY_MODES } = require('../state/guildConfig');
+const { getDiscoveryArtists, getGenreRadioPlan, pickCandidateWithGemini, resetGeminiAutoplayState } = require('./autoplayAi');
 
 const recentTracks = new Map();
 const skippedAutoplayTracks = new Map();
@@ -122,6 +122,17 @@ const POSITIVE_TERMS = [
 function isAutoplayEnabled(guildId) {
   const config = getConfig(guildId);
   return config.autoplay ?? false;
+}
+
+function getAutoplayMode(guildId) {
+  const config = getConfig(guildId);
+  return AUTOPLAY_MODES.has(config.autoplayMode) ? config.autoplayMode : 'ai_assisted';
+}
+
+function setAutoplayMode(guildId, mode) {
+  if (!AUTOPLAY_MODES.has(mode)) return null;
+  setConfig(guildId, { autoplayMode: mode });
+  return mode;
 }
 
 function setAutoplay(guildId, enabled) {
@@ -1005,8 +1016,15 @@ async function findNextTrack(player, lastTrack, client) {
     return null;
   }
 
+  const mode = getAutoplayMode(guildId);
+  const genreRadio = mode === 'discovery';
+  const planPromise = mode === 'classic'
+    ? Promise.resolve([])
+    : genreRadio
+      ? getGenreRadioPlan(context, { logger: logAutoplay })
+      : getDiscoveryArtists(context, { logger: logAutoplay });
+
   const candidates = new Map();
-  const discoveryArtistsPromise = getDiscoveryArtists(context, { logger: logAutoplay });
   let videoId = context.seed?.identifier || context.last?.identifier;
 
   if (!isYouTubeIdentifier(videoId)) {
@@ -1040,11 +1058,11 @@ async function findNextTrack(player, lastTrack, client) {
 
   // Preserve the pre-AI pool so a Gemini failure uses the original autoplay unchanged.
   const fallbackCandidates = [...candidates.values()];
-  const discoveryArtists = await discoveryArtistsPromise;
-  const discoveryQueries = buildDiscoveryQueries(discoveryArtists, context);
+  const plan = await planPromise;
+  const discoveryQueries = buildDiscoveryQueries(plan, context);
   logAutoplay(
     'debug',
-    `Discovery queries: ${discoveryQueries.map((entry) => `${entry.artist}:${entry.distance}`).join(' | ') || 'none'}`,
+    `Discovery queries (${mode}): ${discoveryQueries.map((entry) => `${entry.artist}:${entry.distance}`).join(' | ') || 'none'}`,
   );
 
   for (let offset = 0; offset < discoveryQueries.length; offset += 4) {
@@ -1083,11 +1101,23 @@ async function findNextTrack(player, lastTrack, client) {
     ...scoreCandidate(candidate, context),
   }));
 
+  const aiSelector = mode === 'classic' ? async () => null : pickCandidateWithGemini;
+  let selectionPool = scoredCandidates;
+  if (genreRadio && plan.length) {
+    const genreLocked = scoredCandidates.filter((candidate) => candidate.source === 'discovery');
+    if (genreLocked.length >= 3) {
+      const backup = scoredCandidates.filter((candidate) => candidate.source !== 'discovery').slice(0, 4);
+      selectionPool = [...genreLocked, ...backup];
+      logAutoplay('debug', `Genre radio pool: ${genreLocked.length} locked + ${backup.length} backup candidates`);
+    }
+  }
+  const localPool = genreRadio && selectionPool !== scoredCandidates ? selectionPool : scoredFallbackCandidates;
+
   const selected = await selectCandidate(
-    scoredCandidates,
+    selectionPool,
     context,
-    pickCandidateWithGemini,
-    scoredFallbackCandidates,
+    aiSelector,
+    localPool,
   );
   logCandidateSummary(scoredCandidates, selected);
 
@@ -1241,6 +1271,8 @@ module.exports = {
   isAutoplayEnabled,
   setAutoplay,
   toggleAutoplay,
+  getAutoplayMode,
+  setAutoplayMode,
   handleAutoplay,
   scheduleAutoplayPrefetch,
   clearAutoplayPrefetch,

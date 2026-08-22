@@ -149,6 +149,16 @@ const createConfigCommands = (context) => {
                 { name: 'SoundCloud', value: 'scsearch' },
                 { name: 'Spotify', value: 'spsearch' },
               ),
+          )
+          .addStringOption((option) =>
+            option
+              .setName('autoplay_mode')
+              .setDescription('Autoplay recommendation engine (when autoplay is on)')
+              .addChoices(
+                { name: 'Classic - local recommendations, no AI', value: 'classic' },
+                { name: 'AI assisted - current hybrid behavior', value: 'ai_assisted' },
+                { name: 'Discovery - AI genre radio with fresh tracks', value: 'discovery' },
+              ),
           ),
       )
       .addSubcommand((sub) => sub.setName('reset').setDescription('Restore default settings (dashboard available).'))
@@ -213,6 +223,8 @@ const createConfigCommands = (context) => {
       if (dashboardAccess) updates.dashboardAccess = dashboardAccess;
       const prefSource = interaction.options.getString('preferred_source');
       if (prefSource) updates.preferredSource = prefSource;
+      const autoplayMode = interaction.options.getString('autoplay_mode');
+      if (autoplayMode) updates.autoplayMode = autoplayMode;
 
       const updated = setConfig(interaction.guildId, updates);
       const player = interaction.client.lavalink?.getPlayer(interaction.guildId);

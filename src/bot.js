@@ -8,6 +8,7 @@ const {
   Partials,
 } = require('discord.js');
 const { LavalinkManager } = require('lavalink-client');
+const path = require('node:path');
 const { loadConfig } = require('./config');
 const { CommandError, ensurePlayer } = require('./music/utils');
 const {
@@ -68,6 +69,9 @@ const {
 } = require('./music/voiceStatus');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 const { createPlaybackRecovery } = require('./music/playbackRecovery');
+const { createPlaybackFallback } = require('./music/playbackFallback');
+const { getGeminiStatus } = require('./music/autoplayAi');
+const { createAlertManager, createDmTransport, startMonitoring } = require('./utils/alerts');
 const {
   CLOSE_LYRICS_BUTTON_PREFIX,
   LyricsUI,
@@ -303,6 +307,28 @@ client.on(Events.MessageCreate, safeEventHandler('DirectMessage', async (message
   await processDirectMessage(message);
 }));
 
+let alertMonitor = null;
+
+function startAlertMonitoring() {
+  if (alertMonitor || !config.alerts?.enabled) return;
+
+  const alerter = createAlertManager({
+    transports: [createDmTransport(client, config.alerts.dmUserId, {
+      logger: (message) => console.log(message),
+    })],
+  });
+
+  alertMonitor = startMonitoring({
+    client,
+    alerter,
+    dataDir: path.join(process.cwd(), 'data'),
+    diskMinBytes: config.alerts.diskMinBytes,
+    rssMaxBytes: config.alerts.rssMaxBytes,
+    getGeminiStatus: () => getGeminiStatus(),
+  });
+  console.log('Alert monitoring started (DM recipient:', config.alerts.dmUserId ? 'configured' : 'application owner', ').');
+}
+
 client.once(Events.ClientReady, safeEventHandler('ClientReady', async (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   client.lavalink.init({
@@ -328,6 +354,7 @@ client.once(Events.ClientReady, safeEventHandler('ClientReady', async (readyClie
 
   startActivityRotation();
   await restoreTwentyFourSevenPlayers();
+  startAlertMonitoring();
 }));
 
 client.on(Events.InteractionCreate, safeEventHandler('InteractionCreate', async (interaction) => {
@@ -557,10 +584,30 @@ client.lavalink.nodeManager.on('error', (node, error) => {
 
 const { createApiServer, broadcastPlayerUpdate } = require('./server');
 
+function getConnectedNode() {
+  const nodes = client.lavalink?.nodeManager?.nodes;
+  if (!nodes) return null;
+  for (const node of nodes.values()) {
+    if (node.connected) return node;
+  }
+  return null;
+}
+
+const playbackFallback = createPlaybackFallback({
+  search: async (query) => {
+    const node = getConnectedNode();
+    if (!node) return null;
+    return await node.search({ query }, client.user);
+  },
+});
+
 const recoverPlaybackFailure = createPlaybackRecovery({
   recoverySet: playbackFailureRecovery,
   isPlayerStopping,
   sendPlaybackError: (player, track, payload) => client.musicUI.sendPlaybackError(player, track, payload),
+  findReplacement: ({ player, track }) => playbackFallback.findReplacementTrack({ player, track }),
+  notifyReplacement: (player, track, replacement) =>
+    client.musicUI.sendReplacementNotice(player, track, replacement),
   handleAutoplay: (player, track) => handleAutoplay(player, track, client),
   clearVoiceTrackStatus: (player) => clearVoiceTrackStatus(client, player),
   refreshPlayer: (player) => client.musicUI.refresh(player),
@@ -1309,6 +1356,8 @@ async function gracefulShutdown(signal) {
   console.log(`\n[${signal}] Shutting down gracefully...`);
 
   clearInterval(activityIntervalId);
+  alertMonitor?.stop();
+  alertMonitor = null;
 
   const players = client.lavalink?.players?.values() ?? [];
   for (const player of players) {
