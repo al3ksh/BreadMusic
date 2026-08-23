@@ -97,7 +97,7 @@ const {
 
 const HELP_BUTTON_PREFIX = 'help:';
 
-const ACTIVITY_ROTATION_INTERVAL = 45_000;
+const ACTIVITY_ROTATION_INTERVAL = 30_000;
 const NODE_RECONNECT_DELAY = 5_000;
 const AUTOCOMPLETE_TIMEOUT = 2_500;
 const MAX_AUTOCOMPLETE_RESULTS = 5;
@@ -165,6 +165,14 @@ const activityRotation = [
   { type: ActivityType.Listening, name: "/play • skip responsibly" },
   { type: ActivityType.Playing,   name: "/play • playlist? say less" },
   { type: ActivityType.Watching,  name: "/play • one more song" },
+  { type: ActivityType.Playing,   name: "/play • skip button speedrun any%" },
+  { type: ActivityType.Listening, name: "/play • your DJ arc begins" },
+  { type: ActivityType.Watching,  name: "/play • the queue grows stronger" },
+  { type: ActivityType.Playing,   name: "/play • certified banger incoming" },
+  { type: ActivityType.Listening, name: "/play • shazam could never" },
+  { type: ActivityType.Watching,  name: "/play • volume at illegal levels" },
+  { type: ActivityType.Playing,   name: "/play • bass drop liability" },
+  { type: ActivityType.Listening, name: "/play • the algorithm fears us" },
 
   { type: ActivityType.Playing,   name: "Activity • shared aux unlocked" },
   { type: ActivityType.Watching,  name: "Activity • the queue has witnesses" },
@@ -178,6 +186,13 @@ const activityRotation = [
   { type: ActivityType.Playing,   name: "Activity • server-wide soundcheck" },
   { type: ActivityType.Watching,  name: "Activity • queueing together" },
   { type: ActivityType.Listening, name: "Activity • music with witnesses" },
+  { type: ActivityType.Playing,   name: "Activity • the aux is a shared burden" },
+  { type: ActivityType.Listening, name: "Activity • eavesdropping on the vibe" },
+  { type: ActivityType.Watching,  name: "Activity • DJing without leaving spawn" },
+  { type: ActivityType.Playing,   name: "Activity • your playlist's villain arc" },
+  { type: ActivityType.Listening, name: "Activity • group project, but fun" },
+  { type: ActivityType.Watching,  name: "Activity • 24/7, no bathroom breaks" },
+  { type: ActivityType.Playing,   name: "Activity • touch grass, keep the queue" },
 
   { type: ActivityType.Listening, name: "/dashboard • controlling the chaos" },
   { type: ActivityType.Playing,   name: "/dashboard • queue management simulator" },
@@ -185,6 +200,11 @@ const activityRotation = [
   { type: ActivityType.Listening, name: "/dashboard • control issues, resolved" },
   { type: ActivityType.Playing,   name: "/dashboard • knobs without the booth" },
   { type: ActivityType.Watching,  name: "/dashboard • browser-based DJ decisions" },
+  { type: ActivityType.Watching,  name: "/dashboard • DJ powers from the couch" },
+  { type: ActivityType.Playing,   name: "/dashboard • drag, drop and pray" },
+  { type: ActivityType.Listening, name: "/dashboard • faders without a desk" },
+  { type: ActivityType.Watching,  name: "/dashboard • your queue, but fancy" },
+  { type: ActivityType.Playing,   name: "/dashboard • remote control energy" },
 
   { type: ActivityType.Playing,   name: "/lyrics • karaoke without the rent" },
   { type: ActivityType.Watching,  name: "/lyrics • words pending" },
@@ -193,11 +213,18 @@ const activityRotation = [
   { type: ActivityType.Watching,  name: "/lyrics • subtitles for your shower concert" },
   { type: ActivityType.Listening, name: "/lyrics • vocals not included" },
   { type: ActivityType.Playing,   name: "/lyrics • words before the beat drops" },
+  { type: ActivityType.Watching,  name: "/lyrics • mishear in HD" },
+  { type: ActivityType.Listening, name: "/lyrics • words at 0.5x speed" },
+  { type: ActivityType.Playing,   name: "/lyrics • duet with the ceiling" },
+  { type: ActivityType.Watching,  name: "/lyrics • sing like nobody's watching" },
 
   { type: ActivityType.Playing,   name: "/help • ask nicely" },
   { type: ActivityType.Listening, name: "/help • professionally confused" },
   { type: ActivityType.Watching,  name: "/help • answers sold separately" },
   { type: ActivityType.Playing,   name: "/help • plot twist: documentation" },
+  { type: ActivityType.Playing,   name: "/help • the manual speedrun" },
+  { type: ActivityType.Listening, name: "/help • answers within seconds" },
+  { type: ActivityType.Watching,  name: "/help • google, but friendlier" },
   { type: ActivityType.Watching,  name: "/stats • keeping receipts" },
   { type: ActivityType.Listening, name: "/stats • counting the damage" },
   { type: ActivityType.Watching,  name: "/stats • playback paperwork" },
@@ -205,6 +232,11 @@ const activityRotation = [
   { type: ActivityType.Listening, name: "/stats • numbers with rhythm" },
   { type: ActivityType.Watching,  name: "/stats • evidence of one more song" },
   { type: ActivityType.Playing,   name: "/stats • quantifying the vibe" },
+  { type: ActivityType.Watching,  name: "/stats • your villain origin story" },
+  { type: ActivityType.Playing,   name: "/stats • damage report ready" },
+  { type: ActivityType.Listening, name: "/stats • the receipts are audited" },
+  { type: ActivityType.Watching,  name: "/stats • graphs go brrr" },
+  { type: ActivityType.Playing,   name: "/stats • wrapped before wrapped" },
 ];
 
 let activityIntervalId;

@@ -1,5 +1,7 @@
 const express = require('express');
 
+const DEBUG_FAILURE_KINDS = new Set(['discord', 'lavalink', 'voice', 'auth', 'access', 'generic']);
+
 function createActivityRouter({
   discordApi,
   artworkMaxBytes,
@@ -10,9 +12,11 @@ function createActivityRouter({
   const router = express.Router();
 
   router.get('/api/activity/config', (_req, res) => {
+    const debugFailure = String(process.env.ACTIVITY_DEBUG_FAILURE || '').trim();
     res.json({
       enabled: process.env.ACTIVITY_ENABLED !== 'false',
       clientId: process.env.DISCORD_CLIENT_ID || null,
+      debugFailure: DEBUG_FAILURE_KINDS.has(debugFailure) ? debugFailure : null,
     });
   });
 

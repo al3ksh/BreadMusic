@@ -164,9 +164,9 @@ const createStatsCommands = (context) => {
           );
         if (detailed) {
           embed.addFields(
-            { name: '\u{1F30D} Sources', value: formatRankedSources(details.topSources, 'No source data recorded.'), inline: false },
-            { name: '\u{23F1} Activity', value: `Peak **${activityHour}**  \u2022  **${details.activeDays}** active days  \u2022  **${details.longestStreakDays} days** longest streak`, inline: true },
-            { name: '\u{1F465} Top Requesters', value: users, inline: false },
+            { name: '\u{1F30D} Sources', value: formatRankedSources(details.topSources, 'No source data recorded.') },
+            { name: '\u{23F1} Activity', value: `Peak **${activityHour}** \u2022 **${details.activeDays}** days \u2022 streak **${details.longestStreakDays}d**` },
+            { name: '\u{1F465} Top Requesters', value: users },
           );
         }
         if (details.historyScoped) {
@@ -193,11 +193,11 @@ const createStatsCommands = (context) => {
           },
           {
             name: '\u{1F4C8} Rhythm',
-            value: `**${insights.details.averagePerActiveDay.toFixed(1)}**/active day  \u2022  **${insights.details.activeDays}** active days  \u2022  **${insights.details.longestStreakDays} days** longest streak`,
+            value: `**${insights.details.averagePerActiveDay.toFixed(1)}**/day \u2022 **${insights.details.activeDays}** days \u2022 streak **${insights.details.longestStreakDays}d**`,
             inline: true,
           },
           { name: '\u{1F3A7} Top Tracks', value: tracks.slice(0, 1024) },
-          { name: '\u{1F3A4} Top Artists', value: formatCompactRankedCounts(insights.details.topArtists, 'No artist data recorded.'), inline: true },
+          { name: '\u{1F3A4} Top Artists', value: formatCompactRankedCounts(insights.details.topArtists, 'No artist data recorded.') },
         );
       if (member?.joinedTimestamp || insights.lastRequestAt) {
         const footerParts = [];

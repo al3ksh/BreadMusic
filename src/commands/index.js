@@ -119,19 +119,22 @@ const RADIO_EQ = [
 ];
 
 function formatStatsDuration(milliseconds) {
-  const minutes = Math.max(0, Math.round((milliseconds || 0) / 60000));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = minutes / 60;
-  return `${hours >= 10 ? hours.toFixed(1) : hours.toFixed(2)}h`;
+  const totalMinutes = Math.max(0, Math.round((milliseconds || 0) / 60000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  return `${totalMinutes}m`;
 }
 
 function formatCompactRankedCounts(items, emptyMessage) {
   if (!items?.length) return emptyMessage;
   return items.map((item) => {
     const name = String(item.name || 'Unknown');
-    const label = name.length > 28 ? `${name.slice(0, 25)}...` : name;
-    return `**${item.rank}. ${label}** ${item.count}x`;
-  }).join(' \u2022 ').slice(0, 1024);
+    const label = name.length > 30 ? `${name.slice(0, 27)}...` : name;
+    return `**${label}** ${item.count}x`;
+  }).join(' \u00b7 ').slice(0, 1024);
 }
 
 function formatSourceLabel(value) {
@@ -151,23 +154,26 @@ function formatSourceLabel(value) {
 function formatRankedSources(items, emptyMessage) {
   if (!items?.length) return emptyMessage;
   return items.map((item) => (
-    `**${item.rank}. ${formatSourceLabel(item.name)}** - ${item.count} plays`
+    `**${item.rank}.** ${formatSourceLabel(item.name)} \u2014 ${item.count} ${item.count === 1 ? 'play' : 'plays'}`
   )).join('\n').slice(0, 1024);
 }
 
 function formatRankedRequesters(items, emptyMessage) {
   if (!items?.length) return emptyMessage;
   return items.map((item) => (
-    `**${item.rank}. ${item.displayName}** - ${item.count} requests`
+    `**${item.rank}.** ${item.displayName} \u2014 ${item.count} ${item.count === 1 ? 'request' : 'requests'}`
   )).join('\n').slice(0, 1024);
 }
 
 function formatRankedTracks(items, emptyMessage) {
   if (!items?.length) return emptyMessage;
   return items.map((item) => {
-    const rawTitle = String(item.title || 'Unknown');
-    const title = rawTitle.length > 56 ? `${rawTitle.slice(0, 53)}...` : rawTitle;
-    return `**${item.rank}. ${title} (${item.count}x)**`;
+    const rawTitle = String(item.title || 'Unknown')
+      .replace(/\s*[\[(][^\])]*(prod|official|video|audio|lyric|visualizer|hd|hq|4k)[^\])]*[\])]/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45)}...` : rawTitle;
+    return `**${item.rank}.** ${title} \u2014 ${item.count}x`;
   }).join('\n').slice(0, 1024);
 }
 

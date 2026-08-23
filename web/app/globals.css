@@ -479,6 +479,51 @@ a { color: inherit; text-decoration: none; }
   text-underline-offset: 3px;
 }
 
+.activity-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.activity-error-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 16px;
+  color: #d9dbe5;
+  background: #1b1b1e;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 100ms ease;
+}
+
+.activity-error-button:hover:not(:disabled) {
+  color: #fff;
+  background: #262629;
+  border-color: rgba(162, 156, 229, 0.55);
+}
+
+.activity-error-button:active:not(:disabled) { transform: scale(0.97); }
+.activity-error-button:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.activity-error-button.primary {
+  color: #fff;
+  background: #5a5494;
+  border-color: #7169b9;
+}
+
+.activity-error-button.primary:hover:not(:disabled) {
+  background: #6760a7;
+  border-color: #8880d1;
+}
+
 .activity-header,
 .activity-footer {
   display: flex;

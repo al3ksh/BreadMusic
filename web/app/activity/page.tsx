@@ -3,11 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   AlertTriangle,
+  AudioLines,
+  Bot,
   CheckCircle2,
   Disc3,
   GripVertical,
   Info,
+  KeyRound,
+  PlugZap,
+  RefreshCw,
+  ShieldAlert,
   Trash2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, QueueTrack } from '@/lib/api';
@@ -42,6 +49,16 @@ declare global {
 }
 
 type ActivityPhase = 'starting' | 'ready' | 'error' | 'unsupported';
+type ActivityErrorKind = 'discord' | 'lavalink' | 'voice' | 'auth' | 'access' | 'generic';
+
+const ACTIVITY_ERROR_VISUALS: Record<ActivityErrorKind, { icon: typeof Bot; title: string }> = {
+  discord: { icon: Bot, title: 'Bot is offline' },
+  lavalink: { icon: AudioLines, title: 'Audio engine offline' },
+  voice: { icon: VolumeX, title: 'Bread is not in a voice channel' },
+  auth: { icon: KeyRound, title: 'Session expired' },
+  access: { icon: ShieldAlert, title: 'Access denied' },
+  generic: { icon: AlertTriangle, title: 'Activity unavailable' },
+};
 type ActivityPanel = 'queue' | 'search' | 'lyrics' | null;
 type ActivityNoticeTone = 'success' | 'error' | 'warning' | 'info';
 type ActivityNotice = { id: number; message: string; tone: ActivityNoticeTone };
@@ -139,6 +156,8 @@ export default function ActivityPage() {
   const queueAutoScrollFrameRef = useRef<number | null>(null);
   const queueAutoScrollSpeedRef = useRef(0);
   const [phase, setPhase] = useState<ActivityPhase>('starting');
+  const [errorKind, setErrorKind] = useState<ActivityErrorKind>('generic');
+  const [summoning, setSummoning] = useState(false);
   const [introExiting, setIntroExiting] = useState(false);
   const [message, setMessage] = useState('Connecting to Discord...');
   const [guildId, setGuildId] = useState<string | null>(null);
@@ -368,19 +387,26 @@ export default function ActivityPage() {
     let cancelled = false;
 
     async function initialize() {
+      let failureKind: ActivityErrorKind = 'generic';
       try {
         setMessage('Preparing Bread...');
         const config = await fetch('/api/activity/config').then(async (response) => {
           if (!response.ok) throw new Error('Activity is not configured');
-          return response.json() as Promise<{ enabled: boolean; clientId: string | null }>;
+          return response.json() as Promise<{ enabled: boolean; clientId: string | null; debugFailure?: string | null }>;
         });
+
+        if (config.debugFailure && config.debugFailure in ACTIVITY_ERROR_VISUALS) {
+          setErrorKind(config.debugFailure as ActivityErrorKind);
+          setMessage('Simulated failure for preview.');
+          setPhase('error');
+          return;
+        }
 
         if (!config.enabled || !config.clientId) {
           setPhase('error');
           setMessage('Discord Activity is not configured on this deployment.');
           return;
-        }
-        if (typeof window === 'undefined' || window.parent === window) {
+        }        if (typeof window === 'undefined' || window.parent === window) {
           setPhase('unsupported');
           setMessage('Open this page from Discord as a Bread Activity.');
           return;
@@ -409,15 +435,24 @@ export default function ActivityPage() {
           body: JSON.stringify({ code }),
         }).then(async (response) => {
           const body = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(body.error || 'Activity authorization failed');
+          if (!response.ok) {
+            failureKind = 'auth';
+            throw new Error(body.error || 'Activity authorization failed');
+          }
           return body as { access_token: string };
         });
         const auth = await sdk.commands.authenticate({ access_token: tokenResponse.access_token });
-        if (!auth) throw new Error('Discord Activity authentication failed');
+        if (!auth) {
+          failureKind = 'auth';
+          throw new Error('Discord Activity authentication failed');
+        }
 
         setMessage('Loading your server...');
         activityTokenRef.current = auth.access_token || tokenResponse.access_token;
-        if (!sdk.guildId) throw new Error('Open the Activity from a server voice channel');
+        if (!sdk.guildId) {
+          failureKind = 'voice';
+          throw new Error('Open the Activity from a server voice channel');
+        }
         if (cancelled) return;
 
         setGuildId(sdk.guildId);
@@ -426,7 +461,10 @@ export default function ActivityPage() {
         setChannelId(sdk.channelId ?? null);
         setMessage('Checking server access...');
         const access = await activityFetch<DashboardCapabilities>(`/api/guilds/${sdk.guildId}/access`);
-        if (!access.canAccess) throw new Error('You do not have access to Bread on this server');
+        if (!access.canAccess) {
+          failureKind = 'access';
+          throw new Error('You do not have access to Bread on this server');
+        }
         if (cancelled) return;
         setCapabilities(access);
 
@@ -449,8 +487,28 @@ export default function ActivityPage() {
         setMessage('');
       } catch (error) {
         if (cancelled) return;
+        const failureMessage = error instanceof Error ? error.message : 'Could not start Bread Activity';
+
+        if (failureKind === 'generic') {
+          try {
+            const health = await fetch('/api/healthz').then((response) => response.json()) as {
+              discord?: { ok?: boolean };
+              lavalink?: { ok?: boolean };
+            };
+            if (health?.discord && health.discord.ok === false) failureKind = 'discord';
+            else if (health?.lavalink && health.lavalink.ok === false) failureKind = 'lavalink';
+            else if (guildId) {
+              const status = await activityFetch<PlayerStatus>(`/api/guilds/${guildId}/status`).catch(() => null);
+              if (status && status.connected === false) failureKind = 'voice';
+            }
+          } catch {
+            // Diagnostics are best effort; the generic screen still applies.
+          }
+        }
+
+        setErrorKind(failureKind);
         setPhase('error');
-        setMessage(error instanceof Error ? error.message : 'Could not start Bread Activity');
+        setMessage(failureMessage);
       }
     }
 
@@ -774,6 +832,23 @@ export default function ActivityPage() {
   const fetchHistoryPage = useCallback((page: number) => {
     return activityFetch<HistoryPage>(`/api/guilds/${guildId}/history?page=${page}&limit=25`);
   }, [activityFetch, guildId]);
+
+  const summonBot = useCallback(async () => {
+    if (!guildId || summoning) return;
+    setSummoning(true);
+    try {
+      await activityFetch(`/api/guilds/${guildId}/player/join`, {
+        method: 'POST',
+        body: JSON.stringify({ channelId: channelId ?? undefined }),
+      });
+      notify('Bread joined your voice channel', 'success');
+      window.setTimeout(() => window.location.reload(), 700);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Summon failed', 'error');
+    } finally {
+      setSummoning(false);
+    }
+  }, [channelId, guildId, notify, summoning]);
 
   const requeueHistoryTrack = useCallback((uri: string) => {
     const queued = playerAction('play', { query: uri });
@@ -1321,12 +1396,35 @@ export default function ActivityPage() {
     );
   }
 
+  if (phase === 'error') {
+    const visual = ACTIVITY_ERROR_VISUALS[errorKind];
+    const VisualIcon = visual.icon;
+    return (
+      <main className="activity-shell activity-centered">
+        <div className="activity-status-mark"><VisualIcon size={30} /></div>
+        <p className="activity-kicker">Bread Activity</p>
+        <h1>{visual.title}</h1>
+        <p className="activity-muted">{message}</p>
+        <div className="activity-error-actions">
+          {errorKind === 'voice' && guildId && (
+            <button type="button" className="activity-error-button primary" onClick={summonBot} disabled={summoning}>
+              <PlugZap size={16} />{summoning ? 'Summoning…' : 'Summon bot'}
+            </button>
+          )}
+          <button type="button" className="activity-error-button" onClick={() => window.location.reload()}>
+            <RefreshCw size={16} />Retry
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   if (phase !== 'ready') {
     return (
       <main className="activity-shell activity-centered">
         <div className="activity-status-mark"><Disc3 size={30} /></div>
         <p className="activity-kicker">Bread Activity</p>
-        <h1>{phase === 'unsupported' ? 'Open in Discord' : 'Activity unavailable'}</h1>
+        <h1>{phase === 'unsupported' ? 'Open in Discord' : 'Loading Bread'}</h1>
         <p className="activity-muted">{message}</p>
         {phase === 'unsupported' && <a className="activity-link" href="/">Back to Bread</a>}
       </main>
