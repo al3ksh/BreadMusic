@@ -406,7 +406,11 @@ function createApiServer(client) {
     const access = await loadGuildAccess(req, res);
     if (!access) return;
     if (req.activityUser) {
-      req.dashboardCapabilities = resolveActivityCapabilities(access.member, access.config);
+      const player = client.lavalink?.players?.get(req.params.guildId);
+      req.dashboardCapabilities = resolveActivityCapabilities(access.member, access.config, {
+        memberVoiceChannelId: access.member?.voice?.channelId ?? null,
+        botVoiceChannelId: access.guild?.members?.me?.voice?.channelId ?? player?.voiceChannelId ?? null,
+      });
       return next();
     }
     if (!access.capabilities.canAccess) {

@@ -90,3 +90,50 @@ test('default volume cannot exceed the configured maximum', () => {
     { defaultVolume: 100, maxVolume: 500, autoplayMode: 'ai_assisted' },
   );
 });
+
+test('activity control requires the member to share the voice channel', () => {
+  const config = { dashboardAccess: 'members', djRoleId: null };
+
+  const inBotChannel = resolveActivityCapabilities(memberWith(), config, {
+    memberVoiceChannelId: 'vc-1',
+    botVoiceChannelId: 'vc-1',
+  });
+  assert.equal(inBotChannel.canControlPlayer, true);
+
+  const botIdle = resolveActivityCapabilities(memberWith(), config, {
+    memberVoiceChannelId: 'vc-1',
+    botVoiceChannelId: null,
+  });
+  assert.equal(botIdle.canControlPlayer, true);
+
+  const differentChannel = resolveActivityCapabilities(memberWith(), config, {
+    memberVoiceChannelId: 'vc-2',
+    botVoiceChannelId: 'vc-1',
+  });
+  assert.equal(differentChannel.canControlPlayer, false);
+});
+
+test('activity control drops when the member leaves voice', () => {
+  const config = { dashboardAccess: 'members', djRoleId: null };
+
+  const leftVoice = resolveActivityCapabilities(memberWith(), config, {
+    memberVoiceChannelId: null,
+    botVoiceChannelId: 'vc-1',
+  });
+  assert.equal(leftVoice.canControlPlayer, false);
+  assert.equal(leftVoice.canView, true);
+
+  const adminLeftVoice = resolveActivityCapabilities(memberWith({ permissions: ['ManageGuild'] }), config, {
+    memberVoiceChannelId: null,
+    botVoiceChannelId: 'vc-1',
+  });
+  assert.equal(adminLeftVoice.canControlPlayer, false);
+});
+
+test('activity capabilities stay unchanged without voice context', () => {
+  const access = resolveActivityCapabilities(memberWith(), {
+    dashboardAccess: 'members',
+    djRoleId: null,
+  });
+  assert.equal(access.canControlPlayer, true);
+});

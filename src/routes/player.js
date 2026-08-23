@@ -428,15 +428,19 @@ function createPlayerRouter({
 
       if (action === 'join') {
         const activityChannelId = req.body?.channelId || null;
-        if (!memberVoiceChannelId || activityChannelId !== memberVoiceChannelId) {
-          return res.status(403).json({ error: 'Open the Activity from the voice channel you are currently in' });
+        // Activities launched from text-channel buttons may report the text
+        // channel as the launch context. Trust the gateway view of where the
+        // member actually sits instead of the client-provided channel.
+        const targetVoiceChannelId = memberVoiceChannelId || activityChannelId;
+        if (!targetVoiceChannelId || req.activityUser && !memberVoiceChannelId) {
+          return res.status(403).json({ error: 'Join a voice channel before opening the Activity' });
         }
 
-        const channel = guild?.channels?.cache?.get(memberVoiceChannelId);
+        const channel = guild?.channels?.cache?.get(targetVoiceChannelId);
         if (!channel?.isVoiceBased()) {
           return res.status(400).json({ error: 'The Activity channel is not a voice channel' });
         }
-        if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== memberVoiceChannelId) {
+        if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== targetVoiceChannelId) {
           return res.status(409).json({ error: 'Bread is already active in another voice channel' });
         }
 
@@ -445,13 +449,13 @@ function createPlayerRouter({
         if (!player) {
           player = client.lavalink.createPlayer({
             guildId,
-            voiceChannelId: memberVoiceChannelId,
+            voiceChannelId: targetVoiceChannelId,
             textChannelId: preferredTextChannelId,
             selfDeaf: true,
             volume: guildConfig.defaultVolume ?? 60,
           });
         } else {
-          player.voiceChannelId = memberVoiceChannelId;
+          player.voiceChannelId = targetVoiceChannelId;
           player.textChannelId = preferredTextChannelId;
         }
 
@@ -474,7 +478,7 @@ function createPlayerRouter({
         } else if (!connectedBotVoiceChannelId) {
           await player.connect();
         }
-        return res.json({ success: true, channelId: memberVoiceChannelId, channelName: channel.name });
+        return res.json({ success: true, channelId: targetVoiceChannelId, channelName: channel.name });
       }
 
       const djOnlyActions = new Set(['stop', 'clearqueue', 'shuffle', 'loop', 'back', 'volume', 'filter', 'autoplay', 'remove', 'seek', 'move', 'playnow', 'playlist']);
@@ -483,13 +487,16 @@ function createPlayerRouter({
       }
 
       const isPlaybackAction = ['play', 'playnow', 'playlist'].includes(action);
+      if (isPlaybackAction && req.activityUser && !memberVoiceChannelId) {
+        return res.status(403).json({ error: 'Join the voice channel Bread is playing in before controlling playback' });
+      }
+      // Prefer the gateway view of the member's voice channel over the
+      // client-provided launch context, which can be a text channel when the
+      // Activity is opened from a player button.
       const requestedPlaybackChannelId = isPlaybackAction
-        ? req.body?.channelId || memberVoiceChannelId || connectedBotVoiceChannelId || null
+        ? memberVoiceChannelId || req.body?.channelId || connectedBotVoiceChannelId || null
         : null;
       if (requestedPlaybackChannelId) {
-        if (req.activityUser && (!memberVoiceChannelId || requestedPlaybackChannelId !== memberVoiceChannelId)) {
-          return res.status(403).json({ error: 'Open the Activity from the voice channel you are currently in' });
-        }
         const channel = guild?.channels?.cache?.get(requestedPlaybackChannelId);
         if (!channel?.isVoiceBased()) return res.status(400).json({ error: 'The Activity channel is not a voice channel' });
         if (connectedBotVoiceChannelId && connectedBotVoiceChannelId !== requestedPlaybackChannelId) {

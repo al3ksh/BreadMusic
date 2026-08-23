@@ -416,11 +416,12 @@ export default function ActivityPage() {
         setMessage('Loading your server...');
         activityTokenRef.current = auth.access_token || tokenResponse.access_token;
         if (!sdk.guildId) throw new Error('Open the Activity from a server voice channel');
-        if (!sdk.channelId) throw new Error('Open the Activity from a voice channel');
         if (cancelled) return;
 
         setGuildId(sdk.guildId);
-        setChannelId(sdk.channelId);
+        // The launch context can be a text channel when the Activity is opened
+        // from a player button; playback targeting is resolved server-side.
+        setChannelId(sdk.channelId ?? null);
         setMessage('Checking server access...');
         const access = await activityFetch<DashboardCapabilities>(`/api/guilds/${sdk.guildId}/access`);
         if (!access.canAccess) throw new Error('You do not have access to Bread on this server');

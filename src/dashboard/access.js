@@ -46,12 +46,26 @@ function resolveDashboardCapabilities(member, config) {
   };
 }
 
-function resolveActivityCapabilities(member, config) {
+function resolveActivityCapabilities(member, config, voiceContext = {}) {
   const capabilities = resolveDashboardCapabilities(member, config);
+  let { canControlPlayer } = capabilities;
+
+  // Activity control is tied to listening along in the same voice channel.
+  // When the caller supplies voice context, members who left the channel
+  // (or never joined it) keep a read-only view.
+  if (Object.prototype.hasOwnProperty.call(voiceContext, 'memberVoiceChannelId')) {
+    const memberVoiceChannelId = voiceContext.memberVoiceChannelId ?? null;
+    const botVoiceChannelId = voiceContext.botVoiceChannelId ?? null;
+    const inBotVoice = Boolean(memberVoiceChannelId)
+      && (!botVoiceChannelId || memberVoiceChannelId === botVoiceChannelId);
+    if (!inBotVoice) canControlPlayer = false;
+  }
+
   return {
     ...capabilities,
     canAccess: true,
     canView: true,
+    canControlPlayer,
   };
 }
 
