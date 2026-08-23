@@ -25,6 +25,19 @@ export default function GuildPage() {
   const rawView = searchParams.get('view');
   const [capabilities, setCapabilities] = useState<DashboardCapabilities | null>(null);
   const [accessLoading, setAccessLoading] = useState(true);
+  const toast = useToast();
+
+  const requeueFromHistory = useCallback(async (uri: string, mode: 'queue' | 'now') => {
+    try {
+      await apiFetch(`/guilds/${guildId}/player/${mode === 'now' ? 'playnow' : 'play'}`, {
+        method: 'POST',
+        body: JSON.stringify({ query: uri }),
+      });
+      toast.success(mode === 'now' ? 'Playing from history' : 'Added to queue from history');
+    } catch (error) {
+      toast.error('Replay failed', error instanceof Error ? error.message : 'Request failed.');
+    }
+  }, [guildId, toast]);
   const validTabs: Tab[] = ['settings', 'status', 'player', 'history', 'lyrics', 'economy', 'control'];
   const invalidView = rawView && !validTabs.includes(rawView as Tab) ? rawView : null;
   const defaultTab: Tab = capabilities?.canManageConfig ? 'settings' : 'player';
@@ -95,7 +108,13 @@ export default function GuildPage() {
       {!invalidView && !restrictedView && activeTab === 'settings' && <DashboardSettings guildId={guildId} />}
       {!invalidView && activeTab === 'status' && <DashboardStatus guildId={guildId} />}
       {!invalidView && activeTab === 'player' && <PlayerTab guildId={guildId} capabilities={capabilities} />}
-      {!invalidView && activeTab === 'history' && <DashboardHistory guildId={guildId} />}
+      {!invalidView && activeTab === 'history' && (
+                  <DashboardHistory
+                    guildId={guildId}
+                    canQueue={capabilities?.canControlPlayer === true}
+                    onRequeue={requeueFromHistory}
+                  />
+                )}
       {!invalidView && activeTab === 'lyrics' && <DashboardLyrics guildId={guildId} />}
       {!invalidView && !restrictedView && activeTab === 'economy' && <DashboardEconomy guildId={guildId} />}
       {!invalidView && !restrictedView && activeTab === 'control' && <DashboardControl guildId={guildId} />}

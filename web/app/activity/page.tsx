@@ -10,10 +10,11 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { DashboardCapabilities, LyricsResult, PlayerStatus, QueueTrack } from '@/lib/api';
+import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, QueueTrack } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 import { ActivityPlayerControls } from '@/components/activity/ActivityPlayerControls';
 import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
+import { ActivityHistoryPanel } from '@/components/activity/ActivityHistoryPanel';
 import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
 import { ActivitySearchPanel } from '@/components/activity/ActivitySearchPanel';
 import { ActivityLyricsPanel } from '@/components/activity/ActivityLyricsPanel';
@@ -153,6 +154,7 @@ export default function ActivityPage() {
   const [queueRestore, setQueueRestore] = useState<{ id: number; revision: string; throughPage: number } | null>(null);
   const [position, setPosition] = useState(0);
   const [activePanel, setActivePanel] = useState<ActivityPanel>(null);
+  const [queueView, setQueueView] = useState<'queue' | 'history'>('queue');
   const [drawerClosing, setDrawerClosing] = useState(false);
   const [drawerDragY, setDrawerDragY] = useState<number | null>(null);
   const [drawerDragging, setDrawerDragging] = useState(false);
@@ -768,6 +770,32 @@ export default function ActivityPage() {
     const applied = await playerAction(action, body);
     if (applied) flashControl(action);
   }, [flashControl, playerAction]);
+
+  const fetchHistoryPage = useCallback((page: number) => {
+    return activityFetch<HistoryPage>(`/api/guilds/${guildId}/history?page=${page}&limit=25`);
+  }, [activityFetch, guildId]);
+
+  const requeueHistoryTrack = useCallback((uri: string) => {
+    const queued = playerAction('play', { query: uri });
+    if (queued instanceof Promise) {
+      return queued.then((ok) => {
+        if (ok) notify('Added to queue from history', 'success');
+        return ok;
+      });
+    }
+    return queued;
+  }, [notify, playerAction]);
+
+  const playHistoryTrackNow = useCallback((uri: string) => {
+    const started = playerAction('playnow', { query: uri });
+    if (started instanceof Promise) {
+      return started.then((ok) => {
+        if (ok) notify('Playing from history', 'success');
+        return ok;
+      });
+    }
+    return started;
+  }, [notify, playerAction]);
 
   const commitSeek = useCallback(async (value: number) => {
     const duration = status.currentTrack?.duration || 0;
@@ -1498,23 +1526,55 @@ export default function ActivityPage() {
                 }}
               >
                 {activePanel === 'queue' && (
-                  <ActivityQueuePanel
-                    queue={queue}
-                    status={status}
-                    canDj={canDj}
-                    actionBusy={actionBusy}
-                    queueRestore={queueRestore}
-                    dragIndex={dragIndex}
-                    dropIndex={dropIndex}
-                    queueLoadingMore={queueLoadingMore}
-                    setDragIndex={setDragIndex}
-                    setDropIndex={setDropIndex}
-                    stopQueueAutoScroll={stopQueueAutoScroll}
-                    runControlAction={runControlAction}
-                    handleQueueDrop={handleQueueDrop}
-                    handleQueueRemove={handleQueueRemove}
-                    loadMoreQueue={loadMoreQueue}
-                  />
+                  <>
+                    <div className="activity-queue-switch" role="tablist" aria-label="Queue panel view">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={queueView === 'queue'}
+                        className={queueView === 'queue' ? 'active' : ''}
+                        onClick={() => setQueueView('queue')}
+                      >
+                        Queue
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={queueView === 'history'}
+                        className={queueView === 'history' ? 'active' : ''}
+                        onClick={() => setQueueView('history')}
+                      >
+                        History
+                      </button>
+                    </div>
+                    {queueView === 'history' ? (
+                      <ActivityHistoryPanel
+                        canDj={canDj}
+                        actionBusy={actionBusy}
+                        fetchHistoryPage={fetchHistoryPage}
+                        onRequeue={requeueHistoryTrack}
+                        onPlayNow={playHistoryTrackNow}
+                      />
+                    ) : (
+                      <ActivityQueuePanel
+                        queue={queue}
+                        status={status}
+                        canDj={canDj}
+                        actionBusy={actionBusy}
+                        queueRestore={queueRestore}
+                        dragIndex={dragIndex}
+                        dropIndex={dropIndex}
+                        queueLoadingMore={queueLoadingMore}
+                        setDragIndex={setDragIndex}
+                        setDropIndex={setDropIndex}
+                        stopQueueAutoScroll={stopQueueAutoScroll}
+                        runControlAction={runControlAction}
+                        handleQueueDrop={handleQueueDrop}
+                        handleQueueRemove={handleQueueRemove}
+                        loadMoreQueue={loadMoreQueue}
+                      />
+                    )}
+                  </>
                 )}
 
                 {activePanel === 'search' && (

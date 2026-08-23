@@ -1834,6 +1834,80 @@ a { color: inherit; text-decoration: none; }
   margin: 2px 5px 10px;
 }
 
+.activity-queue-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 2px 5px 10px;
+  padding: 3px;
+  background: #131315;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+}
+
+.activity-queue-switch button {
+  min-height: 30px;
+  color: #8f92a1;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.activity-queue-switch button:hover { color: #d9dbe5; }
+
+.activity-queue-switch button.active {
+  color: #eeedff;
+  background: #292944;
+  box-shadow: inset 0 0 0 1px rgba(162, 156, 229, 0.4);
+}
+
+.activity-queue-row.activity-history-row {
+  grid-template-columns: 38px minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.activity-history-badge {
+  margin-left: 6px;
+  padding: 1px 5px;
+  color: #b7b2ee;
+  background: rgba(90, 84, 148, 0.24);
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.activity-history-actions {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.activity-history-actions button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: #b7b9c3;
+  background: #1b1b1e;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, transform 100ms ease;
+}
+
+.activity-history-actions button:hover:not(:disabled) {
+  color: #fff;
+  background: #292944;
+  border-color: rgba(162, 156, 229, 0.5);
+}
+
+.activity-history-actions button:active:not(:disabled) { transform: scale(0.94); }
+.activity-history-actions button:disabled { cursor: not-allowed; opacity: 0.4; }
+
 .activity-autoplay-toggle {
   width: max-content;
   min-height: 34px;

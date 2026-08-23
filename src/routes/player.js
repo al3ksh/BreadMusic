@@ -317,7 +317,10 @@ function createPlayerRouter({
     res.json(buildQueueSnapshot(client, req.params.guildId, parseQueuePage(req.query.page)));
   });
 
-  router.get('/api/guilds/:guildId/history', requireAuth, requireGuildAccess, (req, res) => {
+  router.get('/api/guilds/:guildId/history', requireAuth, requirePlayerAccess, (req, res) => {
+    if (!req.activityUser && !req.dashboardCapabilities?.canAccess) {
+      return res.status(403).json({ error: 'Dashboard access is not enabled for your role' });
+    }
     res.json(getGuildHistory(req.params.guildId, {
       page: req.query.page,
       limit: req.query.limit,
