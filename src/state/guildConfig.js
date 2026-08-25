@@ -4,6 +4,7 @@ const { CommandError } = require('../utils/commandError');
 const DEFAULT_CONFIG = {
   preferredSource: null,
   djRoleId: null,
+  modRoleId: null,
   // null = use the command/player context, "disabled" = never send player messages.
   playerTextChannelId: null,
   maxVolume: 100,
@@ -15,11 +16,14 @@ const DEFAULT_CONFIG = {
   defaultVolume: 100,
   autoplay: false,
   autoplayMode: 'ai_assisted',
+  activityControl: 'inherit',
   voiceChannelStatus: true,
   dashboardAccess: 'admin',
 };
 
 const AUTOPLAY_MODES = new Set(['classic', 'ai_assisted', 'discovery']);
+const DASHBOARD_ACCESS_LEVELS = new Set(['admin', 'mod', 'members']);
+const ACTIVITY_CONTROL_MODES = new Set(['inherit', 'admin', 'mod', 'dj', 'members']);
 
 const OLD_DEFAULT_AFK_TIMEOUT = 5 * 60 * 1000;
 
@@ -35,6 +39,19 @@ function normalizeVolumeConfig(config) {
   ));
   if (!AUTOPLAY_MODES.has(normalized.autoplayMode)) {
     normalized.autoplayMode = DEFAULT_CONFIG.autoplayMode;
+  }
+  // Legacy 'dj' dashboard access becomes 'mod'; the DJ role stays music-only.
+  if (normalized.dashboardAccess === 'dj') {
+    normalized.dashboardAccess = 'mod';
+    if (!normalized.modRoleId && normalized.djRoleId) {
+      normalized.modRoleId = normalized.djRoleId;
+    }
+  }
+  if (!DASHBOARD_ACCESS_LEVELS.has(normalized.dashboardAccess)) {
+    normalized.dashboardAccess = DEFAULT_CONFIG.dashboardAccess;
+  }
+  if (!ACTIVITY_CONTROL_MODES.has(normalized.activityControl)) {
+    normalized.activityControl = DEFAULT_CONFIG.activityControl;
   }
   return normalized;
 }
@@ -94,6 +111,7 @@ function formatConfig(config) {
   return [
     `preferredSource: ${config.preferredSource ?? 'auto'}`,
     `djRoleId: ${config.djRoleId ?? 'none'}`,
+    `modRoleId: ${config.modRoleId ?? 'none'}`,
     `playerTextChannelId: ${config.playerTextChannelId === 'disabled' ? 'disabled' : config.playerTextChannelId ?? 'default'}`,
     `maxVolume: ${config.maxVolume}`,
     `voteSkipPercent: ${(config.voteSkipPercent * 100).toFixed(0)}%`,
@@ -104,6 +122,7 @@ function formatConfig(config) {
     `defaultVolume: ${config.defaultVolume}`,
     `autoplay: ${config.autoplay ? 'yes' : 'no'}`,
     `autoplayMode: ${config.autoplayMode}`,
+    `activityControl: ${config.activityControl}`,
     `voiceChannelStatus: ${config.voiceChannelStatus ? 'yes' : 'no'}`,
     `dashboardAccess: ${config.dashboardAccess}`,
   ].join('\n');
@@ -124,4 +143,5 @@ module.exports = {
   DEFAULT_CONFIG,
   normalizeVolumeConfig,
   AUTOPLAY_MODES,
+  ACTIVITY_CONTROL_MODES,
 };

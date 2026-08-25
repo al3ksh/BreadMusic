@@ -141,12 +141,18 @@ function createGuildConfigRouter({
     const guild = client.guilds.cache.get(req.params.guildId);
 
     let djRoleName = null;
+    let modRoleName = null;
     let twentyFourSevenChannelName = null;
     let playerTextChannelName = null;
 
     if (config.djRoleId && guild) {
       const role = guild.roles.cache.get(config.djRoleId);
       djRoleName = role ? role.name : null;
+    }
+
+    if (config.modRoleId && guild) {
+      const role = guild.roles.cache.get(config.modRoleId);
+      modRoleName = role ? role.name : null;
     }
 
     if (config.twentyFourSevenChannelId && guild) {
@@ -163,6 +169,8 @@ function createGuildConfigRouter({
       preferredSource: config.preferredSource,
       djRoleId: config.djRoleId,
       djRoleName,
+      modRoleId: config.modRoleId,
+      modRoleName,
       maxVolume: config.maxVolume,
       voteSkipPercent: config.voteSkipPercent,
       stayInChannel: config.stayInChannel,
@@ -175,6 +183,7 @@ function createGuildConfigRouter({
       defaultVolume: config.defaultVolume,
       autoplay: config.autoplay,
       autoplayMode: config.autoplayMode,
+      activityControl: config.activityControl,
       voiceChannelStatus: config.voiceChannelStatus,
       dashboardAccess: config.dashboardAccess,
     });
@@ -188,6 +197,7 @@ function createGuildConfigRouter({
     const previousConfig = getConfig(guildId);
 
     if (typeof body.djRoleId === 'string') updates.djRoleId = body.djRoleId || null;
+    if (typeof body.modRoleId === 'string') updates.modRoleId = body.modRoleId || null;
     if (Object.prototype.hasOwnProperty.call(body, 'playerTextChannelId')) {
       const channelId = body.playerTextChannelId || null;
       if (channelId && channelId !== playerTextChannelDisabled) {
@@ -209,8 +219,13 @@ function createGuildConfigRouter({
     if (typeof body.autoplayMode === 'string' && ['classic', 'ai_assisted', 'discovery'].includes(body.autoplayMode)) {
       updates.autoplayMode = body.autoplayMode;
     }
+    if (typeof body.activityControl === 'string' && ['inherit', 'admin', 'mod', 'dj', 'members'].includes(body.activityControl)) {
+      updates.activityControl = body.activityControl;
+    }
+    if (typeof body.dashboardAccess === 'string') {
+      updates.dashboardAccess = body.dashboardAccess === 'dj' ? 'mod' : body.dashboardAccess;
+    }
     if (typeof body.voiceChannelStatus === 'boolean') updates.voiceChannelStatus = body.voiceChannelStatus;
-    if (['admin', 'dj', 'members'].includes(body.dashboardAccess)) updates.dashboardAccess = body.dashboardAccess;
     if (typeof body.defaultVolume === 'number') updates.defaultVolume = Math.max(0, Math.min(100, body.defaultVolume));
 
     const updated = setConfig(guildId, updates);

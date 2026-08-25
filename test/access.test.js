@@ -22,20 +22,39 @@ test('admin always has full dashboard capabilities', () => {
   assert.equal(access.maxVolume, 100);
 });
 
-test('DJ access admits configured DJ but not regular member', () => {
-  const config = { dashboardAccess: 'dj', djRoleId: 'dj-role' };
-  assert.equal(resolveDashboardCapabilities(memberWith({ roles: ['dj-role'] }), config).canAccess, true);
+test('mod access admits the configured mod role but not DJs or regular members', () => {
+  const config = { dashboardAccess: 'mod', modRoleId: 'mod-role', djRoleId: 'dj-role' };
+  const mod = resolveDashboardCapabilities(memberWith({ roles: ['mod-role'] }), config);
+  assert.equal(mod.canAccess, true);
+  assert.equal(mod.accessLevel, 'mod');
+  assert.equal(mod.canControlPlayer, true);
+  assert.equal(mod.canUpload, true);
+  assert.equal(mod.canUseRemoteControl, true);
+
+  assert.equal(resolveDashboardCapabilities(memberWith({ roles: ['dj-role'] }), config).canAccess, false);
   assert.equal(resolveDashboardCapabilities(memberWith(), config).canAccess, false);
 });
 
-test('everyone is treated as DJ when no DJ role is configured', () => {
-  const config = { dashboardAccess: 'dj', djRoleId: null };
+test('legacy dj dashboard access migrates to mod semantics', () => {
+  // getConfig backfills modRoleId from the old djRoleId during normalization.
+  const config = { dashboardAccess: 'dj', djRoleId: 'dj-role', modRoleId: 'dj-role' };
+  const migrated = resolveDashboardCapabilities(memberWith({ roles: ['dj-role'] }), config);
+  assert.equal(migrated.canAccess, true);
+  assert.equal(migrated.accessLevel, 'mod');
+
+  // Without the backfilled mod role, legacy DJs gain no dashboard access.
+  assert.equal(resolveDashboardCapabilities(memberWith({ roles: ['dj-role'] }), { dashboardAccess: 'dj' }).canAccess, false);
+});
+
+test('members access treats everyone as DJ when no DJ role is configured', () => {
+  const config = { dashboardAccess: 'members', djRoleId: null };
   const access = resolveDashboardCapabilities(memberWith(), config);
   assert.equal(access.canAccess, true);
-  assert.equal(access.accessLevel, 'dj');
+  assert.equal(access.accessLevel, 'member');
   assert.equal(access.canControlPlayer, true);
   assert.equal(access.canUpload, true);
   assert.equal(access.canManageConfig, false);
+  assert.equal(access.canUseRemoteControl, false);
   assert.equal(access.maxVolume, 100);
 });
 
@@ -83,11 +102,11 @@ test('activity capabilities expose the configured volume limit', () => {
 test('default volume cannot exceed the configured maximum', () => {
   assert.deepEqual(
     normalizeVolumeConfig({ defaultVolume: 90, maxVolume: 40 }),
-    { defaultVolume: 40, maxVolume: 40, autoplayMode: 'ai_assisted' },
+    { defaultVolume: 40, maxVolume: 40, autoplayMode: 'ai_assisted', dashboardAccess: 'admin', activityControl: 'inherit' },
   );
   assert.deepEqual(
     normalizeVolumeConfig({ defaultVolume: 300, maxVolume: 900 }),
-    { defaultVolume: 100, maxVolume: 500, autoplayMode: 'ai_assisted' },
+    { defaultVolume: 100, maxVolume: 500, autoplayMode: 'ai_assisted', dashboardAccess: 'admin', activityControl: 'inherit' },
   );
 });
 
@@ -134,6 +153,57 @@ test('activity capabilities stay unchanged without voice context', () => {
   const access = resolveActivityCapabilities(memberWith(), {
     dashboardAccess: 'members',
     djRoleId: null,
+  });
+  assert.equal(access.canControlPlayer, true);
+});
+
+test('activityControl overrides the dashboard policy inside the Activity', () => {
+  const config = {
+    dashboardAccess: 'admin',
+    djRoleId: 'dj-role',
+    modRoleId: null,
+    activityControl: 'dj',
+  };
+  const dj = resolveActivityCapabilities(memberWith({ roles: ['dj-role'] }), config);
+  assert.equal(dj.canControlPlayer, true);
+  assert.equal(dj.activityPolicy, 'dj');
+
+  const stranger = resolveActivityCapabilities(memberWith(), config);
+  assert.equal(stranger.canControlPlayer, false);
+});
+
+test('activityControl members opens control to everyone in voice', () => {
+  const access = resolveActivityCapabilities(memberWith(), {
+    dashboardAccess: 'admin',
+    activityControl: 'members',
+  }, { memberVoiceChannelId: 'vc-1', botVoiceChannelId: 'vc-1' });
+  assert.equal(access.canControlPlayer, true);
+  assert.equal(access.activityPolicy, 'members');
+
+  const leftVoice = resolveActivityCapabilities(memberWith(), {
+    dashboardAccess: 'admin',
+    activityControl: 'members',
+  }, { memberVoiceChannelId: null, botVoiceChannelId: 'vc-1' });
+  assert.equal(leftVoice.canControlPlayer, false);
+});
+
+test('activityControl admin restricts even DJs and mods', () => {
+  const config = {
+    dashboardAccess: 'members',
+    djRoleId: 'dj-role',
+    modRoleId: 'mod-role',
+    activityControl: 'admin',
+  };
+  assert.equal(resolveActivityCapabilities(memberWith({ roles: ['dj-role'] }), config).canControlPlayer, false);
+  assert.equal(resolveActivityCapabilities(memberWith({ roles: ['mod-role'] }), config).canControlPlayer, false);
+  assert.equal(resolveActivityCapabilities(memberWith({ permissions: ['ManageGuild'] }), config).canControlPlayer, true);
+});
+
+test('activityControl mod admits the mod role', () => {
+  const access = resolveActivityCapabilities(memberWith({ roles: ['mod-role'] }), {
+    dashboardAccess: 'admin',
+    modRoleId: 'mod-role',
+    activityControl: 'mod',
   });
   assert.equal(access.canControlPlayer, true);
 });

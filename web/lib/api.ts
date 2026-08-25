@@ -46,7 +46,7 @@ export interface GuildInfo {
   permissions: number;
   member_count: number;
   bot_present: boolean;
-  access_level: 'admin' | 'dj' | 'member';
+  access_level: 'admin' | 'mod' | 'member';
   dashboard_access: 'admin' | 'dj' | 'members';
   can_access: boolean;
   can_invite: boolean;
@@ -69,6 +69,8 @@ export interface GuildConfig {
   preferredSource: string | null;
   djRoleId: string | null;
   djRoleName: string | null;
+  modRoleId: string | null;
+  modRoleName: string | null;
   playerTextChannelId: string | null;
   playerTextChannelName: string | null;
   maxVolume: number;
@@ -81,8 +83,9 @@ export interface GuildConfig {
   defaultVolume: number;
   autoplay: boolean;
   autoplayMode: 'classic' | 'ai_assisted' | 'discovery';
+  activityControl: 'inherit' | 'admin' | 'mod' | 'dj' | 'members';
   voiceChannelStatus: boolean;
-  dashboardAccess: 'admin' | 'dj' | 'members';
+  dashboardAccess: 'admin' | 'mod' | 'members';
 }
 
 export interface HistoryEntry {

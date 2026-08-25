@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch, type GuildConfig } from '@/lib/api';
 import { useToast } from '@/components/ui/ToastProvider';
 import { Row, Section, Skeleton, ToggleSwitch } from '@/components/dashboard/DashboardPrimitives';
@@ -19,16 +20,71 @@ interface DiscordChannel {
 
 const rangeClass = 'w-full min-w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent';
 const selectClass = 'rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors font-[inherit]';
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+function NumberInput({
+  value,
+  min,
+  max,
+  step,
+  onCommit,
+  ariaLabel,
+  className,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onCommit: (value: number) => void;
+  ariaLabel: string;
+  className: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commit = () => {
+    if (draft === null) return;
+    const parsed = Number(draft);
+    if (draft.trim() !== '' && Number.isFinite(parsed)) {
+      onCommit(clamp(parsed, min, max));
+    }
+    setDraft(null);
+  };
+
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? value}
+      aria-label={ariaLabel}
+      className={className}
+      onFocus={(event) => {
+        setDraft(String(value));
+        event.currentTarget.select();
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+        if (event.key === 'Escape') {
+          setDraft(null);
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
 
 export function DashboardSettings({ guildId }: { guildId: string }) {
   const toast = useToast();
   const [config, setConfig] = useState<GuildConfig | null>(null);
+  const [savedConfig, setSavedConfig] = useState<GuildConfig | null>(null);
   const [roles, setRoles] = useState<DiscordRole[]>([]);
   const [channels, setChannels] = useState<DiscordChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
   const compactValueInputClass = 'w-14 h-7 rounded-md border border-border bg-bg-input text-text-primary px-2 text-xs text-right tabular-nums outline-none focus:border-accent transition-colors font-[inherit]';
 
   useEffect(() => {
@@ -39,6 +95,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
     ])
       .then(([confRes, rolesRes, channelsRes]) => {
         setConfig(confRes);
+        setSavedConfig(confRes);
         setRoles(rolesRes || []);
         setChannels(channelsRes || []);
       })
@@ -55,6 +112,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
         method: 'PUT',
         body: JSON.stringify(updates),
       });
+      setSavedConfig(updates as unknown as GuildConfig);
       toast.success('Settings saved', 'Server configuration has been updated.');
     } catch (err) {
       const text = err instanceof Error ? err.message : 'Failed to save';
@@ -70,6 +128,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
     try {
       const res = await apiFetch<{ success: boolean; config: GuildConfig }>(`/guilds/${guildId}/config/reset`, { method: 'POST' });
       setConfig(res.config);
+      setSavedConfig(res.config);
       toast.success('Settings reset', 'Default values have been restored.');
     } catch {
       toast.error('Reset failed', 'Could not reset server configuration.');
@@ -77,6 +136,20 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
       setSaving(false);
     }
   }, [guildId, toast]);
+
+  const isDirty = Boolean(
+    config && savedConfig && JSON.stringify(config) !== JSON.stringify(savedConfig),
+  );
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
 
   if (loading) return (
     <div className="space-y-5 w-full max-w-5xl mx-auto">
@@ -105,15 +178,40 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
   return (
     <div className="space-y-5 w-full max-w-5xl mx-auto">
       <Section title="DJ & Permissions">
-        <Row label="Dashboard Access" desc="DJ access uses the configured DJ role; without one, every member is treated as a DJ">
+        <Row label="Dashboard Access" desc="Who can open the dashboard. Moderators use the Mod Role below">
           <select
             value={config.dashboardAccess}
             onChange={(e) => setConfig({ ...config, dashboardAccess: e.target.value as GuildConfig['dashboardAccess'] })}
             className={selectClass + ' w-full sm:w-64'}
           >
             <option value="admin">Administrators only</option>
-            <option value="dj">Administrators and DJs</option>
+            <option value="mod">Administrators and moderators</option>
             <option value="members">All server members</option>
+          </select>
+        </Row>
+        <Row label="Mod Role" desc={config.modRoleName || 'Not set'}>
+          <select
+            value={config.modRoleId || ''}
+            onChange={(e) => setConfig({ ...config, modRoleId: e.target.value || null })}
+            className={selectClass + ' w-full sm:w-64'}
+          >
+            <option value="">(None)</option>
+            {roles.filter(r => r.name !== '@everyone').map(r => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+        </Row>
+        <Row label="Activity Control" desc="Who can control playback inside the Activity (must be in the bot voice channel)">
+          <select
+            value={config.activityControl || 'inherit'}
+            onChange={(e) => setConfig({ ...config, activityControl: e.target.value as GuildConfig['activityControl'] })}
+            className={selectClass + ' w-full sm:w-64'}
+          >
+            <option value="inherit">Inherit (follow Dashboard Access)</option>
+            <option value="admin">Administrators only</option>
+            <option value="mod">Admins and moderators</option>
+            <option value="dj">Admins, moderators and DJs</option>
+            <option value="members">All members</option>
           </select>
         </Row>
         <Row label="DJ Role" desc={config.djRoleName || 'All members can DJ'}>
@@ -136,15 +234,13 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
               onChange={(e) => setConfig({ ...config, voteSkipPercent: Number(e.target.value) / 100 })}
               className={rangeClass}
             />
-            <input
-              type="number" min={10} max={100} step={1}
+            <NumberInput
               value={Math.round(config.voteSkipPercent * 100)}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                if (Number.isNaN(value)) return;
-                setConfig({ ...config, voteSkipPercent: clamp(value, 10, 100) / 100 });
-              }}
-              aria-label="Vote skip percent"
+              min={10}
+              max={100}
+              step={1}
+              onCommit={(value) => setConfig({ ...config, voteSkipPercent: value / 100 })}
+              ariaLabel="Vote skip percent"
               className={compactValueInputClass}
             />
             <span className="text-xs text-text-secondary">%</span>
@@ -156,14 +252,13 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
         <Row label="Default Volume">
           <div className="flex items-center gap-2">
             <input type="range" min={0} max={100} value={config.defaultVolume} onChange={(e) => setConfig({ ...config, defaultVolume: Number(e.target.value) })} className={rangeClass} />
-            <input
-              type="number" min={0} max={100} step={1} value={config.defaultVolume}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                if (Number.isNaN(value)) return;
-                setConfig({ ...config, defaultVolume: clamp(value, 0, 100) });
-              }}
-              aria-label="Default volume"
+            <NumberInput
+              value={config.defaultVolume}
+              min={0}
+              max={100}
+              step={1}
+              onCommit={(value) => setConfig({ ...config, defaultVolume: value })}
+              ariaLabel="Default volume"
               className={compactValueInputClass}
             />
             <span className="text-xs text-text-secondary">%</span>
@@ -172,14 +267,13 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
         <Row label="Maximum Volume">
           <div className="flex items-center gap-2">
             <input type="range" min={10} max={500} value={config.maxVolume} onChange={(e) => setConfig({ ...config, maxVolume: Number(e.target.value) })} className={rangeClass} />
-            <input
-              type="number" min={10} max={500} step={1} value={config.maxVolume}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                if (Number.isNaN(value)) return;
-                setConfig({ ...config, maxVolume: clamp(value, 10, 500) });
-              }}
-              aria-label="Maximum volume"
+            <NumberInput
+              value={config.maxVolume}
+              min={10}
+              max={500}
+              step={1}
+              onCommit={(value) => setConfig({ ...config, maxVolume: value })}
+              ariaLabel="Maximum volume"
               className={compactValueInputClass}
             />
             <span className="text-xs text-text-secondary">%</span>
@@ -214,14 +308,13 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
         <Row label="AFK Timeout">
           <div className="flex items-center gap-2">
             <input type="range" min={0.5} max={30} step={0.5} value={config.afkTimeout / 60000} onChange={(e) => setConfig({ ...config, afkTimeout: Number(e.target.value) * 60000 })} className={rangeClass} />
-            <input
-              type="number" min={0.5} max={30} step={0.5} value={Number((config.afkTimeout / 60000).toFixed(1))}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                if (Number.isNaN(value)) return;
-                setConfig({ ...config, afkTimeout: clamp(value, 0.5, 30) * 60000 });
-              }}
-              aria-label="AFK timeout minutes"
+            <NumberInput
+              value={Number((config.afkTimeout / 60000).toFixed(1))}
+              min={0.5}
+              max={30}
+              step={0.5}
+              onCommit={(value) => setConfig({ ...config, afkTimeout: value * 60000 })}
+              ariaLabel="AFK timeout minutes"
               className={compactValueInputClass}
             />
             <span className="text-xs text-text-secondary">m</span>
@@ -265,6 +358,29 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
           Reset
         </button>
       </div>
+
+      {isDirty && createPortal(
+        <div className="fixed bottom-5 right-5 z-[100] flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-bg-card/95 backdrop-blur px-4 py-3 shadow-2xl animate-fade-up">
+          <span className="text-sm text-text-secondary">You have unsaved changes</span>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => savedConfig && setConfig(savedConfig)}
+            className="px-3 py-1.5 rounded-md border border-border text-xs font-semibold text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => save(config as any)}
+            className="px-4 py-1.5 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-hover disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

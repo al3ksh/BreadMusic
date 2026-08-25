@@ -100,7 +100,8 @@ const createConfigCommands = (context) => {
         sub
           .setName('set')
           .setDescription('Set selected options (dashboard available).')
-          .addRoleOption((option) => option.setName('dj_role').setDescription('Rola DJ.'))
+          .addRoleOption((option) => option.setName('dj_role').setDescription('Rola DJ (tylko muzyka, np. Activity).'))
+          .addRoleOption((option) => option.setName('mod_role').setDescription('Rola moderatora dashboardu.'))
           .addIntegerOption((option) =>
             option
               .setName('max_volume')
@@ -136,7 +137,7 @@ const createConfigCommands = (context) => {
               .setDescription('Who can open the server dashboard?')
               .addChoices(
                 { name: 'Administrators only', value: 'admin' },
-                { name: 'Administrators and DJs', value: 'dj' },
+                { name: 'Administrators and moderators', value: 'mod' },
                 { name: 'All server members', value: 'members' },
               ),
           )
@@ -158,6 +159,18 @@ const createConfigCommands = (context) => {
                 { name: 'Classic - local recommendations, no AI', value: 'classic' },
                 { name: 'AI assisted - current hybrid behavior', value: 'ai_assisted' },
                 { name: 'Discovery - AI genre radio with fresh tracks', value: 'discovery' },
+              ),
+          )
+          .addStringOption((option) =>
+            option
+              .setName('activity_control')
+              .setDescription('Who can control playback inside the Activity (must be in the bot voice channel)')
+              .addChoices(
+                { name: 'Inherit - follow dashboard access', value: 'inherit' },
+                { name: 'Administrators only', value: 'admin' },
+                { name: 'Admins and moderators', value: 'mod' },
+                { name: 'Admins, moderators and DJs', value: 'dj' },
+                { name: 'All members', value: 'members' },
               ),
           ),
       )
@@ -205,6 +218,8 @@ const createConfigCommands = (context) => {
       const updates = {};
       const djRole = interaction.options.getRole('dj_role');
       if (djRole) updates.djRoleId = djRole.id;
+      const modRole = interaction.options.getRole('mod_role');
+      if (modRole) updates.modRoleId = modRole.id;
       const maxVolume = interaction.options.getInteger('max_volume');
       if (maxVolume !== null) updates.maxVolume = Math.max(10, Math.min(500, maxVolume));
       const voteSkip = interaction.options.getNumber('voteskip_percent');
@@ -225,6 +240,8 @@ const createConfigCommands = (context) => {
       if (prefSource) updates.preferredSource = prefSource;
       const autoplayMode = interaction.options.getString('autoplay_mode');
       if (autoplayMode) updates.autoplayMode = autoplayMode;
+      const activityControl = interaction.options.getString('activity_control');
+      if (activityControl) updates.activityControl = activityControl;
 
       const updated = setConfig(interaction.guildId, updates);
       const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
