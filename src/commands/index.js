@@ -23,6 +23,7 @@ const {
   buildQueueComponents,
 } = require('../music/queueFormatter');
 const { formatDuration, parseTimecode } = require('../utils/time');
+const { cleanTrackTitle } = require('../utils/trackTitles');
 const { isTrackSeekable, isUnseekableTrackError, seekTrack } = require('../music/trackCapabilities');
 const { getSelection, deleteSelection } = require('../state/searchCache');
 const {
@@ -168,10 +169,7 @@ function formatRankedRequesters(items, emptyMessage) {
 function formatRankedTracks(items, emptyMessage) {
   if (!items?.length) return emptyMessage;
   return items.map((item) => {
-    const rawTitle = String(item.title || 'Unknown')
-      .replace(/\s*[\[(][^\])]*(prod|official|video|audio|lyric|visualizer|hd|hq|4k)[^\])]*[\])]/gi, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
+    const rawTitle = cleanTrackTitle(String(item.title || 'Unknown'));
     const title = rawTitle.length > 48 ? `${rawTitle.slice(0, 45)}...` : rawTitle;
     return `**${item.rank}.** ${title} \u2014 ${item.count}x`;
   }).join('\n').slice(0, 1024);

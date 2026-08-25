@@ -1,4 +1,5 @@
 const { getConfig, setConfig, AUTOPLAY_MODES } = require('../state/guildConfig');
+const { cleanTrackTitle: cleanTitle } = require('../utils/trackTitles');
 const { getDiscoveryArtists, getGenreRadioPlan, pickCandidateWithGemini, resetGeminiAutoplayState } = require('./autoplayAi');
 
 const recentTracks = new Map();
@@ -294,16 +295,6 @@ function cleanArtistName(author) {
   return normalizeComparable(author)
     .replace(/\b(topic|vevo|official|music|records|recordings|label|entertainment)\b$/gi, '')
     .replace(/\b(ft|feat|featuring|prod)\b.*$/gi, '')
-    .trim();
-}
-
-function cleanTitle(title) {
-  if (!title) return '';
-  return String(title)
-    .replace(/\s*\([^)]*(official|video|audio|lyric|hd|hq|4k|prod|visualizer)[^)]*\)/gi, '')
-    .replace(/\s*\[[^\]]*(official|video|audio|lyric|hd|hq|4k|prod|visualizer)[^\]]*\]/gi, '')
-    .replace(/\s*[-|]\s*(official|video|audio|lyrics?|visualizer).*$/gi, '')
-    .replace(/\s+/g, ' ')
     .trim();
 }
 
