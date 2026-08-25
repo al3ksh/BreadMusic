@@ -81,7 +81,7 @@ export function AddToDiscordModal({ open, onClose }: AddToDiscordModalProps) {
           Add to Discord
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          Bread is private right now. If you want access, message me directly or deploy it yourself.
+          Bread is private right now. If you want access, message me directly on Discord.
         </p>
 
         <div className="mt-6 space-y-3">
@@ -108,7 +108,7 @@ export function AddToDiscordModal({ open, onClose }: AddToDiscordModalProps) {
             rel="noreferrer"
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 font-semibold text-white transition-all hover:bg-accent-hover"
           >
-            Deploy it yourself
+            View source on GitHub
             <ExternalLink size={16} />
           </a>
         </div>

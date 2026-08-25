@@ -7,12 +7,12 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 
 ARG LAVALINK_VERSION=4.2.2
-RUN wget -q https://github.com/lavalink-devs/Lavalink/releases/download/${LAVALINK_VERSION}/Lavalink.jar -O Lavalink.jar
+ARG LAVASRC_VERSION=4.8.3
+RUN wget -q https://github.com/lavalink-devs/Lavalink/releases/download/${LAVALINK_VERSION}/Lavalink.jar -O Lavalink.jar \
+	&& mkdir -p plugins \
+	&& wget -q https://github.com/topi314/LavaSrc/releases/download/${LAVASRC_VERSION}/lavasrc-plugin-${LAVASRC_VERSION}.jar -O plugins/lavasrc-plugin-${LAVASRC_VERSION}.jar
 
 COPY application.example.yml application.yml
-
-RUN mkdir -p plugins
-COPY plugins/ ./plugins/
 
 EXPOSE 2333
 

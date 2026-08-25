@@ -45,3 +45,5 @@ configs.json
 lavalink/logs/
 lavalink/*.log
 lavalink/application.yml
+lavalink/Lavalink.jar
+lavalink/plugins/*.jar

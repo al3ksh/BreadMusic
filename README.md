@@ -446,6 +446,9 @@ Bread is free software distributed under the
 that version available through a network, you must make the corresponding
 source code available to users under the same license.
 
+**Self-hosting:** the repository contains everything a technical user needs to
+run their own instance.
+
 Third-party dependencies and bundled Lavalink plugins remain covered by their
 respective licenses.
 
