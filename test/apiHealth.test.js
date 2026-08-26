@@ -1,6 +1,16 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import { createApiServer } from '../src/server.js';
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bread-api-health-'));
+process.env.BREAD_DATA_DIR = testDataDir;
+process.env.NODE_ENV = 'test';
+process.env.SESSION_SECRET = 'api-health-test-secret';
+process.env.WEB_URL = 'http://localhost:3000';
+
+const { createApiServer } = require('../src/server');
 
 function makeClient({ ready = true, connectedNodes = 1 } = {}) {
   const nodes = new Map();
@@ -25,25 +35,12 @@ function makeClient({ ready = true, connectedNodes = 1 } = {}) {
 }
 
 async function withServer(client, callback) {
-  const previous = {
-    NODE_ENV: process.env.NODE_ENV,
-    SESSION_SECRET: process.env.SESSION_SECRET,
-    WEB_URL: process.env.WEB_URL,
-  };
-  process.env.NODE_ENV = 'test';
-  process.env.SESSION_SECRET = 'api-health-test-secret';
-  process.env.WEB_URL = 'http://localhost:3000';
-
   const server = createApiServer(client).listen(0);
   try {
     const address = server.address();
     await callback(`http://127.0.0.1:${address.port}`);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
   }
 }
 
