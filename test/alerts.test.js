@@ -148,3 +148,28 @@ test('memory tick alerts when RSS stays above the configured limit', async () =>
 
   monitor.stop();
 });
+
+test('Gemini monitoring waits for a real successful request before resolving an alert', async () => {
+  const { sent, transport } = collectTranscript();
+  const alerter = createAlertManager({ transports: [transport] });
+  const { startMonitoring } = require('../src/utils/alerts');
+  let status = { enabled: true, healthy: false, circuitOpen: false, retryInMs: 0, lastError: 'network down' };
+  const monitor = startMonitoring({
+    client: { isReady: () => true, lavalink: { nodeManager: { nodes: new Map() } } },
+    alerter,
+    getGeminiStatus: () => status,
+  });
+
+  for (let index = 0; index < 5; index += 1) await monitor.checks.geminiTick();
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].title, /gemini/i);
+
+  await monitor.checks.geminiTick();
+  assert.equal(sent.length, 1);
+
+  status = { ...status, healthy: true, lastError: '' };
+  await monitor.checks.geminiTick();
+  assert.equal(sent.length, 2);
+  assert.match(sent[1].title, /Resolved: gemini/);
+  monitor.stop();
+});

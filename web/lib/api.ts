@@ -47,17 +47,18 @@ export interface GuildInfo {
   member_count: number;
   bot_present: boolean;
   access_level: 'admin' | 'mod' | 'member';
-  dashboard_access: 'admin' | 'dj' | 'members';
+  dashboard_access: 'admin' | 'mod' | 'members';
   can_access: boolean;
   can_invite: boolean;
 }
 
 export interface DashboardCapabilities {
-  accessLevel: 'admin' | 'dj' | 'member';
-  dashboardAccess: 'admin' | 'dj' | 'members';
+  accessLevel: 'admin' | 'mod' | 'member';
+  dashboardAccess: 'admin' | 'mod' | 'members';
   canAccess: boolean;
   canView: boolean;
   canControlPlayer: boolean;
+  canQueue: boolean;
   canUpload: boolean;
   canManageConfig: boolean;
   canManageEconomy: boolean;

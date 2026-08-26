@@ -424,6 +424,7 @@ client.on(Events.InteractionCreate, safeEventHandler('InteractionCreate', async 
       const command = client.commands.get(interaction.commandName);
       if (!command) return;
       await command.execute(interaction);
+      if (interaction.guildId) broadcastPlayerUpdate(interaction.guildId);
       return;
     }
 

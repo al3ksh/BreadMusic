@@ -13,6 +13,11 @@ const DISCOVERY_DISTANCES = new Set(['close', 'medium', 'broad']);
 const rankingCache = new Map();
 const selectionProfiles = new Map();
 let unavailableUntil = 0;
+let lastAttemptAt = 0;
+let lastSuccessAt = 0;
+let lastFailureAt = 0;
+let consecutiveFailures = 0;
+let lastError = '';
 
 const RESPONSE_SCHEMA = {
   type: 'object',
@@ -423,7 +428,24 @@ function breakerDelay(status) {
   if (status === 400 || status === 401 || status === 403) return 10 * 60 * 1000;
   if (status === 429) return 60 * 1000;
   if (status >= 500) return 20 * 1000;
-  return 0;
+  return 20 * 1000;
+}
+
+function recordGeminiSuccess(now) {
+  lastAttemptAt = now;
+  lastSuccessAt = now;
+  consecutiveFailures = 0;
+  lastError = '';
+  unavailableUntil = 0;
+}
+
+function recordGeminiFailure(error, now) {
+  const status = Number(error?.status) || 0;
+  lastAttemptAt = now;
+  lastFailureAt = now;
+  consecutiveFailures += 1;
+  lastError = safeText(error?.name === 'AbortError' ? 'timeout' : error?.message, 240) || 'unknown failure';
+  unavailableUntil = Math.max(unavailableUntil, now + breakerDelay(status));
 }
 
 async function requestStructuredJson(systemInstruction, payload, schema, config, options = {}) {
@@ -588,13 +610,12 @@ async function getGenreRadioPlan(context, options = {}) {
     );
     const artists = validateDiscoveryArtists(parsed.artists, payload.coreArtists);
     if (artists.length < 3) throw new Error('Gemini genre radio plan contained too few valid artists');
+    recordGeminiSuccess(now);
     const genre = safeText(parsed.genre, 80);
     options.logger?.('info', `Genre radio plan (${genre || 'unknown scene'}): ${artists.map((entry) => `${entry.name}:${entry.distance}`).join(', ')}`);
     return artists;
   } catch (error) {
-    const status = Number(error.status) || 0;
-    const delay = breakerDelay(status);
-    if (delay) unavailableUntil = now + delay;
+    recordGeminiFailure(error, now);
     options.logger?.('warn', `Gemini genre radio planner unavailable (${error.name === 'AbortError' ? 'timeout' : error.message}); falling back to standard retrieval`);
     return [];
   }
@@ -618,12 +639,11 @@ async function getDiscoveryArtists(context, options = {}) {
     );
     const artists = validateDiscoveryArtists(parsed.artists, payload.coreArtists);
     if (artists.length < 3) throw new Error('Gemini discovery plan contained too few valid artists');
+    recordGeminiSuccess(now);
     options.logger?.('info', `Discovery plan: ${artists.map((entry) => `${entry.name}:${entry.distance}`).join(', ')}`);
     return artists;
   } catch (error) {
-    const status = Number(error.status) || 0;
-    const delay = breakerDelay(status);
-    if (delay) unavailableUntil = now + delay;
+    recordGeminiFailure(error, now);
     options.logger?.('warn', `Gemini discovery planner unavailable (${error.name === 'AbortError' ? 'timeout' : error.message}); using existing retrieval`);
     return [];
   }
@@ -651,12 +671,11 @@ async function pickCandidateWithGemini(scoredCandidates, context, options = {}) 
     if (!ranking) {
       cached = false;
       ranking = await requestRanking(payload, eligible, config, options);
+      recordGeminiSuccess(now);
       cacheRanking(cacheKey, ranking, now);
     }
   } catch (error) {
-    const status = Number(error.status) || 0;
-    const delay = breakerDelay(status);
-    if (delay) unavailableUntil = now + delay;
+    recordGeminiFailure(error, now);
     options.logger?.('warn', `Gemini selector unavailable (${error.name === 'AbortError' ? 'timeout' : error.message}); using local fallback`);
     return null;
   }
@@ -671,8 +690,14 @@ function getGeminiStatus(now = Date.now()) {
   const config = getRuntimeConfig();
   return {
     enabled: Boolean(config.enabled),
+    healthy: consecutiveFailures === 0,
     circuitOpen: unavailableUntil > now,
     retryInMs: Math.max(0, unavailableUntil - now),
+    consecutiveFailures,
+    lastAttemptAt,
+    lastSuccessAt,
+    lastFailureAt,
+    lastError,
   };
 }
 
@@ -680,6 +705,11 @@ function resetForTests() {
   rankingCache.clear();
   selectionProfiles.clear();
   unavailableUntil = 0;
+  lastAttemptAt = 0;
+  lastSuccessAt = 0;
+  lastFailureAt = 0;
+  consecutiveFailures = 0;
+  lastError = '';
 }
 
 module.exports = {

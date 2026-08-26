@@ -362,8 +362,10 @@ function createPlayerRouter({
       const memberVoiceChannelId = member?.voice?.channelId || null;
       const connectedBotVoiceChannelId = guild?.members?.me?.voice?.channelId || null;
       let botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
-      const privileged = capabilities.accessLevel === 'admin' || capabilities.accessLevel === 'dj';
-      if (!capabilities.canControlPlayer && action !== 'skip') {
+      const privileged = capabilities.canControlPlayer === true;
+      const canQueue = capabilities.canQueue === true;
+      const queueContributorAction = action === 'search' || action === 'play';
+      if (!privileged && action !== 'skip' && !(canQueue && queueContributorAction)) {
         return res.status(403).json({ error: 'Player control is not enabled for your role' });
       }
 

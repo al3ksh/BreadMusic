@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Backs up the Bread SQLite database and OAuth sessions with rotation.
-# Intended for cron:  15 */6 * * * /path/to/scripts/backup-data.sh
+# Intended for cron:  15 */6 * * * /usr/bin/env bash /path/to/scripts/backup-data.sh
 set -euo pipefail
 
 SOURCE_DIR="${BREAD_DATA_DIR:-/home/alexpi/apps/discord-bot/data}"

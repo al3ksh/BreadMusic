@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { getDiscoveryArtists, getGenreRadioPlan, pickCandidateWithGemini, __testing } = require('../src/music/autoplayAi');
+const { getDiscoveryArtists, getGeminiStatus, getGenreRadioPlan, pickCandidateWithGemini, __testing } = require('../src/music/autoplayAi');
 
 function candidate(key, title, artist, score = 60) {
   return {
@@ -277,6 +277,36 @@ test('Gemini failure returns null so the local selector can take over', async ()
   assert.equal(requests, 1);
   assert.equal(messages[0].level, 'warn');
   assert.match(messages[0].message, /local fallback/);
+  assert.equal(getGeminiStatus().healthy, false);
+  assert.equal(getGeminiStatus().consecutiveFailures, 1);
+});
+
+test('Gemini health recovers only after a successful provider response', async () => {
+  const candidates = [
+    candidate('a', 'First Track', 'Artist A'),
+    candidate('b', 'Second Track', 'Artist B'),
+  ];
+  const failedAt = 1_000;
+  await pickCandidateWithGemini(candidates, context(), {
+    apiKey: 'test-key',
+    now: () => failedAt,
+    fetchImpl: async () => { throw new Error('network down'); },
+  });
+
+  assert.equal(getGeminiStatus(failedAt + 30_000).circuitOpen, false);
+  assert.equal(getGeminiStatus(failedAt + 30_000).healthy, false);
+
+  await pickCandidateWithGemini(candidates, context(), {
+    apiKey: 'test-key',
+    now: () => failedAt + 30_000,
+    fetchImpl: async () => geminiResponse([
+      { id: 'c1', score: 90, reason: 'recovered' },
+      { id: 'c2', score: 70, reason: 'alternative' },
+    ]),
+  });
+
+  assert.equal(getGeminiStatus(failedAt + 30_000).healthy, true);
+  assert.equal(getGeminiStatus(failedAt + 30_000).consecutiveFailures, 0);
 });
 
 test('Gemini selector stays disabled when no API key is configured', async () => {

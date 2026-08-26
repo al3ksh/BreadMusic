@@ -118,6 +118,7 @@ test('activity control requires the member to share the voice channel', () => {
     botVoiceChannelId: 'vc-1',
   });
   assert.equal(inBotChannel.canControlPlayer, true);
+  assert.equal(inBotChannel.canQueue, true);
 
   const botIdle = resolveActivityCapabilities(memberWith(), config, {
     memberVoiceChannelId: 'vc-1',
@@ -130,6 +131,24 @@ test('activity control requires the member to share the voice channel', () => {
     botVoiceChannelId: 'vc-1',
   });
   assert.equal(differentChannel.canControlPlayer, false);
+  assert.equal(differentChannel.canQueue, false);
+});
+
+test('read-only Activity members can summon the bot or contribute in its channel', () => {
+  const config = { dashboardAccess: 'members', djRoleId: 'dj-role', activityControl: 'admin' };
+  const sameChannel = resolveActivityCapabilities(memberWith(), config, {
+    memberVoiceChannelId: 'vc-1',
+    botVoiceChannelId: 'vc-1',
+  });
+  assert.equal(sameChannel.canControlPlayer, false);
+  assert.equal(sameChannel.canQueue, true);
+
+  const botIdle = resolveActivityCapabilities(memberWith(), config, {
+    memberVoiceChannelId: 'vc-1',
+    botVoiceChannelId: null,
+  });
+  assert.equal(botIdle.canControlPlayer, false);
+  assert.equal(botIdle.canQueue, true);
 });
 
 test('activity control drops when the member leaves voice', () => {
@@ -197,6 +216,17 @@ test('activityControl admin restricts even DJs and mods', () => {
   assert.equal(resolveActivityCapabilities(memberWith({ roles: ['dj-role'] }), config).canControlPlayer, false);
   assert.equal(resolveActivityCapabilities(memberWith({ roles: ['mod-role'] }), config).canControlPlayer, false);
   assert.equal(resolveActivityCapabilities(memberWith({ permissions: ['ManageGuild'] }), config).canControlPlayer, true);
+});
+
+test('player authorization follows the explicit capability instead of the legacy access level', () => {
+  const config = { dashboardAccess: 'members', djRoleId: 'dj-role' };
+  const dj = resolveDashboardCapabilities(memberWith({ roles: ['dj-role'] }), config);
+  const member = resolveDashboardCapabilities(memberWith(), config);
+
+  assert.equal(dj.accessLevel, 'member');
+  assert.equal(dj.canControlPlayer, true);
+  assert.equal(member.accessLevel, 'member');
+  assert.equal(member.canControlPlayer, false);
 });
 
 test('activityControl mod admits the mod role', () => {

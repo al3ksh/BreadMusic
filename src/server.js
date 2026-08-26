@@ -331,19 +331,9 @@ function createApiServer(client) {
   uploadCleanupTimer.unref?.();
 
   async function requireAuth(req, res, next) {
-    if (!req.session?.user) {
-      const activityToken = readBearerToken(req);
-      if (!activityToken) {
-        return res.status(401).json({ error: 'Not authenticated' });
-      }
-
-      const activityUser = await resolveActivityUser(activityToken);
-      if (!activityUser) {
-        return res.status(401).json({ error: 'Activity authentication expired' });
-      }
-
-      req.activityUser = activityUser;
-    }
+    const auth = await resolveRequestAuth(req);
+    if (auth.error) return res.status(401).json({ error: auth.error });
+    if (auth.activityUser) req.activityUser = auth.activityUser;
     next();
   }
 
@@ -1700,6 +1690,19 @@ function getRequestUser(req) {
   return req.activityUser || req.session?.user || null;
 }
 
+async function resolveRequestAuth(req, resolveActivityUserImpl = resolveActivityUser) {
+  const activityToken = readBearerToken(req);
+  if (activityToken) {
+    const activityUser = await resolveActivityUserImpl(activityToken);
+    return activityUser
+      ? { activityUser }
+      : { error: 'Activity authentication expired' };
+  }
+  return req.session?.user
+    ? { sessionUser: req.session.user }
+    : { error: 'Not authenticated' };
+}
+
 function readBearerToken(req) {
   const header = req.get('authorization') || '';
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -1792,4 +1795,8 @@ function buildTrustedOrigins(webUrl) {
   return origins;
 }
 
-module.exports = { createApiServer, broadcastPlayerUpdate };
+module.exports = {
+  createApiServer,
+  broadcastPlayerUpdate,
+  __testing: { resolveRequestAuth },
+};

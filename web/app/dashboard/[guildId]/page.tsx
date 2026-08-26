@@ -725,7 +725,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const hasCurrentTrack = Boolean(status.connected && status.currentTrack);
   const canUsePlayerControls = Boolean(status.connected);
   const canControlTrack = Boolean(status.connected && status.currentTrack);
-  const canUseDJControls = capabilities.accessLevel !== 'member';
+  const canUseDJControls = capabilities.canControlPlayer === true;
   const canSeekTrack = Boolean(canUseDJControls && canControlTrack && status.currentTrack?.seekable);
 
   const updateSeekPreview = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {

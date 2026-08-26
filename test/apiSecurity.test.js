@@ -10,7 +10,7 @@ process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'api-security-test-secret';
 process.env.WEB_URL = 'http://localhost:3000';
 
-const { createApiServer } = require('../src/server');
+const { createApiServer, __testing } = require('../src/server');
 
 const GUILD_ID = 'security-test-guild';
 
@@ -74,4 +74,33 @@ test('state-changing routes enforce trusted browser origins', async () => {
     assert.equal(trustedOrigin.status, 200);
     assert.deepEqual(await trustedOrigin.json(), { success: true });
   });
+});
+
+test('Activity bearer identity takes precedence over an existing dashboard session', async () => {
+  const sessionUser = { id: 'dashboard-user' };
+  const activityUser = { id: 'activity-user' };
+  const req = {
+    session: { user: sessionUser },
+    get(name) {
+      return name.toLowerCase() === 'authorization' ? 'Bearer activity-token' : '';
+    },
+  };
+
+  const auth = await __testing.resolveRequestAuth(req, async (token) => {
+    assert.equal(token, 'activity-token');
+    return activityUser;
+  });
+  assert.deepEqual(auth, { activityUser });
+});
+
+test('an invalid Activity bearer token never falls back to a dashboard session', async () => {
+  const req = {
+    session: { user: { id: 'dashboard-user' } },
+    get(name) {
+      return name.toLowerCase() === 'authorization' ? 'Bearer expired-token' : '';
+    },
+  };
+
+  const auth = await __testing.resolveRequestAuth(req, async () => null);
+  assert.deepEqual(auth, { error: 'Activity authentication expired' });
 });

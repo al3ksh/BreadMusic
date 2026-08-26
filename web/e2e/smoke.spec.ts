@@ -48,6 +48,7 @@ async function mockApi(page: Page, options: { canControlPlayer?: boolean } = {})
     canAccess: true,
     canView: true,
     canControlPlayer,
+    canQueue: true,
     canUpload: canControlPlayer,
     canManageConfig: canControlPlayer,
     canManageEconomy: canControlPlayer,
@@ -169,7 +170,7 @@ test('Activity uses mocked SDK and respects read-only access', async ({ page }) 
   const activity = page.frameLocator('iframe[title="Bread Activity"]');
   await expect(activity.getByText('Music Activity')).toBeVisible({ timeout: 30_000 });
   await expect(activity.getByText('View only')).toBeVisible();
-  await expect(activity.getByRole('button', { name: 'Add music' })).toBeDisabled();
+  await expect(activity.getByRole('button', { name: 'Add music' })).toBeEnabled();
   await expect.poll(async () => {
     const activityFrame = page.frames().find((frame) => frame.url().includes('/activity'));
     return activityFrame?.evaluate(() => window.__BREAD_TEST_RICH_PRESENCE_CALLS__?.some((entry) => entry?.details === 'Test track'));
@@ -177,8 +178,16 @@ test('Activity uses mocked SDK and respects read-only access', async ({ page }) 
   const activityFrame = page.frames().find((frame) => frame.url().includes('/activity'));
   expect(await activityFrame?.evaluate(() => window.__BREAD_TEST_ACTIVITY_SCOPES__)).toContain('rpc.activities.write');
   await activity.getByRole('button', { name: 'Queue' }).click();
-  await expect(activity.getByRole('complementary', { name: 'queue panel' })).toBeVisible();
-  await activity.getByRole('complementary', { name: 'queue panel' }).getByRole('button', { name: 'Close panel' }).click();
+  const queuePanel = activity.getByRole('complementary', { name: 'queue panel' });
+  await expect(queuePanel).toBeVisible();
+  await expect(queuePanel.getByRole('button', { name: /autoplay/i })).toHaveCount(0);
+  await queuePanel.getByRole('button', { name: 'Close panel' }).click();
+  await activity.getByRole('button', { name: 'Add music' }).click();
+  const searchPanel = activity.getByRole('complementary', { name: 'search panel' });
+  await searchPanel.getByLabel('Search for a track').fill('test track');
+  const playNow = searchPanel.getByRole('button', { name: 'Play Test track now' });
+  if (await playNow.count()) await expect(playNow).toBeDisabled();
+  await expect(searchPanel.getByRole('button', { name: 'Add Test track to queue' })).toBeEnabled();
   const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: window.innerWidth }));
   expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
 });

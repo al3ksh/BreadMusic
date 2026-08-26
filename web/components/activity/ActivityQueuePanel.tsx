@@ -1,6 +1,6 @@
-import { ChevronDown, Disc3, GripVertical, Radio, Trash2 } from 'lucide-react';
+import { ChevronDown, Disc3, GripVertical, Trash2 } from 'lucide-react';
 import type { Dispatch, SetStateAction } from 'react';
-import type { PlayerStatus, QueueTrack } from '@/lib/api';
+import type { QueueTrack } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 
 type ActivityQueue = {
@@ -11,9 +11,7 @@ type QueueRestoreState = { id: number; revision: string; throughPage: number };
 
 type ActivityQueuePanelProps = {
   queue: ActivityQueue | null;
-  status: PlayerStatus;
   canDj: boolean;
-  actionBusy: string | null;
   queueRestore: QueueRestoreState | null;
   dragIndex: number | null;
   dropIndex: number | null;
@@ -21,7 +19,6 @@ type ActivityQueuePanelProps = {
   setDragIndex: Dispatch<SetStateAction<number | null>>;
   setDropIndex: Dispatch<SetStateAction<number | null>>;
   stopQueueAutoScroll: () => void;
-  runControlAction: (action: string, body?: Record<string, unknown>) => void | Promise<unknown>;
   handleQueueDrop: (index: number) => void | Promise<unknown>;
   handleQueueRemove: (index: number) => void | Promise<unknown>;
   loadMoreQueue: () => void | Promise<unknown>;
@@ -29,9 +26,7 @@ type ActivityQueuePanelProps = {
 
 export function ActivityQueuePanel({
   queue,
-  status,
   canDj,
-  actionBusy,
   queueRestore,
   dragIndex,
   dropIndex,
@@ -39,22 +34,12 @@ export function ActivityQueuePanel({
   setDragIndex,
   setDropIndex,
   stopQueueAutoScroll,
-  runControlAction,
   handleQueueDrop,
   handleQueueRemove,
   loadMoreQueue,
 }: ActivityQueuePanelProps) {
   return (
     <div className="activity-queue-list">
-      <button
-        type="button"
-        className={`activity-queue-state activity-autoplay-toggle ${status.autoplay ? 'active' : ''}`}
-        disabled={!canDj || Boolean(actionBusy)}
-        aria-pressed={status.autoplay}
-        onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}
-      >
-        <Radio size={15} /> Autoplay {status.autoplay ? 'on' : 'off'}
-      </button>
       {!queue?.tracks.length ? (
         <div className="activity-empty"><Disc3 size={20} /><span>Queue is empty</span></div>
       ) : queue.tracks.map((track, index) => (

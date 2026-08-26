@@ -181,11 +181,12 @@ function startMonitoring({
     if (typeof getGeminiStatus !== 'function') return;
     const gemini = getGeminiStatus();
     if (!gemini.enabled) return;
-    if (gemini.circuitOpen) {
+    if (gemini.healthy === false || gemini.circuitOpen) {
       const minutes = Math.max(1, Math.round((gemini.retryInMs || 0) / 60_000));
+      const detail = gemini.lastError ? ` Last error: ${gemini.lastError}.` : '';
       await alerter.recordFailure(
         'gemini',
-        `Gemini autoplay has been failing for several cycles; retrying in ~${minutes} min. Classic autoplay continues in affected guilds.`,
+        `Gemini autoplay is unhealthy; retrying in ~${minutes} min.${detail} Classic autoplay continues in affected guilds.`,
         { threshold: 5, severity: 'warning' },
       );
     } else {

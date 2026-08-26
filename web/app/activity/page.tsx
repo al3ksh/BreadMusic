@@ -1151,6 +1151,7 @@ export default function ActivityPage() {
   }, [channelId, closePanel, notify, playerAction, searchPlaylist, status.currentTrack]);
 
   const canDj = capabilities?.canControlPlayer === true;
+  const canQueue = capabilities?.canQueue === true;
   const hasTrack = Boolean(status.connected && status.currentTrack);
   const canSeekTrack = Boolean(canDj && status.currentTrack?.seekable);
   const normalizedRepeatMode = String(status.repeatMode || 'off').toLowerCase();
@@ -1573,7 +1574,7 @@ export default function ActivityPage() {
         <ActivityPanelNav
           activePanel={activePanel}
           queueTotal={queue?.total || 0}
-          canDj={canDj}
+          canQueue={canQueue}
           hasTrack={hasTrack}
           togglePanel={togglePanel}
         />
@@ -1601,7 +1602,7 @@ export default function ActivityPage() {
                   <strong>{activePanel === 'queue' ? 'Queue' : activePanel === 'search' ? 'Add music' : 'Live lyrics'}</strong>
                   <span>
                     {activePanel === 'queue'
-                      ? `${queue?.total || 0} tracks - autoplay ${status.autoplay ? 'on' : 'off'}`
+                      ? `${queue?.total || 0} tracks`
                       : activePanel === 'search'
                         ? 'Search or upload audio'
                         : status.currentTrack?.title || 'Current track'}
@@ -1656,9 +1657,7 @@ export default function ActivityPage() {
                     ) : (
                       <ActivityQueuePanel
                         queue={queue}
-                        status={status}
                         canDj={canDj}
-                        actionBusy={actionBusy}
                         queueRestore={queueRestore}
                         dragIndex={dragIndex}
                         dropIndex={dropIndex}
@@ -1666,7 +1665,6 @@ export default function ActivityPage() {
                         setDragIndex={setDragIndex}
                         setDropIndex={setDropIndex}
                         stopQueueAutoScroll={stopQueueAutoScroll}
-                        runControlAction={runControlAction}
                         handleQueueDrop={handleQueueDrop}
                         handleQueueRemove={handleQueueRemove}
                         loadMoreQueue={loadMoreQueue}
@@ -1678,6 +1676,7 @@ export default function ActivityPage() {
                 {activePanel === 'search' && (
                   <ActivitySearchPanel
                     canDj={canDj}
+                    canQueue={canQueue}
                     hasTrack={hasTrack}
                     actionBusy={actionBusy}
                     searchQuery={searchQuery}

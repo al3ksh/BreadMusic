@@ -67,6 +67,7 @@ function resolveDashboardCapabilities(member, config) {
     // the admin/mod/members levels; the DJ role stays music-side but keeps
     // granting player control to members who already have dashboard access.
     canControlPlayer: canAccess && musicTrusted,
+    canQueue: canAccess && musicTrusted,
     canUpload: canAccess && musicTrusted,
     canManageConfig: admin,
     canManageEconomy: admin,
@@ -82,6 +83,7 @@ function resolveActivityCapabilities(member, config, voiceContext = {}) {
     : 'inherit';
 
   let canControlPlayer;
+  let canQueue;
   if (raw === 'inherit') {
     // Inherit keeps the exact dashboard rule: entry to the dashboard plus
     // the admin/mod/DJ music-trust check.
@@ -102,11 +104,21 @@ function resolveActivityCapabilities(member, config, voiceContext = {}) {
     if (!inBotVoice) canControlPlayer = false;
   }
 
+  if (Object.prototype.hasOwnProperty.call(voiceContext, 'memberVoiceChannelId')) {
+    const memberVoiceChannelId = voiceContext.memberVoiceChannelId ?? null;
+    const botVoiceChannelId = voiceContext.botVoiceChannelId ?? null;
+    canQueue = Boolean(memberVoiceChannelId)
+      && (!botVoiceChannelId || memberVoiceChannelId === botVoiceChannelId);
+  } else {
+    canQueue = canControlPlayer;
+  }
+
   return {
     ...capabilities,
     canAccess: true,
     canView: true,
     canControlPlayer,
+    canQueue,
     activityPolicy: raw === 'inherit' ? normalizeDashboardAccess(config?.dashboardAccess) : raw,
   };
 }

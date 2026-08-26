@@ -8,6 +8,7 @@ type SearchPlaylist = { key: string; name: string; trackCount: number; totalDura
 
 type ActivitySearchPanelProps = {
   canDj: boolean;
+  canQueue: boolean;
   hasTrack: boolean;
   actionBusy: string | null;
   searchQuery: string;
@@ -27,6 +28,7 @@ type ActivitySearchPanelProps = {
 
 export function ActivitySearchPanel({
   canDj,
+  canQueue,
   hasTrack,
   actionBusy,
   searchQuery,
@@ -48,6 +50,7 @@ export function ActivitySearchPanel({
       <div className="activity-search-box">
         <Search size={18} />
         <input
+          disabled={!canQueue}
           value={searchQuery}
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
@@ -58,7 +61,7 @@ export function ActivitySearchPanel({
           placeholder="Search YouTube or paste a link"
           aria-label="Search for a track"
         />
-        <button type="button" onClick={submitSearch} disabled={searching || !searchQuery.trim()} aria-label="Search">
+        <button type="button" onClick={submitSearch} disabled={!canQueue || searching || !searchQuery.trim()} aria-label="Search">
           {searching ? <ActivitySpinner /> : <ChevronDown size={17} className="activity-search-arrow" />}
         </button>
       </div>
@@ -94,8 +97,8 @@ export function ActivitySearchPanel({
               <span><strong>{track.title}</strong><small>{track.author} - {formatMs(track.duration)}</small></span>
               <div className="activity-search-actions">
                 {hasTrack && <button type="button" disabled={!canDj || Boolean(actionBusy)} onClick={() => playSearchResult(track, 'now')} title="Play now" aria-label={`Play ${track.title} now`}><Play size={15} /></button>}
-                <button type="button" disabled={!canDj || Boolean(actionBusy)} onClick={() => playSearchResult(track, 'queue')} title={hasTrack ? 'Add to queue' : 'Play'} aria-label={hasTrack ? `Add ${track.title} to queue` : `Play ${track.title}`}>
-                  {hasTrack ? <ListPlus size={15} /> : <Play size={15} />}
+                <button type="button" disabled={!canQueue || Boolean(actionBusy)} onClick={() => playSearchResult(track, 'queue')} title={canDj && !hasTrack ? 'Play' : 'Add to queue'} aria-label={canDj && !hasTrack ? `Play ${track.title}` : `Add ${track.title} to queue`}>
+                  {canDj && !hasTrack ? <Play size={15} /> : <ListPlus size={15} />}
                 </button>
               </div>
             </div>
