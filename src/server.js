@@ -28,6 +28,7 @@ const { hydratePlayer, getStoredLocalUploadPaths, savePlayerState } = require('.
 const { createGuildConfigRouter } = require('./routes/guildConfig');
 const { createPlayerRouter } = require('./routes/player');
 const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
+const { createServerExtensionHost } = require('./extensions/serverExtensions');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
 const { handleSkipRequest, clearVoteSkip, getVoteSkipSnapshot } = require('./music/skipManager');
 const { markPlayerStopping } = require('./music/playerLifecycle');
@@ -259,6 +260,7 @@ function broadcastPlayerUpdate(guildId) {
 }
 
 function createApiServer(client) {
+  const extensionHost = createServerExtensionHost();
   const app = express();
   client.on('breadPlayerNotice', ({ guildId, message, tone }) => {
     publishPlayerNotice(guildId, message, tone);
@@ -301,6 +303,7 @@ function createApiServer(client) {
       name: 'bread.sid',
     }),
   );
+
   attachControlMessageCacheListeners(client);
 
   app.use(createHealthRouter(client));
@@ -368,14 +371,24 @@ function createApiServer(client) {
     if (!member) {
       try {
         member = await guild.members.fetch(requestUser.id);
-      } catch {
-        res.status(403).json({ error: 'You are not in this guild' });
-        return null;
-      }
+      } catch {}
     }
 
     const config = getConfig(guildId);
-    const capabilities = resolveDashboardCapabilities(member, config);
+    const coreCapabilities = member ? resolveDashboardCapabilities(member, config) : null;
+    const extensionCapabilities = req.activityUser ? null : await extensionHost.resolveGuildAccess({
+      req,
+      requestUser,
+      guild,
+      member,
+      config,
+      capabilities: coreCapabilities,
+    });
+    const capabilities = extensionCapabilities || coreCapabilities;
+    if (!capabilities) {
+      res.status(403).json({ error: 'You are not in this guild' });
+      return null;
+    }
     req.guild = guild;
     req.guildMember = member;
     req.guildConfig = config;
@@ -477,6 +490,21 @@ function createApiServer(client) {
   }
 
   // ---- Auth ----
+
+  extensionHost.attach(app, {
+    client,
+    requireAuth,
+    requireTrustedOrigin,
+    requireDashboardActionRateLimit,
+    isGuildAllowed,
+    getConfig,
+    setConfig,
+    getRequestUser,
+    clearAutoplayState,
+    clearVoiceTrackStatus,
+    savePlayerState,
+    broadcastPlayerUpdate,
+  });
 
   app.use(createAuthRouter({
     discordApi: DISCORD_API,
