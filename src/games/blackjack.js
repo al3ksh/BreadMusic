@@ -3,8 +3,11 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  AttachmentBuilder,
 } = require('discord.js');
 const { getBalance, addBalance, removeBalance, hasBalance } = require('./economy');
+const { renderBlackjackImage } = require('./blackjackRenderer');
+const { recordArcadeGame } = require('./arcadeStats');
 
 const suits = ['♠', '♥', '♦', '♣'];
 const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -76,7 +79,20 @@ function formatHand(cards, revealAll) {
   return cards.map(formatCard).join(' ');
 }
 
-function startGame(userId, bet = 0) {
+function recordFinishedGame(userId, game) {
+  if (!game.finished || game.statsRecorded) return;
+  game.statsRecorded = true;
+  recordArcadeGame({
+    guildId: game.guildId,
+    userId,
+    game: 'blackjack',
+    outcome: game.outcome,
+    bet: game.bet,
+    payout: game.winnings,
+  });
+}
+
+function startGame(userId, bet = 0, guildId = null) {
   if (bet > 0) {
     if (!hasBalance(userId, bet)) {
       return { error: "You don't have enough 🍞!" };
@@ -93,6 +109,9 @@ function startGame(userId, bet = 0) {
     result: null,
     bet,
     winnings: 0,
+    guildId,
+    outcome: null,
+    statsRecorded: false,
   };
 
   const playerValue = handValue(game.player);
@@ -103,15 +122,18 @@ function startGame(userId, bet = 0) {
     if (dealerValue === 21) {
       game.result = '🤝 Push! Both have Blackjack - bet returned!';
       game.winnings = bet;
+      game.outcome = 'draw';
     } else {
       game.result = '🎉 Blackjack! You win 2.5x!';
       game.winnings = Math.floor(bet * 2.5);
+      game.outcome = 'win';
     }
     addBalance(userId, game.winnings);
   }
 
   games.set(userId, game);
   scheduleGameCleanup(userId);
+  recordFinishedGame(userId, game);
   return game;
 }
 
@@ -142,18 +164,23 @@ function stand(userId, options = {}) {
   if (playerTotal > 21) {
     game.result = 'You busted - over 21!';
     game.winnings = 0;
+    game.outcome = 'loss';
   } else if (dealerTotal > 21) {
     game.result = '🎉 You win! Dealer busted!';
     game.winnings = game.bet * 2;
+    game.outcome = 'win';
   } else if (playerTotal > dealerTotal) {
     game.result = '🎉 You win!';
     game.winnings = game.bet * 2;
+    game.outcome = 'win';
   } else if (playerTotal < dealerTotal) {
     game.result = 'Dealer wins!';
     game.winnings = 0;
+    game.outcome = 'loss';
   } else {
     game.result = 'Push - bet returned!';
     game.winnings = game.bet;
+    game.outcome = 'draw';
   }
 
   if (game.winnings > 0) {
@@ -161,6 +188,7 @@ function stand(userId, options = {}) {
   }
 
   game.finished = true;
+  recordFinishedGame(userId, game);
   return game;
 }
 
@@ -216,8 +244,49 @@ function buildEmbed(user, game) {
   return embed;
 }
 
-function buildComponents(userId, finished = false, canDouble = false) {
-  if (finished) return [];
+async function buildMessage(user, game, canDouble = false) {
+  const fallbackEmbed = buildEmbed(user, game);
+  const filename = `blackjack-${user.id}.png`;
+
+  try {
+    const image = await renderBlackjackImage({
+      username: user.globalName || user.displayName || user.username,
+      game,
+      balance: getBalance(user.id),
+      dealerValue: handValue(game.dealer),
+      playerValue: handValue(game.player),
+    });
+    const embed = new EmbedBuilder()
+      .setColor(game.finished ? (game.winnings > 0 ? '#22c55e' : '#ef4444') : '#8f82eb')
+      .setImage(`attachment://${filename}`)
+      .setFooter({ text: game.finished ? game.result ?? 'Game over.' : 'Choose your move below.' });
+
+    return {
+      embeds: [embed],
+      files: [new AttachmentBuilder(image, { name: filename })],
+      components: buildComponents(user.id, game.finished, canDouble, game.bet),
+    };
+  } catch (error) {
+    console.warn(`[Blackjack] Could not render game board: ${error.message}`);
+    return {
+      embeds: [fallbackEmbed],
+      files: [],
+      components: buildComponents(user.id, game.finished, canDouble, game.bet),
+    };
+  }
+}
+
+function buildComponents(userId, finished = false, canDouble = false, bet = 0) {
+  if (finished) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${BUTTON_PREFIX}:replay:${userId}:${Math.max(0, Number(bet) || 0)}`)
+          .setLabel('Play again')
+          .setStyle(ButtonStyle.Primary),
+      ),
+    ];
+  }
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`${BUTTON_PREFIX}:hit:${userId}`)
@@ -268,6 +337,7 @@ module.exports = {
   doubleDown,
   endGame,
   buildEmbed,
+  buildMessage,
   buildComponents,
   BUTTON_PREFIX: 'blackjack',
 };

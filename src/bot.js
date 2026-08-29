@@ -44,16 +44,34 @@ const {
 const { applyPreferredSource } = require('./music/searchUtils');
 const { formatDuration } = require('./utils/time');
 const {
+  startGame: startBlackjack,
   getGame: getBlackjackGame,
   hit: hitBlackjack,
   stand: standBlackjack,
   doubleDown: doubleBlackjack,
   endGame: endBlackjack,
   buildEmbed: buildBlackjackEmbed,
+  buildMessage: buildBlackjackMessage,
   buildComponents: buildBlackjackComponents,
   BUTTON_PREFIX: BLACKJACK_BUTTON_PREFIX,
 } = require('./games/blackjack');
 const { hasBalance, addBalance, removeBalance, getBalance } = require('./games/economy');
+const {
+  playSlots,
+  playRoulette,
+  playCoinflip,
+  buildSlotsMessage,
+  buildRouletteMessage,
+  buildCoinflipMessage,
+} = require('./games/gambling');
+const {
+  BUTTON_PREFIX: ARCADE_BUTTON_PREFIX,
+  buildReplayComponents,
+  consumeReplayToken,
+  parseReplayCustomId,
+  restoreReplayToken,
+} = require('./games/arcadeControls');
+const { recordArcadeGame } = require('./games/arcadeStats');
 const {
   handleAutoplay,
   scheduleAutoplayPrefetch,
@@ -84,6 +102,7 @@ const {
   createChallenge,
   setMessageInfo,
   buildRPSChallengeEmbed,
+  buildRPSChallengeMessage,
   buildRPSChallengeComponents,
   getChallenge,
   cancelChallenge,
@@ -92,7 +111,9 @@ const {
   cleanupChallenge,
   setExpireCallback,
   buildRPSDuelResultEmbed,
+  buildRPSDuelResultMessage,
   buildRPSExpiredEmbed,
+  buildRPSExpiredMessage,
 } = require('./games/fun');
 
 const HELP_BUTTON_PREFIX = 'help:';
@@ -375,8 +396,8 @@ client.once(Events.ClientReady, safeEventHandler('ClientReady', async (readyClie
         if (channel) {
           const message = await channel.messages.fetch(challenge.messageId);
           if (message) {
-            const expiredEmbed = buildRPSExpiredEmbed(challenge);
-            await message.edit({ embeds: [expiredEmbed], components: [] });
+            const expiredMessage = await buildRPSExpiredMessage(challenge);
+            await message.edit({ ...expiredMessage, components: [] });
           }
         }
       } catch (err) {
@@ -461,6 +482,11 @@ client.on(Events.InteractionCreate, safeEventHandler('InteractionCreate', async 
 
       if (interaction.customId.startsWith(BLACKJACK_BUTTON_PREFIX)) {
         await handleBlackjackButton(interaction);
+        return;
+      }
+
+      if (interaction.customId.startsWith(ARCADE_BUTTON_PREFIX)) {
+        await handleArcadeReplayButton(interaction);
         return;
       }
 
@@ -601,6 +627,7 @@ client.lavalink.nodeManager.on('disconnect', (node, reason) => {
       if (result && typeof result.catch === 'function') {
         result.catch((err) => console.warn(`Failed to reconnect node ${node.id}:`, err.message));
       }
+
     }
   }, delay);
   reconnectTimer.unref?.();
@@ -710,9 +737,31 @@ async function handleQueueButton(interaction) {
 }
 
 async function handleBlackjackButton(interaction) {
-  const [, action, userId] = interaction.customId.split(':');
+  const [, action, userId, replayBetString] = interaction.customId.split(':');
   if (interaction.user.id !== userId) {
     await interaction.reply({ content: 'Only the player can use these controls.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+
+  if (action === 'replay') {
+    if (getBlackjackGame(userId)) {
+      await interaction.reply({ content: 'You already have an active game! Finish it first.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      return;
+    }
+    await interaction.deferUpdate();
+    const replayBet = Math.max(0, Number(replayBetString) || 0);
+    const replayGame = startBlackjack(userId, replayBet, interaction.guildId);
+    if (replayGame.error) {
+      await interaction.followUp({ content: replayGame.error, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return;
+    }
+
+    const canDouble = replayGame.player.length === 2 && !replayGame.finished && replayBet > 0 && hasBalance(userId, replayBet);
+    const message = await buildBlackjackMessage(interaction.user, replayGame, canDouble);
+    if (replayGame.finished) {
+      endBlackjack(userId);
+    }
+    await interaction.editReply({ ...message, attachments: [] }).catch(() => {});
     return;
   }
 
@@ -745,15 +794,109 @@ async function handleBlackjackButton(interaction) {
     return;
   }
 
-  const embed = buildBlackjackEmbed(interaction.user, updatedGame);
   const canDouble = updatedGame.player && updatedGame.player.length === 2 && !updatedGame.finished && updatedGame.bet > 0 && hasBalance(userId, updatedGame.bet);
-  const components = buildBlackjackComponents(userId, updatedGame.finished, canDouble);
+  const message = await buildBlackjackMessage(interaction.user, updatedGame, canDouble);
 
   if (updatedGame.finished) {
     endBlackjack(userId);
   }
 
-  await interaction.editReply({ embeds: [embed], components }).catch(() => {});
+  await interaction.editReply({ ...message, attachments: [] }).catch(() => {});
+}
+
+async function handleArcadeReplayButton(interaction) {
+  const replay = parseReplayCustomId(interaction.customId);
+  if (!replay) {
+    await interaction.reply({ content: 'This replay button is invalid.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+  if (interaction.user.id !== replay.userId) {
+    await interaction.reply({ content: 'Only the player can replay this game.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+  if (!consumeReplayToken(replay.token, replay.userId)) {
+    await interaction.reply({ content: 'This replay button was already used or expired.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+
+  let result;
+  if (replay.game === 'slots') result = playSlots(replay.userId, replay.bet);
+  else if (replay.game === 'roulette') result = playRoulette(replay.userId, replay.bet, replay.option);
+  else result = playCoinflip(replay.userId, replay.bet, replay.option);
+
+  if (!result.success) {
+    restoreReplayToken(replay.token, replay.userId);
+    await interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+
+  await interaction.deferUpdate();
+  let message;
+  if (replay.game === 'slots') {
+    message = await buildSlotsMessage(
+      interaction.user.username,
+      result.result,
+      replay.bet,
+      result.winnings,
+      result.isWin,
+      result.newBalance,
+    );
+  } else if (replay.game === 'roulette') {
+    message = await buildRouletteMessage(
+      interaction.user.username,
+      result.spinResult,
+      result.color,
+      replay.option,
+      replay.bet,
+      result.isWin,
+      result.winnings,
+      result.newBalance,
+    );
+  } else {
+    message = await buildCoinflipMessage(
+      interaction.user.username,
+      result.result,
+      replay.option,
+      replay.bet,
+      result.isWin,
+      result.winnings,
+      result.newBalance,
+    );
+  }
+
+  recordArcadeGame({
+    guildId: interaction.guildId,
+    userId: replay.userId,
+    game: replay.game,
+    outcome: result.isWin ? 'win' : 'loss',
+    bet: replay.bet,
+    payout: result.winnings,
+  });
+  await interaction.editReply({
+    ...message,
+    attachments: [],
+    components: buildReplayComponents({
+      game: replay.game,
+      userId: replay.userId,
+      bet: replay.bet,
+      option: replay.option,
+    }),
+  });
+}
+
+function recordRpsDuel(challenge, outcome, guildId) {
+  for (const userId of [challenge.challengerId, challenge.targetId]) {
+    const draw = outcome.result === 'draw';
+    const won = outcome.winnerId === userId;
+    recordArcadeGame({
+      guildId,
+      userId,
+      game: 'rps-duel',
+      outcome: draw ? 'draw' : won ? 'win' : 'loss',
+      bet: challenge.bet,
+      payout: draw ? challenge.bet : won ? challenge.bet * 2 : 0,
+    });
+  }
 }
 
 async function handleHelpButton(interaction) {
@@ -855,11 +998,11 @@ async function handleRPSButton(interaction) {
       choice,
     );
 
-    const embed = buildRPSChallengeEmbed(challenge);
     const components = buildRPSChallengeComponents(challenge);
+    const challengeMessage = await buildRPSChallengeMessage(challenge, components);
 
     try {
-      const message = await interaction.channel.send({ content: `<@${targetId}>`, embeds: [embed], components });
+      const message = await interaction.channel.send({ content: `<@${targetId}>`, ...challengeMessage });
       setMessageInfo(challenge.id, message.channelId, message.id);
       await interaction.update({
         content: `✅ Challenge sent to <@${targetId}>. Your move is hidden until duel ends.`,
@@ -964,8 +1107,9 @@ async function handleRPSButton(interaction) {
         }
       }
 
-      const resultEmbed = buildRPSDuelResultEmbed(fallbackChallenge, outcome);
-      await interaction.update({ embeds: [resultEmbed], components: [] }).catch(() => {});
+      const resultMessage = await buildRPSDuelResultMessage(fallbackChallenge, outcome);
+      await interaction.update({ ...resultMessage, components: [] }).catch(() => {});
+      recordRpsDuel(fallbackChallenge, outcome, interaction.guildId);
       return;
     }
 
@@ -1035,12 +1179,13 @@ async function handleRPSButton(interaction) {
       }
     }
     
-    const resultEmbed = buildRPSDuelResultEmbed(updatedChallenge, outcome);
+    const resultMessage = await buildRPSDuelResultMessage(updatedChallenge, outcome);
     
     await interaction.update({ 
-      embeds: [resultEmbed], 
+      ...resultMessage,
       components: [] 
     }).catch(() => {});
+    recordRpsDuel(updatedChallenge, outcome, interaction.guildId);
     
     cleanupChallenge(challengeId);
     return;

@@ -1,3 +1,7 @@
+function arcadeOutcome(result) {
+  return result === 'win' ? 'win' : result === 'draw' ? 'draw' : 'loss';
+}
+
 const createArcadeCommands = (context) => {
   const {
     SlashCommandBuilder,
@@ -45,13 +49,22 @@ const createArcadeCommands = (context) => {
     buildSlotsEmbed,
     buildRouletteEmbed,
     buildCoinflipEmbed,
+    buildSlotsMessage,
+    buildRouletteMessage,
+    buildCoinflipMessage,
     playRPS,
     magic8Ball,
     rollDice,
     buildRPSEmbed,
     build8BallEmbed,
     buildDiceEmbed,
+    buildRPSMessage,
+    build8BallMessage,
+    buildDiceMessage,
+    buildRPSPrepareMessage,
     buildRPSChoiceComponents,
+    buildReplayComponents,
+    recordArcadeGame,
     applyPreferredSource,
     handleSkipRequest,
     markPlayerStopping,
@@ -94,10 +107,10 @@ const createArcadeCommands = (context) => {
       .setName('slots')
       .setDescription('Spin the slot machine.')
       .addIntegerOption((option) =>
-        option.setName('bet').setDescription('Amount to bet').setRequired(true).setMinValue(1),
+        option.setName('bet').setDescription('Amount to bet (optional)').setMinValue(1),
       ),
     async execute(interaction) {
-      const bet = interaction.options.getInteger('bet', true);
+      const bet = interaction.options.getInteger('bet') || 0;
       const result = playSlots(interaction.user.id, bet);
 
       if (!result.success) {
@@ -105,9 +118,28 @@ const createArcadeCommands = (context) => {
         return;
       }
 
-      const embed = buildSlotsEmbed(result.result, bet, result.winnings, result.isWin, result.newBalance);
+      await interaction.deferReply();
       try {
-        await interaction.reply({ embeds: [embed] });
+        const message = await buildSlotsMessage(
+          interaction.user.username,
+          result.result,
+          bet,
+          result.winnings,
+          result.isWin,
+          result.newBalance,
+        );
+        await interaction.editReply({
+          ...message,
+          components: buildReplayComponents({ game: 'slots', userId: interaction.user.id, bet }),
+        });
+        recordArcadeGame({
+          guildId: interaction.guildId,
+          userId: interaction.user.id,
+          game: 'slots',
+          outcome: result.isWin ? 'win' : 'loss',
+          bet,
+          payout: result.winnings,
+        });
       } catch (error) {
         if (!result.isWin) {
           addBalance(interaction.user.id, bet);
@@ -120,9 +152,6 @@ const createArcadeCommands = (context) => {
     data: new SlashCommandBuilder()
       .setName('roulette')
       .setDescription('Spin the roulette wheel.')
-      .addIntegerOption((option) =>
-        option.setName('bet').setDescription('Amount to bet').setRequired(true).setMinValue(1),
-      )
       .addStringOption((option) =>
         option
           .setName('type')
@@ -135,9 +164,12 @@ const createArcadeCommands = (context) => {
             { name: 'Odd (2x)', value: 'odd' },
             { name: 'Even (2x)', value: 'even' },
           ),
+      )
+      .addIntegerOption((option) =>
+        option.setName('bet').setDescription('Amount to bet (optional)').setMinValue(1),
       ),
     async execute(interaction) {
-      const bet = interaction.options.getInteger('bet', true);
+      const bet = interaction.options.getInteger('bet') || 0;
       const betType = interaction.options.getString('type', true);
 
       const result = playRoulette(interaction.user.id, bet, betType);
@@ -147,17 +179,35 @@ const createArcadeCommands = (context) => {
         return;
       }
 
-      const embed = buildRouletteEmbed(
-        result.spinResult,
-        result.color,
-        betType,
-        bet,
-        result.isWin,
-        result.winnings,
-        result.newBalance,
-      );
+      await interaction.deferReply();
       try {
-        await interaction.reply({ embeds: [embed] });
+        const message = await buildRouletteMessage(
+          interaction.user.username,
+          result.spinResult,
+          result.color,
+          betType,
+          bet,
+          result.isWin,
+          result.winnings,
+          result.newBalance,
+        );
+        await interaction.editReply({
+          ...message,
+          components: buildReplayComponents({
+            game: 'roulette',
+            userId: interaction.user.id,
+            bet,
+            option: betType,
+          }),
+        });
+        recordArcadeGame({
+          guildId: interaction.guildId,
+          userId: interaction.user.id,
+          game: 'roulette',
+          outcome: result.isWin ? 'win' : 'loss',
+          bet,
+          payout: result.winnings,
+        });
       } catch (error) {
         if (!result.isWin) {
           addBalance(interaction.user.id, bet);
@@ -170,9 +220,6 @@ const createArcadeCommands = (context) => {
     data: new SlashCommandBuilder()
       .setName('coinflip')
       .setDescription('Flip a coin.')
-      .addIntegerOption((option) =>
-        option.setName('bet').setDescription('Amount to bet').setRequired(true).setMinValue(1),
-      )
       .addStringOption((option) =>
         option
           .setName('choice')
@@ -182,9 +229,12 @@ const createArcadeCommands = (context) => {
             { name: 'Heads', value: 'heads' },
             { name: 'Tails', value: 'tails' },
           ),
+      )
+      .addIntegerOption((option) =>
+        option.setName('bet').setDescription('Amount to bet (optional)').setMinValue(1),
       ),
     async execute(interaction) {
-      const bet = interaction.options.getInteger('bet', true);
+      const bet = interaction.options.getInteger('bet') || 0;
       const choice = interaction.options.getString('choice', true);
 
       const result = playCoinflip(interaction.user.id, bet, choice);
@@ -194,9 +244,34 @@ const createArcadeCommands = (context) => {
         return;
       }
 
-      const embed = buildCoinflipEmbed(result.result, choice, bet, result.isWin, result.winnings, result.newBalance);
+      await interaction.deferReply();
       try {
-        await interaction.reply({ embeds: [embed] });
+        const message = await buildCoinflipMessage(
+          interaction.user.username,
+          result.result,
+          choice,
+          bet,
+          result.isWin,
+          result.winnings,
+          result.newBalance,
+        );
+        await interaction.editReply({
+          ...message,
+          components: buildReplayComponents({
+            game: 'coinflip',
+            userId: interaction.user.id,
+            bet,
+            option: choice,
+          }),
+        });
+        recordArcadeGame({
+          guildId: interaction.guildId,
+          userId: interaction.user.id,
+          game: 'coinflip',
+          outcome: result.isWin ? 'win' : 'loss',
+          bet,
+          payout: result.winnings,
+        });
       } catch (error) {
         if (!result.isWin) {
           addBalance(interaction.user.id, bet);
@@ -261,8 +336,21 @@ const createArcadeCommands = (context) => {
           return;
         }
         const result = playRPS(choice);
-        const embed = buildRPSEmbed(result.playerChoice, result.botChoice, result.result, interaction.user.username);
-        await interaction.reply({ embeds: [embed] });
+        const message = await buildRPSMessage(
+          result.playerChoice,
+          result.botChoice,
+          result.result,
+          interaction.user.username,
+        );
+        await interaction.reply(message);
+        recordArcadeGame({
+          guildId: interaction.guildId,
+          userId: interaction.user.id,
+          game: 'rps',
+          outcome: arcadeOutcome(result.result),
+          bet: 0,
+          payout: 0,
+        });
         return;
       }
 
@@ -303,17 +391,14 @@ const createArcadeCommands = (context) => {
         }
       }
 
-      const embed = new EmbedBuilder()
-        .setTitle('⚔️ Prepare RPS duel')
-        .setColor('#f59e0b')
-        .setDescription(`Choose your hidden move against **${opponent.username}**.`)
-        .addFields(
-          { name: '💰 Bet', value: bet > 0 ? `${bet} 🍞` : 'No bet', inline: true },
-          { name: '🔒 Privacy', value: 'Your move is hidden until duel ends.', inline: true },
-        );
-
       const components = buildRPSChoiceComponents(interaction.user.id, opponent.id, bet);
-      await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
+      const message = await buildRPSPrepareMessage(
+        interaction.user.username,
+        opponent.username,
+        bet,
+        components,
+      );
+      await interaction.reply({ ...message, flags: MessageFlags.Ephemeral });
     },
   },
   {
@@ -326,8 +411,16 @@ const createArcadeCommands = (context) => {
     async execute(interaction) {
       const question = interaction.options.getString('question', true);
       const answer = magic8Ball();
-      const embed = build8BallEmbed(question, answer);
-      await interaction.reply({ embeds: [embed] });
+      const message = await build8BallMessage(interaction.user.username, question, answer);
+      await interaction.reply(message);
+      recordArcadeGame({
+        guildId: interaction.guildId,
+        userId: interaction.user.id,
+        game: '8ball',
+        outcome: 'draw',
+        bet: 0,
+        payout: 0,
+      });
     },
   },
   {
@@ -346,8 +439,17 @@ const createArcadeCommands = (context) => {
         return;
       }
 
-      const embed = buildDiceEmbed(result);
-      await interaction.reply({ embeds: [embed] });
+      await interaction.deferReply();
+      const message = await buildDiceMessage(interaction.user.username, result);
+      await interaction.editReply(message);
+      recordArcadeGame({
+        guildId: interaction.guildId,
+        userId: interaction.user.id,
+        game: 'dice',
+        outcome: 'draw',
+        bet: 0,
+        payout: 0,
+      });
     },
   },
   ];

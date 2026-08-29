@@ -31,6 +31,7 @@ const createBlackjackCommands = (context) => {
     startBlackjack,
     endBlackjack,
     buildBlackjackEmbed,
+    buildBlackjackMessage,
     buildBlackjackComponents,
     getBlackjackGame,
     getBalance,
@@ -109,16 +110,18 @@ const createBlackjackCommands = (context) => {
         return;
       }
 
-      const game = startBlackjack(interaction.user.id, bet);
+      const game = startBlackjack(interaction.user.id, bet, interaction.guildId);
       if (game.error) {
         await interaction.reply({ content: game.error, flags: MessageFlags.Ephemeral });
         return;
       }
 
-      const embed = buildBlackjackEmbed(interaction.user, game);
       const canDouble = game.player.length === 2 && !game.finished && bet > 0 && hasBalance(interaction.user.id, bet);
-      const components = buildBlackjackComponents(interaction.user.id, game.finished, canDouble);
-      await interaction.reply({ embeds: [embed], components });
+      const message = await buildBlackjackMessage(interaction.user, game, canDouble);
+      await interaction.reply(message);
+      if (game.finished) {
+        endBlackjack(interaction.user.id);
+      }
     },
   },
   ];

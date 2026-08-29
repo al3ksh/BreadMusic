@@ -30,6 +30,7 @@ const {
   startGame: startBlackjack,
   endGame: endBlackjack,
   buildEmbed: buildBlackjackEmbed,
+  buildMessage: buildBlackjackMessage,
   buildComponents: buildBlackjackComponents,
   getGame: getBlackjackGame,
 } = require('../games/blackjack');
@@ -48,6 +49,9 @@ const {
   buildSlotsEmbed,
   buildRouletteEmbed,
   buildCoinflipEmbed,
+  buildSlotsMessage,
+  buildRouletteMessage,
+  buildCoinflipMessage,
 } = require('../games/gambling');
 const {
   playRPS,
@@ -56,9 +60,15 @@ const {
   buildRPSEmbed,
   build8BallEmbed,
   buildDiceEmbed,
+  buildRPSMessage,
+  build8BallMessage,
+  buildDiceMessage,
+  buildRPSPrepareMessage,
   buildRPSChoiceComponents,
 } = require('../games/fun');
 const { applyPreferredSource } = require('../music/searchUtils');
+const { buildReplayComponents } = require('../games/arcadeControls');
+const { getArcadeStats, recordArcadeGame } = require('../games/arcadeStats');
 const { handleSkipRequest } = require('../music/skipManager');
 const { markPlayerStopping } = require('../music/playerLifecycle');
 const { deleteInteractionReply } = require('../utils/interactions');
@@ -229,13 +239,13 @@ const HELP_CATEGORIES = [
       { name: '/help', value: 'Show this help menu.' },
       { name: '/ping', value: 'Check latency.' },
       { name: '/dashboard', value: 'Open the web dashboard for this server.' },
-      { name: '/stats', value: 'Show member or server listening statistics.' },
+      { name: '/stats', value: 'Show listening or Arcade statistics.' },
       { name: '/config', value: 'Manage guild settings (or use the dashboard).' },
     ],
   },
   {
-    name: 'Fun',
-    description: 'Games and memes.',
+    name: 'Arcade',
+    description: 'Arcade games and casual commands.',
     commands: [
       { name: '/blackjack', value: 'Play blackjack (bet optional).' },
       { name: '/slots', value: 'Spin the slot machine.' },
@@ -369,6 +379,7 @@ const commandContext = {
   startBlackjack,
   endBlackjack,
   buildBlackjackEmbed,
+  buildBlackjackMessage,
   buildBlackjackComponents,
   getBlackjackGame,
   getBalance,
@@ -383,13 +394,23 @@ const commandContext = {
   buildSlotsEmbed,
   buildRouletteEmbed,
   buildCoinflipEmbed,
+  buildSlotsMessage,
+  buildRouletteMessage,
+  buildCoinflipMessage,
   playRPS,
   magic8Ball,
   rollDice,
   buildRPSEmbed,
   build8BallEmbed,
   buildDiceEmbed,
+  buildRPSMessage,
+  build8BallMessage,
+  buildDiceMessage,
+  buildRPSPrepareMessage,
   buildRPSChoiceComponents,
+  buildReplayComponents,
+  getArcadeStats,
+  recordArcadeGame,
   applyPreferredSource,
   handleSkipRequest,
   markPlayerStopping,

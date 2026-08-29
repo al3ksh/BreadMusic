@@ -1,5 +1,7 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { getBalance, addBalance, removeBalance, hasBalance, checkGamblingCooldown } = require('./economy');
+const { renderArcadeImage, compactNumber } = require('./arcadeRenderer');
+const { renderSlotsAnimation, renderRouletteAnimation, renderCoinflipAnimation } = require('./arcadeAnimation');
 
 const SLOTS_SYMBOLS = ['🍞', '🍒', '🔔', '💎', '7️⃣'];
 const SLOTS_MULTIPLIERS = {
@@ -57,7 +59,7 @@ function playSlots(userId, bet) {
     winnings,
     multiplier,
     newBalance: getBalance(userId),
-    isWin: winnings > 0,
+    isWin: multiplier > 0,
   };
 }
 
@@ -196,6 +198,85 @@ function buildCoinflipEmbed(result, choice, bet, isWin, winnings, newBalance) {
   return embed;
 }
 
+async function buildRenderedMessage(filename, input, fallbackEmbed, renderer = renderArcadeImage) {
+  try {
+    const buffer = await renderer(input);
+    const attachment = new AttachmentBuilder(buffer, { name: filename });
+    const embed = new EmbedBuilder()
+      .setColor(input.accent)
+      .setImage(`attachment://${filename}`)
+      .setFooter({ text: input.detail });
+    return { embeds: [embed], files: [attachment] };
+  } catch (error) {
+    if (error.message !== 'Animation renderer is busy') {
+      console.warn(`[Arcade] Could not render ${input.title}: ${error.message}`);
+    }
+    if (renderer !== renderArcadeImage) {
+      return buildRenderedMessage(filename.replace(/\.gif$/i, '.png'), input, fallbackEmbed);
+    }
+    return { embeds: [fallbackEmbed] };
+  }
+}
+
+function resultStatus(isWin, winnings, bet) {
+  if (bet === 0) {
+    return isWin
+      ? { status: 'YOU WIN', detail: 'Just for fun', accent: '#61d59b' }
+      : { status: 'HOUSE WINS', detail: 'Just for fun', accent: '#ef6877' };
+  }
+  return isWin
+    ? { status: 'YOU WIN', detail: `+${compactNumber(winnings)} BREAD`, accent: '#61d59b' }
+    : { status: 'HOUSE WINS', detail: `-${compactNumber(bet)} BREAD`, accent: '#ef6877' };
+}
+
+async function buildSlotsMessage(username, result, bet, winnings, isWin, newBalance) {
+  const state = resultStatus(isWin, winnings, bet);
+  return buildRenderedMessage('slots.gif', {
+    type: 'slots',
+    title: 'Slots',
+    username,
+    ...state,
+    data: { symbols: result },
+    metrics: [
+      { label: 'BET', value: bet > 0 ? `${compactNumber(bet)} BREAD` : 'JUST FOR FUN' },
+      { label: 'MULTIPLIER', value: isWin && bet > 0 ? `${winnings / bet}x` : (isWin ? 'WIN' : '0x') },
+      { label: 'BALANCE', value: `${compactNumber(newBalance)} BREAD` },
+    ],
+  }, buildSlotsEmbed(result, bet, winnings, isWin, newBalance), renderSlotsAnimation);
+}
+
+async function buildRouletteMessage(username, spinResult, color, betType, bet, isWin, winnings, newBalance) {
+  const state = resultStatus(isWin, winnings, bet);
+  return buildRenderedMessage('roulette.gif', {
+    type: 'roulette',
+    title: 'Roulette',
+    username,
+    ...state,
+    data: { number: spinResult, color },
+    metrics: [
+      { label: 'BET', value: bet > 0 ? `${compactNumber(bet)} BREAD` : 'JUST FOR FUN' },
+      { label: 'PICK', value: String(betType).toUpperCase() },
+      { label: 'BALANCE', value: `${compactNumber(newBalance)} BREAD` },
+    ],
+  }, buildRouletteEmbed(spinResult, color, betType, bet, isWin, winnings, newBalance), renderRouletteAnimation);
+}
+
+async function buildCoinflipMessage(username, result, choice, bet, isWin, winnings, newBalance) {
+  const state = resultStatus(isWin, winnings, bet);
+  return buildRenderedMessage('coinflip.gif', {
+    type: 'coinflip',
+    title: 'Coinflip',
+    username,
+    ...state,
+    data: { result },
+    metrics: [
+      { label: 'BET', value: bet > 0 ? `${compactNumber(bet)} BREAD` : 'JUST FOR FUN' },
+      { label: 'YOUR PICK', value: String(choice).toUpperCase() },
+      { label: 'BALANCE', value: `${compactNumber(newBalance)} BREAD` },
+    ],
+  }, buildCoinflipEmbed(result, choice, bet, isWin, winnings, newBalance), renderCoinflipAnimation);
+}
+
 module.exports = {
   playSlots,
   playRoulette,
@@ -203,4 +284,7 @@ module.exports = {
   buildSlotsEmbed,
   buildRouletteEmbed,
   buildCoinflipEmbed,
+  buildSlotsMessage,
+  buildRouletteMessage,
+  buildCoinflipMessage,
 };

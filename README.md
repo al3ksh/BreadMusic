@@ -334,7 +334,14 @@ Change access from Dashboard Settings or Discord:
 
 Economy and game commands are documented by `/help` inside Discord.
 
-Listening statistics are available through `/stats user` and `/stats server`.
+Arcade GIF rendering uses a small worker pool so image encoding does not block
+Discord interactions. Configure it with `ARCADE_ANIMATION_WORKERS` (`1`-`4`,
+default `2`). Values `1`-`2` are recommended for Raspberry Pi deployments;
+higher values increase peak CPU and memory use. Concurrent requests above the
+limit receive the same result as a static PNG instead of waiting in a queue.
+
+Listening statistics are available through `/stats user` and `/stats server`;
+game history is available through `/stats arcade`.
 User stats include top tracks and artists, source preference, active days and an
 estimated requested duration. `/stats server detailed:true` adds source ranking,
 requester ranking and retained activity patterns to the server overview.

@@ -1,5 +1,7 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { BRAND_COLORS } = require('../theme');
+const { renderArcadeImage } = require('./arcadeRenderer');
+const { renderDiceAnimation } = require('./arcadeAnimation');
 
 const RPS_CHOICES = ['rock', 'paper', 'scissors'];
 const RPS_EMOJIS = { rock: '🪨', paper: '📄', scissors: '✂️' };
@@ -356,6 +358,175 @@ function buildDiceEmbed(result) {
     );
 }
 
+async function buildFunMessage(filename, input, fallbackEmbed, components = undefined, renderer = renderArcadeImage) {
+  try {
+    const buffer = await renderer(input);
+    const attachment = new AttachmentBuilder(buffer, { name: filename });
+    const embed = new EmbedBuilder()
+      .setColor(input.accent)
+      .setImage(`attachment://${filename}`)
+      .setFooter({ text: input.detail });
+    return { embeds: [embed], files: [attachment], ...(components ? { components } : {}) };
+  } catch (error) {
+    if (error.message !== 'Animation renderer is busy') {
+      console.warn(`[Arcade] Could not render ${input.title}: ${error.message}`);
+    }
+    if (renderer !== renderArcadeImage) {
+      return buildFunMessage(filename.replace(/\.gif$/i, '.png'), input, fallbackEmbed, components);
+    }
+    return { embeds: [fallbackEmbed], ...(components ? { components } : {}) };
+  }
+}
+
+async function buildRPSMessage(playerChoice, botChoice, result, username) {
+  const state = result === 'win'
+    ? { status: 'YOU WIN', detail: `${playerChoice} beats ${botChoice}`, accent: '#61d59b' }
+    : result === 'lose'
+      ? { status: 'BREAD WINS', detail: `${botChoice} beats ${playerChoice}`, accent: '#ef6877' }
+      : { status: 'DRAW', detail: `Both picked ${playerChoice}`, accent: '#e9bb63' };
+  return buildFunMessage('rps.png', {
+    type: 'rps',
+    title: 'Rock Paper Scissors',
+    username,
+    ...state,
+    data: { playerChoice, botChoice, playerName: username, opponentName: 'Bread' },
+    metrics: [
+      { label: 'YOUR MOVE', value: playerChoice.toUpperCase() },
+      { label: 'OPPONENT', value: 'BREAD' },
+      { label: 'RESULT', value: state.status },
+    ],
+  }, buildRPSEmbed(playerChoice, botChoice, result, username));
+}
+
+async function build8BallMessage(username, question, answer) {
+  return buildFunMessage('8ball.png', {
+    type: '8ball',
+    title: 'Magic 8 Ball',
+    username,
+    status: answer.toUpperCase(),
+    detail: question,
+    accent: '#8f82eb',
+    data: { answer },
+    metrics: [
+      { label: 'QUESTION', value: String(question).slice(0, 24) },
+      { label: 'VERDICT', value: answer.toUpperCase() },
+      { label: 'CERTAINTY', value: 'MYSTERIOUS' },
+    ],
+  }, build8BallEmbed(question, answer));
+}
+
+async function buildDiceMessage(username, result) {
+  const rolls = result.rolls.length > 8 ? [...result.rolls.slice(0, 7), `+${result.rolls.length - 7}`] : result.rolls;
+  return buildFunMessage('dice.gif', {
+    type: 'dice',
+    title: 'Dice Roll',
+    username,
+    status: `TOTAL ${result.total}`,
+    detail: `${result.notation} rolled ${result.rolls.length} dice`,
+    accent: '#e9bb63',
+    data: { rolls, notation: result.notation },
+    metrics: [
+      { label: 'NOTATION', value: result.notation.toUpperCase() },
+      { label: 'DICE', value: String(result.rolls.length) },
+      { label: 'TOTAL', value: String(result.total) },
+    ],
+  }, buildDiceEmbed(result), undefined, renderDiceAnimation);
+}
+
+function duelState(challenge, outcome = null) {
+  if (!outcome) {
+    return { status: 'CHALLENGE OPEN', detail: `${challenge.targetName} has 60 seconds to choose`, accent: '#e9bb63' };
+  }
+  if (outcome.result === 'draw') {
+    return { status: 'DRAW', detail: 'Bets returned', accent: '#e9bb63' };
+  }
+  const winner = outcome.winnerId === challenge.challengerId ? challenge.challengerName : challenge.targetName;
+  return {
+    status: `${winner.toUpperCase()} WINS`,
+    detail: challenge.bet > 0 ? `${challenge.bet * 2} BREAD payout` : 'Duel complete',
+    accent: '#61d59b',
+  };
+}
+
+async function buildRPSPrepareMessage(username, opponentName, bet, components) {
+  return buildFunMessage('rps-prepare.png', {
+    type: 'rps',
+    title: 'RPS Duel',
+    username,
+    status: 'CHOOSE YOUR MOVE',
+    detail: `Your choice stays hidden from ${opponentName}`,
+    accent: '#8f82eb',
+    data: { playerChoice: null, botChoice: null, playerName: username, opponentName },
+    metrics: [
+      { label: 'OPPONENT', value: opponentName.toUpperCase() },
+      { label: 'BET', value: bet > 0 ? `${bet} BREAD` : 'NO BET' },
+      { label: 'PRIVACY', value: 'HIDDEN MOVE' },
+    ],
+  }, new EmbedBuilder()
+    .setTitle('⚔️ Prepare RPS duel')
+    .setColor('#f59e0b')
+    .setDescription(`Choose your hidden move against **${opponentName}**.`), components);
+}
+
+async function buildRPSChallengeMessage(challenge, components) {
+  const state = duelState(challenge);
+  return buildFunMessage('rps-challenge.png', {
+    type: 'rps',
+    title: 'RPS Duel',
+    username: challenge.challengerName,
+    ...state,
+    data: {
+      playerChoice: null,
+      botChoice: null,
+      playerName: challenge.challengerName,
+      opponentName: challenge.targetName,
+    },
+    metrics: [
+      { label: 'CHALLENGER', value: challenge.challengerName.toUpperCase() },
+      { label: 'OPPONENT', value: challenge.targetName.toUpperCase() },
+      { label: 'BET', value: challenge.bet > 0 ? `${challenge.bet} BREAD` : 'NO BET' },
+    ],
+  }, buildRPSChallengeEmbed(challenge), components);
+}
+
+async function buildRPSDuelResultMessage(challenge, outcome) {
+  const state = duelState(challenge, outcome);
+  return buildFunMessage('rps-result.png', {
+    type: 'rps',
+    title: 'RPS Duel',
+    username: challenge.challengerName,
+    ...state,
+    data: {
+      playerChoice: challenge.challengerChoice,
+      botChoice: challenge.targetChoice,
+      playerName: challenge.challengerName,
+      opponentName: challenge.targetName,
+    },
+    metrics: [
+      { label: challenge.challengerName.toUpperCase(), value: challenge.challengerChoice.toUpperCase() },
+      { label: challenge.targetName.toUpperCase(), value: challenge.targetChoice.toUpperCase() },
+      { label: 'BET', value: challenge.bet > 0 ? `${challenge.bet} BREAD` : 'NO BET' },
+    ],
+  }, buildRPSDuelResultEmbed(challenge, outcome));
+}
+
+async function buildRPSExpiredMessage(challenge) {
+  return buildFunMessage('rps-expired.png', {
+    type: 'rps',
+    title: 'RPS Duel',
+    username: challenge.challengerName,
+    status: 'CHALLENGE EXPIRED',
+    detail: `${challenge.targetName} did not choose in time`,
+    accent: '#777381',
+    data: { playerChoice: null, botChoice: null, playerName: challenge.challengerName, opponentName: challenge.targetName },
+    metrics: [
+      { label: 'CHALLENGER', value: challenge.challengerName.toUpperCase() },
+      { label: 'OPPONENT', value: challenge.targetName.toUpperCase() },
+      { label: 'BET', value: challenge.bet > 0 ? `${challenge.bet} BREAD` : 'NO BET' },
+    ],
+  }, buildRPSExpiredEmbed(challenge));
+}
+
 module.exports = {
   playRPS,
   magic8Ball,
@@ -363,6 +534,13 @@ module.exports = {
   buildRPSEmbed,
   build8BallEmbed,
   buildDiceEmbed,
+  buildRPSMessage,
+  build8BallMessage,
+  buildDiceMessage,
+  buildRPSPrepareMessage,
+  buildRPSChallengeMessage,
+  buildRPSDuelResultMessage,
+  buildRPSExpiredMessage,
   RPS_CHOICES,
   RPS_BUTTON_PREFIX,
   RPS_EMOJIS,

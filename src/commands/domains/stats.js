@@ -71,6 +71,7 @@ const createStatsCommands = (context) => {
     buildDashboardUrl,
     getGuildInsights,
     getUserInsights,
+    getArcadeStats,
     withGuildMutex,
     FILTER_PRESET_CHOICES,
     BASSBOOST_EQ,
@@ -128,12 +129,43 @@ const createStatsCommands = (context) => {
               .setName('detailed')
               .setDescription('Include sources, activity patterns and top requesters'),
           ),
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName('arcade')
+          .setDescription('Show Arcade statistics for a member.')
+          .addUserOption((option) => option.setName('member').setDescription('Member (defaults to you)')),
       ),
     async execute(interaction) {
       await interaction.deferReply();
       const subcommand = interaction.options.getSubcommand();
       const range = interaction.options.getString('range') || 'all';
       const rangeLabel = range === '24h' ? 'Last 24 hours' : range === '7d' ? 'Last 7 days' : 'All time';
+
+      if (subcommand === 'arcade') {
+        const user = interaction.options.getUser('member') || interaction.user;
+        const stats = getArcadeStats(user.id, interaction.guildId);
+        const favorite = Object.entries(stats.byGame)
+          .sort((left, right) => right[1].games - left[1].games)[0];
+        const winRate = stats.games > 0 ? ((stats.wins / stats.games) * 100).toFixed(1) : '0.0';
+        const gameLines = Object.entries(stats.byGame)
+          .sort((left, right) => right[1].games - left[1].games)
+          .map(([name, value]) => `**${name}**: ${value.games} games, ${value.wins} wins`)
+          .join('\n') || 'No Arcade games recorded yet.';
+        const embed = new EmbedBuilder()
+          .setTitle(`${user.globalName || user.username}'s Arcade Stats`)
+          .setThumbnail(user.displayAvatarURL({ size: 128 }))
+          .setColor(BRAND_COLORS.primary)
+          .addFields(
+            { name: 'Record', value: `**${stats.games}** games - **${stats.wins}W / ${stats.losses}L / ${stats.draws}D**` },
+            { name: 'Performance', value: `**${winRate}%** win rate\nFavorite: **${favorite?.[0] || 'none'}**`, inline: true },
+            { name: 'Economy', value: `Wagered: **${stats.totalWagered} BREAD**\nBiggest payout: **${stats.biggestPayout} BREAD**`, inline: true },
+            { name: 'Games', value: gameLines.slice(0, 1024) },
+          )
+          .setFooter({ text: `Arcade statistics for ${interaction.guild.name}` });
+        await interaction.editReply({ embeds: [embed] });
+        return;
+      }
 
       if (subcommand === 'server') {
         const detailed = interaction.options.getBoolean('detailed') || false;

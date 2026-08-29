@@ -3,10 +3,13 @@ FROM node:22-alpine AS bot
 WORKDIR /app
 ENV NODE_ENV=production
 
+RUN apk add --no-cache fontconfig ttf-dejavu
+
 COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY src/ ./src/
+COPY assets/breadarcade-logo.png ./assets/breadarcade-logo.png
 RUN mkdir -p /app/data
 
 EXPOSE 3001
