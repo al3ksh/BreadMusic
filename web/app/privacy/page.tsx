@@ -4,7 +4,7 @@ export default function PrivacyPage() {
       <div className="max-w-3xl mx-auto rounded-xl border border-border bg-bg-card p-6 sm:p-8">
         <p className="text-xs uppercase tracking-wider text-text-muted">Legal</p>
         <h1 className="text-2xl font-bold mt-2 text-text-primary">Privacy Policy</h1>
-        <p className="text-sm text-text-secondary mt-2">Last updated: 2026-08-17</p>
+        <p className="text-sm text-text-secondary mt-2">Last updated: 2026-08-31</p>
 
         <div className="mt-6 space-y-5 text-sm text-text-secondary leading-relaxed">
           <section>
@@ -27,6 +27,18 @@ export default function PrivacyPage() {
               <li>Direct messages sent to Bread, used only to return the automated help response.</li>
               <li>Request, error, and security logs that may include timestamps, routes, and IP addresses.</li>
             </ul>
+          </section>
+
+          <section>
+            <h2 className="text-base font-semibold text-text-primary">Website demo</h2>
+            <p className="mt-2">
+              The silent landing-page demo keeps its queue in the current browser tab and does not connect to
+              your Discord account or server. When live search or lyrics are enabled, search terms and track
+              metadata are sent through an isolated service to YouTube, SoundCloud or LRCLIB. Search results
+              and artwork are cached in memory for up to five minutes; demo lyrics for up to one hour.
+              Short-lived, hashed IP-based counters may be used for rate limiting. Closing the tab clears
+              the demo queue. The demo does not stream audio or accept uploads.
+            </p>
           </section>
 
           <section>

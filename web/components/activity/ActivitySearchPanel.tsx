@@ -9,6 +9,7 @@ type SearchPlaylist = { key: string; name: string; trackCount: number; totalDura
 type ActivitySearchPanelProps = {
   canDj: boolean;
   canQueue: boolean;
+  uploadDisabled?: boolean;
   hasTrack: boolean;
   actionBusy: string | null;
   searchQuery: string;
@@ -29,6 +30,7 @@ type ActivitySearchPanelProps = {
 export function ActivitySearchPanel({
   canDj,
   canQueue,
+  uploadDisabled = false,
   hasTrack,
   actionBusy,
   searchQuery,
@@ -66,12 +68,12 @@ export function ActivitySearchPanel({
         </button>
       </div>
       <div className="activity-upload-row">
-        <input type="file" accept=".mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.webm,audio/*" className="sr-only" id="activity-upload" disabled={!canDj} onChange={handleUploadSelection} />
-        <label htmlFor="activity-upload" className={`activity-upload-picker ${!canDj ? 'disabled' : ''}`}><Upload size={15} /> Choose audio</label>
+        <input type="file" accept=".mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.webm,audio/*" className="sr-only" id="activity-upload" disabled={!canDj || uploadDisabled} onChange={handleUploadSelection} />
+        <label htmlFor="activity-upload" className={`activity-upload-picker ${!canDj || uploadDisabled ? 'disabled' : ''}`}><Upload size={15} /> Choose audio</label>
         {uploadFile && (
           <>
             <span className="activity-upload-name" title={uploadFile.name}>{uploadFile.name}</span>
-            <button type="button" className="activity-upload-submit" disabled={uploading || !canDj} onClick={handleUpload}>
+            <button type="button" className="activity-upload-submit" disabled={uploading || !canDj || uploadDisabled} onClick={handleUpload}>
               {uploading ? <ActivitySpinner /> : <FileAudio size={15} />} {uploading ? 'Uploading' : 'Queue'}
             </button>
           </>

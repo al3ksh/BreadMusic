@@ -115,6 +115,11 @@ services:
         condition: service_healthy
     environment:
       - NEXT_PUBLIC_API_URL=http://bot:3001
+      - WEB_URL=${WEB_URL:-http://localhost:3000}
+      - LANDING_DEMO_SEARCH_URL=${LANDING_DEMO_SEARCH_URL:-}
+      - LANDING_DEMO_TOKEN=${LANDING_DEMO_TOKEN:-}
+      - LANDING_DEMO_LYRICS_ENABLED=${LANDING_DEMO_LYRICS_ENABLED:-false}
+      - LANDING_DEMO_CLIENT_IP_HEADER=${LANDING_DEMO_CLIENT_IP_HEADER:-}
       - NODE_ENV=production
     ports:
       - "3000:3000"

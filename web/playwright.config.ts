@@ -17,6 +17,7 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
+    env: { WEB_URL: 'http://127.0.0.1:3100', BREAD_LANDING_PREVIEW: '0', LANDING_DEMO_SEARCH_URL: '', LANDING_DEMO_TOKEN: '', LANDING_DEMO_LYRICS_ENABLED: 'false' },
     command: 'npx next dev -p 3100',
     url: 'http://127.0.0.1:3100',
     reuseExistingServer: false,

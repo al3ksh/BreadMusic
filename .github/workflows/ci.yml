@@ -38,14 +38,25 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Test landing demo boundaries and bot contract
+        run: |
+          npm run test:landing --prefix web
+          node web/preview/bot-contract.cjs --check
+
       - name: Typecheck web
         run: npm run typecheck --prefix web
 
       - name: Build web
         run: npm run build --prefix web
 
+      - name: Install browser for web smoke tests
+        run: npx --prefix web playwright install --with-deps chromium
+
+      - name: Test dashboard, Activity and released landing
+        run: npm run test:e2e --prefix web
+
       - name: Validate Docker Compose
-        run: docker compose config
+        run: docker compose config --quiet
 
       - name: Audit production dependencies
         run: |

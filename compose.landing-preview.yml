@@ -1,0 +1,44 @@
+name: bread-landing-preview
+services:
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2
+    volumes:
+      - ./web/preview/search/application.yml:/opt/Lavalink/application.yml:ro
+    environment:
+      _JAVA_OPTIONS: "-Xms128m -Xmx384m"
+    mem_limit: 768m
+    restart: "no"
+  search:
+    build:
+      context: .
+      dockerfile: web/preview/search/Dockerfile
+    depends_on: [lavalink]
+    environment:
+      LANDING_DEMO_TOKEN: local-preview-metadata-only-token
+      LANDING_LAVALINK_URL: http://lavalink:2333
+      LANDING_LAVALINK_PASSWORD: local-preview-search-only
+      LANDING_DEMO_LYRICS_ENABLED: "true"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    restart: "no"
+  web:
+    build:
+      context: ./web
+      dockerfile: preview/Dockerfile
+    environment:
+      WEB_URL: http://localhost:3181
+      LANDING_DEMO_SEARCH_URL: http://search:3001
+      LANDING_DEMO_TOKEN: local-preview-metadata-only-token
+      LANDING_DEMO_LYRICS_ENABLED: "true"
+    ports:
+      - "127.0.0.1:3181:3000"
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

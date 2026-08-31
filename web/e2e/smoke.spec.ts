@@ -98,11 +98,14 @@ async function mockApi(page: Page, options: { canControlPlayer?: boolean } = {})
   });
 }
 
-test('landing reaches the mocked dashboard and player', async ({ page }) => {
+test('landing reaches the mocked dashboard and player', async ({ page, isMobile }) => {
   await mockApi(page);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Bread' }).first()).toBeVisible();
-  await page.getByRole('link', { name: /dashboard/i }).first().click();
+  if (isMobile) {
+    await page.getByRole('button', { name: 'Toggle navigation' }).click();
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Dashboard' }).click();
+  } else await page.getByRole('link', { name: /dashboard/i }).last().click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole('heading', { name: 'Your Servers' })).toBeVisible();
   await page.getByRole('button', { name: /Test Guild/ }).click();

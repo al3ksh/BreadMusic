@@ -18,9 +18,7 @@ function buildTrackEmbed(track, requester, voiceChannelId) {
   const requesterLabel = requester?.tag ?? requester?.username ?? requester?.id ?? 'Unknown user';
   const trackTitle = formatTrackTitle(track);
   const trackAuthor = formatTrackAuthor(track);
-  const description = track.info.uri
-    ? `[${trackTitle}](${track.info.uri})`
-    : trackTitle;
+  const description = formatTrackLink(track, trackTitle);
 
   const embed = new EmbedBuilder()
     .setTitle('➕ Added to queue')
@@ -138,7 +136,7 @@ function formatTrackSource(track) {
 
 function formatTrackLink(track, label) {
   const uri = track?.info?.uri;
-  if (!uri) return label;
+  if (!uri || isLocalUploadTrack(track)) return label;
   return `[${label}](${uri})`;
 }
 

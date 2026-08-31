@@ -1,6 +1,10 @@
 node_modules
 web/node_modules
 web/.next
+.tmp
+web/test-results
+web/playwright-report
+web/tsconfig.tsbuildinfo
 data
 .git
 .env

@@ -1,0 +1,64 @@
+# Optional isolated metadata stack. No bot credentials, data or voice player.
+# Use with docker-compose.yml; keep LANDING_DEMO_TOKEN >= 32 random characters.
+services:
+  web:
+    environment:
+      LANDING_DEMO_SEARCH_URL: http://landing-search:3001
+      LANDING_DEMO_TOKEN: ${LANDING_DEMO_TOKEN:?Set a separate random LANDING_DEMO_TOKEN}
+    networks:
+      - breadmusic-network
+      - landing-metadata
+  landing-search:
+    build:
+      context: .
+      dockerfile: web/preview/search/Dockerfile
+    environment:
+      LANDING_DEMO_TOKEN: ${LANDING_DEMO_TOKEN:?Set a separate random LANDING_DEMO_TOKEN}
+      LANDING_LAVALINK_URL: http://landing-lavalink:2333
+      LANDING_LAVALINK_PASSWORD: ${LANDING_DEMO_TOKEN:?Set a separate random LANDING_DEMO_TOKEN}
+      LANDING_DEMO_LYRICS_ENABLED: ${LANDING_DEMO_LYRICS_ENABLED:-false}
+    depends_on:
+      landing-lavalink:
+        condition: service_healthy
+    networks: [landing-metadata]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://localhost:3001/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: 5m, max-file: "2" }
+  landing-lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2
+    environment:
+      _JAVA_OPTIONS: -Xms128m -Xmx384m
+      LAVALINK_SERVER_PASSWORD: ${LANDING_DEMO_TOKEN:?Set a separate random LANDING_DEMO_TOKEN}
+    volumes:
+      - ./web/preview/search/application.yml:/opt/Lavalink/application.yml:ro
+    networks: [landing-metadata]
+    restart: unless-stopped
+    init: true
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 256
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q --spider --header="Authorization: $${LAVALINK_SERVER_PASSWORD}" http://localhost:2333/version || exit 1']
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: 5m, max-file: "2" }
+networks:
+  landing-metadata:
+    driver: bridge

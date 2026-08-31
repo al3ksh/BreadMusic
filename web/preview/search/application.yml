@@ -1,0 +1,28 @@
+server:
+  port: 2333
+  address: 0.0.0.0
+lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:f45bbb7aebfcbc1c553769e04af6cd43afa8b7c3"
+      snapshot: true
+  server:
+    password: "local-preview-search-only"
+    sources:
+      youtube: false
+      soundcloud: true
+      bandcamp: false
+      twitch: false
+      vimeo: false
+      nico: false
+      http: false
+      local: false
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: false
+    allowDirectPlaylistIds: false
+    clients: [MUSIC, MWEB, WEB, ANDROID_VR]
+logging:
+  level:
+    root: INFO

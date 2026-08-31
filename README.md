@@ -42,6 +42,16 @@ Lavalink playback, smart autoplay, live dashboard, lyrics and persistent state.
 
 ## Features
 
+### Website And Demo
+
+The root page includes the Activity/dashboard gallery, a silent slash-command
+and Activity demo, and Arcade screenshots. It preserves the root URL handoff
+used by Discord Activity. The demo cannot control a real server or play audio.
+
+The default installation uses a sample catalogue. Optional live metadata search
+runs on an isolated worker and Lavalink, with separate credentials and quotas.
+See [landing release and rollback](docs/landing-release.md) before enabling it.
+
 ```text
 [ playback ]  YouTube / Spotify / SoundCloud / Bandcamp
 [ autoplay ]  Gemini discovery + ranking / local fallback / skip feedback

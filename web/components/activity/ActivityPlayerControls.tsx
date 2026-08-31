@@ -5,6 +5,7 @@ import { ActivitySpinner } from '@/components/activity/ActivityArtwork';
 
 type ActivityPlayerControlsProps = {
   iconOnly?: boolean;
+  autoplayDisabled?: boolean;
   status: PlayerStatus;
   queueTotal: number;
   canDj: boolean;
@@ -29,6 +30,7 @@ type ActivityPlayerControlsProps = {
 
 export function ActivityPlayerControls({
   iconOnly = false,
+  autoplayDisabled = false,
   status,
   queueTotal,
   canDj,
@@ -63,7 +65,7 @@ export function ActivityPlayerControls({
       <div className="activity-secondary-controls">
         <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queueTotal || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
         <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
-        {iconOnly && <ControlButton label={`Autoplay ${status.autoplay ? 'on' : 'off'}`} active={status.autoplay} feedback={controlFeedback === 'autoplay'} disabled={!canDj || Boolean(actionBusy)} onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}><Radio size={16} /></ControlButton>}
+        {iconOnly && <ControlButton label={`Autoplay ${status.autoplay ? 'on' : 'off'}`} active={status.autoplay} feedback={controlFeedback === 'autoplay'} disabled={autoplayDisabled || !canDj || Boolean(actionBusy)} onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}><Radio size={16} /></ControlButton>}
         <div className={`activity-volume-control ${volumeOpen ? 'is-open' : ''}`} ref={volumeControlRef}>
           <button
             type="button"

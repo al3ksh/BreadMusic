@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+const base = 'http://localhost:3181';
+const search = (query, origin = base) => fetch(`${base}/demo/api/search`, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
+assert.equal((await search('test', 'https://evil.example')).status, 403);
+assert.equal((await search('http://127.0.0.1/private')).status, 400);
+const response = await search('taconafide tamagotchi');
+assert.equal(response.status, 200);
+const result = await response.json();
+assert.ok(result.tracks.length > 0);
+assert.match(result.tracks[0].title, /tamagotchi/i);
+assert.ok(result.tracks[0].embeds.added.description.includes(result.tracks[0].title));
+const artwork = await fetch(base + result.tracks[0].artwork);
+assert.equal(artwork.status, 200);
+assert.ok((await artwork.arrayBuffer()).byteLength > 0);
+const soundcloud = await search('scsearch:daft punk');
+assert.equal(soundcloud.status, 200);
+assert.ok((await soundcloud.json()).tracks.length > 0);
+console.log('Real YouTube/SoundCloud search, bot presenters, artwork and trusted-origin/URL checks passed. No playback requests.');

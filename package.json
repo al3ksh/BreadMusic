@@ -9,7 +9,7 @@
     "dev:lavalink": "node scripts/start-lavalink.js",
     "dev:web": "cd web && npm run dev",
     "register": "node src/register-commands.js",
-    "test": "node --test test/access.test.js test/alerts.test.js test/apiHealth.test.js test/apiSecurity.test.js test/arcadeOdds.test.js test/arcadeRenderer.test.js test/arcadeStats.test.js test/autoplay.test.js test/autoplayAi.test.js test/autoplayMode.test.js test/blackjack.test.js test/dmResponder.test.js test/guildAccess.test.js test/history.test.js test/lyrics.test.js test/lyricsUi.test.js test/playbackFallback.test.js test/playbackRecovery.test.js test/presenceRotation.test.js test/rateLimit.test.js test/reliability.test.js test/serverExtensions.test.js test/skip.test.js test/sourceNames.test.js test/sqliteStore.test.js test/uploadRoute.test.js test/uploadUrls.test.js test/voiceStatus.test.js"
+    "test": "node --test test/access.test.js test/alerts.test.js test/apiHealth.test.js test/apiSecurity.test.js test/arcadeOdds.test.js test/arcadeRenderer.test.js test/arcadeStats.test.js test/autoplay.test.js test/autoplayAi.test.js test/autoplayMode.test.js test/blackjack.test.js test/dmResponder.test.js test/embeds.test.js test/guildAccess.test.js test/history.test.js test/lyrics.test.js test/lyricsUi.test.js test/playbackFallback.test.js test/playbackRecovery.test.js test/presenceRotation.test.js test/rateLimit.test.js test/reliability.test.js test/serverExtensions.test.js test/skip.test.js test/sourceNames.test.js test/sqliteStore.test.js test/uploadRoute.test.js test/uploadUrls.test.js test/voiceStatus.test.js"
   },
   "keywords": [],
   "author": "",

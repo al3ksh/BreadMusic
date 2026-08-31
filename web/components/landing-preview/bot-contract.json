@@ -1,0 +1,205 @@
+{
+  "nowPlaying": {
+    "title": "Now Playing",
+    "description": "[TRACK_ARTIST - TRACK_TITLE](https://example.invalid/track)\n▬▬▬▬🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n1:24 / 5:37",
+    "color": 5919892,
+    "fields": [
+      {
+        "name": "🎙️ Artist",
+        "value": "TRACK_ARTIST",
+        "inline": true
+      },
+      {
+        "name": "⏱️ Duration",
+        "value": "5:37",
+        "inline": true
+      },
+      {
+        "name": "🔊 Volume",
+        "value": "100%",
+        "inline": true
+      },
+      {
+        "name": "🔁 Loop",
+        "value": "Off",
+        "inline": true
+      },
+      {
+        "name": "📡 Source",
+        "value": "youtube",
+        "inline": true
+      },
+      {
+        "name": "🔈 Channel",
+        "value": "<#123456789012345678>",
+        "inline": true
+      }
+    ],
+    "footer": {
+      "text": "Requested by You"
+    },
+    "thumbnail": {
+      "url": "https://example.invalid/artwork"
+    }
+  },
+  "added": {
+    "title": "➕ Added to queue",
+    "description": "[TRACK_TITLE](https://example.invalid/track)",
+    "fields": [
+      {
+        "name": "🎙️ Artist",
+        "value": "TRACK_ARTIST",
+        "inline": true
+      },
+      {
+        "name": "⏱️ Duration",
+        "value": "5:37",
+        "inline": true
+      },
+      {
+        "name": "🔈 Channel",
+        "value": "<#123456789012345678>",
+        "inline": true
+      }
+    ],
+    "color": 5919892,
+    "footer": {
+      "text": "Requested by You"
+    },
+    "thumbnail": {
+      "url": "https://example.invalid/artwork"
+    }
+  },
+  "empty": {
+    "title": "Nothing playing",
+    "description": "Queue is empty.",
+    "color": 2178428
+  },
+  "queue": {
+    "title": "Queue",
+    "color": 2178428,
+    "description": "`1.` [TRACK_TITLE](https://example.invalid/track)\n    Author: TRACK_ARTIST | ETA 4:13 | 5:37",
+    "fields": [
+      {
+        "name": "Now Playing",
+        "value": "[TRACK_TITLE](https://example.invalid/track)"
+      },
+      {
+        "name": "Total queue duration",
+        "value": "9:50"
+      }
+    ],
+    "footer": {
+      "text": "Page 1/1"
+    }
+  },
+  "emptyQueue": {
+    "title": "Queue",
+    "color": 2178428,
+    "description": "No upcoming tracks. Add something with /play.",
+    "fields": [
+      {
+        "name": "Now Playing",
+        "value": "[TRACK_TITLE](https://example.invalid/track)"
+      },
+      {
+        "name": "Total queue duration",
+        "value": "4:13"
+      }
+    ],
+    "footer": {
+      "text": "Page 1/1"
+    }
+  },
+  "controls": [
+    {
+      "type": 1,
+      "components": [
+        {
+          "type": 2,
+          "emoji": {
+            "name": "⏮️",
+            "animated": false
+          },
+          "custom_id": "music:back:preview",
+          "style": 2,
+          "disabled": false
+        },
+        {
+          "type": 2,
+          "emoji": {
+            "name": "⏸️",
+            "animated": false
+          },
+          "custom_id": "music:playpause:preview",
+          "style": 4,
+          "disabled": false
+        },
+        {
+          "type": 2,
+          "emoji": {
+            "name": "⏭️",
+            "animated": false
+          },
+          "custom_id": "music:skip:preview",
+          "style": 2,
+          "disabled": false
+        },
+        {
+          "type": 2,
+          "emoji": {
+            "name": "⏹️",
+            "animated": false
+          },
+          "custom_id": "music:stop:preview",
+          "style": 4,
+          "disabled": false
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "components": [
+        {
+          "type": 2,
+          "emoji": {
+            "name": "🔁",
+            "animated": false
+          },
+          "custom_id": "music:loop:preview",
+          "style": 2,
+          "disabled": false
+        },
+        {
+          "type": 2,
+          "emoji": {
+            "name": "🔀",
+            "animated": false
+          },
+          "custom_id": "music:shuffle:preview",
+          "style": 2,
+          "disabled": false
+        },
+        {
+          "type": 2,
+          "emoji": {
+            "name": "📖",
+            "animated": false
+          },
+          "custom_id": "music:lyrics:preview",
+          "style": 2,
+          "disabled": false
+        },
+        {
+          "type": 2,
+          "emoji": {
+            "name": "🎵",
+            "animated": false
+          },
+          "custom_id": "music:activity:preview",
+          "style": 2
+        }
+      ]
+    }
+  ]
+}
