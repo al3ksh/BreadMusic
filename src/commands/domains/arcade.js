@@ -160,7 +160,7 @@ const createArcadeCommands = (context) => {
           .addChoices(
             { name: 'Red (2x)', value: 'red' },
             { name: 'Black (2x)', value: 'black' },
-            { name: 'Green/0 (14x)', value: 'green' },
+            { name: 'Green/0 (35x)', value: 'green' },
             { name: 'Odd (2x)', value: 'odd' },
             { name: 'Even (2x)', value: 'even' },
           ),

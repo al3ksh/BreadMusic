@@ -191,3 +191,44 @@ test('Activity uses mocked SDK and respects read-only access', async ({ page }) 
   const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: window.innerWidth }));
   expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
 });
+
+test('Activity can upload with the bot offline and reports playback starting', async ({ page }) => {
+  await mockApi(page);
+  const offline = { ...status, connected: false, playing: false, currentTrack: null, queueLength: 0 };
+  const emptyQueue = { current: null, tracks: [], total: 0, page: 0, totalPages: 0, revision: 'empty' };
+  await page.route('**/api/guilds/*/status', (route) => json(route, offline));
+  await page.route('**/api/guilds/*/queue?*', (route) => json(route, emptyQueue));
+  await page.route('**/api/guilds/*/player/events?*', (route) => route.fulfill({
+    contentType: 'text/event-stream',
+    body: `event: snapshot\ndata: ${JSON.stringify({ status: offline, queue: emptyQueue })}\n\n`,
+  }));
+  await page.route('**/api/guilds/*/player/upload', (route) => {
+    expect(route.request().headers().authorization).toBe('Bearer test-activity-token');
+    expect(route.request().headers()['x-file-name']).toBe('demo.mp3');
+    return json(route, { success: true, started: true, title: 'Uploaded audio' });
+  });
+  await page.addInitScript(() => {
+    window.__BREAD_TEST_ACTIVITY_SDK__ = {
+      guildId: '123456789012345678',
+      channelId: 'voice-1',
+      ready: async () => undefined,
+      commands: {
+        authorize: async () => ({ code: 'test-code' }),
+        authenticate: async () => ({ access_token: 'test-activity-token' }),
+        openExternalLink: async () => ({ opened: true }),
+        setActivity: async (options) => options.activity,
+      },
+    };
+  });
+  await page.setContent('<iframe title="Bread Activity" src="http://127.0.0.1:3100/activity?frame_id=test&instance_id=test&platform=desktop" style="width:100%;height:100vh;border:0"></iframe>');
+  const activity = page.frameLocator('iframe[title="Bread Activity"]');
+  await expect(activity.getByText('Music Activity')).toBeVisible({ timeout: 30_000 });
+  await activity.getByRole('button', { name: 'Add music' }).click();
+  const searchPanel = activity.getByRole('complementary', { name: 'search panel' });
+  await searchPanel.locator('input[type="file"]').setInputFiles({
+    name: 'demo.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('mock audio'),
+  });
+  await searchPanel.getByRole('button', { name: 'Queue', exact: true }).click();
+  await expect(activity.getByText('Playing now: Uploaded audio')).toBeVisible();
+  await expect(activity.getByRole('complementary', { name: 'queue panel' })).toBeVisible();
+});

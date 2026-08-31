@@ -1096,7 +1096,7 @@ export default function ActivityPage() {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || `Upload failed: ${response.status}`);
-      notify(`Queued: ${body.title || uploadFile.name}`, 'success');
+      notify(`${body.started ? 'Playing now' : 'Queued'}: ${body.title || uploadFile.name}`, 'success');
       setUploadFile(null);
       setActivePanel('queue');
     } catch (error) {

@@ -8,7 +8,6 @@ function createPlayerRouter({
   requireAuth,
   requirePlayerAccess,
   requireGuildAccess,
-  requireGuildDJ,
   requireTrustedOrigin,
   requireDashboardActionRateLimit,
   buildPlayerStatusSnapshot,
@@ -142,10 +141,16 @@ function createPlayerRouter({
   router.post(
     '/api/guilds/:guildId/player/upload',
     requireAuth,
-    requireGuildDJ,
+    requirePlayerAccess,
     requireTrustedOrigin,
     requireDashboardActionRateLimit,
     async (req, res) => {
+      const canUpload = req.activityUser
+        ? req.dashboardCapabilities?.canControlPlayer
+        : req.dashboardCapabilities?.canUpload;
+      if (canUpload !== true) {
+        return res.status(403).json({ error: 'Player control is not enabled for your role' });
+      }
       const guildId = req.params.guildId;
       res.once('finish', () => broadcastPlayerUpdate(guildId));
       const releaseUpload = await acquireGuildMutex(guildId);
@@ -157,24 +162,27 @@ function createPlayerRouter({
 
       try {
         const guildConfig = getConfig(guildId);
-
-        if (!player && guild) {
-          const botVoiceChannelId = guild.members.me?.voice?.channelId;
-          if (botVoiceChannelId) {
-            player = client.lavalink.createPlayer({
-              guildId,
-              voiceChannelId: botVoiceChannelId,
-              textChannelId: resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player?.textChannelId ?? null),
-              selfDeaf: true,
-              volume: guildConfig.defaultVolume ?? 60,
-            });
-            await player.connect();
+        const resolveUploadChannel = () => {
+          const memberVoiceChannelId = req.guildMember?.voice?.channelId;
+          const botVoiceChannelId = guild?.members?.me?.voice?.channelId;
+          const channelId = req.activityUser
+            ? memberVoiceChannelId
+            : memberVoiceChannelId || botVoiceChannelId || player?.voiceChannelId;
+          if (!channelId) {
+            res.status(403).json({ error: 'Join a voice channel before uploading audio' });
+            return null;
           }
-        }
-
-        if (!player) {
-          return res.status(404).json({ error: 'No active player in this guild' });
-        }
+          if (!guild?.channels?.cache?.get(channelId)?.isVoiceBased()) {
+            res.status(400).json({ error: 'The Activity channel is not a voice channel' });
+            return null;
+          }
+          if (botVoiceChannelId && botVoiceChannelId !== channelId) {
+            res.status(409).json({ error: 'Bread is already active in another voice channel' });
+            return null;
+          }
+          return channelId;
+        };
+        if (!resolveUploadChannel()) return;
 
         const originalName = sanitizeUploadName(decodeUploadHeader(req.get('x-file-name')) || 'upload');
         const ext = path.extname(originalName).toLowerCase();
@@ -282,7 +290,44 @@ function createPlayerRouter({
           cached: alreadyStored,
         };
 
-        const startedFromIdle = !player.playing && !player.paused;
+        // Uploads can take minutes. Recheck voice state before joining, and
+        // only summon the bot once Lavalink has accepted the audio file.
+        const voiceChannelId = resolveUploadChannel();
+        if (!voiceChannelId) {
+          if (storedFilePath) await safeDeleteFile(storedFilePath);
+          return;
+        }
+        const connectedBotVoiceChannelId = guild.members.me?.voice?.channelId;
+        const createdPlayer = !player;
+        const textChannelId = resolvePlayerTextChannelId(guild, guildConfig.playerTextChannelId, player?.textChannelId ?? null);
+        if (!player) {
+          player = client.lavalink.createPlayer({
+            guildId,
+            voiceChannelId,
+            textChannelId,
+            selfDeaf: true,
+            volume: guildConfig.defaultVolume ?? 60,
+          });
+        } else {
+          player.voiceChannelId = voiceChannelId;
+          player.textChannelId = textChannelId;
+        }
+        if (createdPlayer || !connectedBotVoiceChannelId) {
+          if (createdPlayer && connectedBotVoiceChannelId) {
+            await player.disconnect(true).catch(() => {});
+            await new Promise((resolve) => setTimeout(resolve, activityVoiceReconnectDelayMs));
+          }
+          await player.connect();
+          const voiceReady = await waitForPlayerVoice(player);
+          if (!voiceReady) console.warn(`[Player] Voice handshake still pending for guild ${guildId}; continuing upload request.`);
+          if (createdPlayer) {
+            await hydratePlayer(player, client).catch((error) => {
+              console.error(`Failed to restore upload player for ${guildId}:`, error.message);
+            });
+          }
+        }
+
+        const startedFromIdle = !player.queue.current || (!player.playing && !player.paused);
         await addManualTrackToQueue(player, queuedTrack);
 
         if (startedFromIdle) {
@@ -298,6 +343,7 @@ function createPlayerRouter({
           author: queuedTrack.info.author,
           size: streamedUpload.size,
           cached: alreadyStored,
+          started: startedFromIdle,
         });
       } catch (err) {
         console.error('Player upload error:', err);

@@ -1,5 +1,5 @@
 const sharp = require('sharp');
-const { renderBrandMark } = require('./brandAssets');
+const { logoDataUri, renderBrandMark } = require('./brandAssets');
 
 const WIDTH = 1200;
 const HEIGHT = 700;
@@ -29,16 +29,38 @@ function metric(label, value, x, width = 330) {
     <line x1="${x + width}" y1="616" x2="${x + width}" y2="654" stroke="#302c3f" stroke-width="2"/>`;
 }
 
+function slotSymbol(symbol) {
+  if (symbol === '🍞') {
+    return `<path d="M42 112 V82 C42 53 62 35 92 35 H108 C138 35 158 53 158 82 V112 C158 129 146 140 129 140 H71 C54 140 42 129 42 112Z" fill="#e9bb63" stroke="#b98431" stroke-width="6"/>
+      <path d="M71 58 C78 72 78 85 70 99 M100 48 C108 64 108 80 99 96 M130 58 C137 72 137 85 129 99" fill="none" stroke="#fff0c4" stroke-width="8" stroke-linecap="round"/>`;
+  }
+  if (symbol === '🍒') {
+    return `<path d="M98 69 C103 43 120 29 145 26 M102 69 C95 48 82 38 62 35" fill="none" stroke="#4f9d69" stroke-width="9" stroke-linecap="round"/>
+      <path d="M121 36 C136 23 153 22 167 30 C153 45 137 49 121 36Z" fill="#61d59b"/>
+      <circle cx="72" cy="111" r="34" fill="#ef6877" stroke="#bd3e50" stroke-width="6"/>
+      <circle cx="132" cy="111" r="34" fill="#dc4f61" stroke="#bd3e50" stroke-width="6"/>
+      <circle cx="61" cy="99" r="8" fill="#ffd7db" opacity="0.8"/>`;
+  }
+  if (symbol === '🔔') {
+    return `<path d="M47 123 H153 L138 104 V78 C138 51 122 35 100 35 C78 35 62 51 62 78 V104Z" fill="#e9bb63" stroke="#b98431" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M48 123 H152" stroke="#fff0c4" stroke-width="9" stroke-linecap="round"/>
+      <circle cx="100" cy="142" r="14" fill="#d49a3e" stroke="#b98431" stroke-width="5"/>
+      <path d="M77 68 C80 54 88 48 98 46" fill="none" stroke="#fff0c4" stroke-width="8" stroke-linecap="round" opacity="0.75"/>`;
+  }
+  if (symbol === '💎') {
+    return `<path d="M30 72 L62 34 H138 L170 72 L100 151Z" fill="#78c8ee" stroke="#3f91bd" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M30 72 H170 M62 34 L78 72 L100 151 M138 34 L122 72 L100 151 M78 72 H122" fill="none" stroke="#d8f4ff" stroke-width="5" stroke-linejoin="round" opacity="0.85"/>`;
+  }
+  return `<path d="M52 39 H153 L139 69 H104 L73 151 H37 L72 69 H52Z" fill="#8f82eb" stroke="#574da3" stroke-width="7" stroke-linejoin="round"/>
+    <path d="M68 53 H134" stroke="#d9d3ff" stroke-width="7" stroke-linecap="round" opacity="0.75"/>`;
+}
+
 function slotsVisual(data) {
-  const labels = { '🍞': 'BREAD', '🍒': 'CHERRY', '🔔': 'BELL', '💎': 'DIAMOND', '7️⃣': '7' };
-  const colors = { '🍞': '#e9bb63', '🍒': '#ef6877', '🔔': '#e9bb63', '💎': '#78c8ee', '7️⃣': '#8f82eb' };
   return data.symbols.map((symbol, index) => {
     const x = 260 + index * 240;
     return `<g transform="translate(${x} 242)">
       <rect width="200" height="190" rx="22" fill="#f4f2f0" stroke="#d8d4de" stroke-width="3"/>
-      <circle cx="100" cy="72" r="44" fill="${colors[symbol] || '#8f82eb'}" opacity="0.18"/>
-      <text x="100" y="88" text-anchor="middle" font-size="${symbol === '7️⃣' ? 58 : 27}" font-weight="900" fill="${colors[symbol] || '#8f82eb'}">${escapeXml(labels[symbol] || symbol)}</text>
-      <text x="100" y="157" text-anchor="middle" class="tile-label">${escapeXml(labels[symbol] || symbol)}</text>
+      ${slotSymbol(symbol)}
     </g>`;
   }).join('');
 }
@@ -66,12 +88,16 @@ function rouletteVisual(data) {
 function coinVisual(data) {
   const heads = data.result === 'heads';
   const scaleX = Number.isFinite(data.scaleX) ? Math.max(0.08, Math.abs(data.scaleX)) : 1;
+  const face = heads && logoDataUri
+    ? `<image x="-82" y="-82" width="164" height="164" href="${logoDataUri}" preserveAspectRatio="xMidYMid slice" clip-path="url(#coinLogoClip)"/>
+      <circle r="83" fill="none" stroke="#fff0c4" stroke-width="5"/>`
+    : `<path d="M-64 43 V-3 C-64-44-35-67 0-67 C35-67 64-44 64-3 V43 C64 61 51 72 32 72 H-32 C-51 72-64 61-64 43Z" fill="#f1c96f" stroke="#fff0c4" stroke-width="7"/>
+      <path d="M-36-36 C-25-19-25-2-36 14 M0-50 C11-29 11-9 0 12 M36-36 C47-19 47-2 36 14" fill="none" stroke="#fff8dc" stroke-width="9" stroke-linecap="round"/>`;
   return `<g transform="translate(600 334)" filter="url(#shadow)">
     <g transform="scale(${scaleX.toFixed(3)} 1)">
     <circle r="145" fill="${heads ? '#e9bb63' : '#7164cf'}" stroke="${heads ? '#ffe1a0' : '#aaa2f5'}" stroke-width="12"/>
     <circle r="112" fill="none" stroke="#ffffff" stroke-width="3" opacity="0.38"/>
-    <text y="12" text-anchor="middle" font-size="54" font-weight="900" fill="#ffffff">${heads ? 'HEADS' : 'TAILS'}</text>
-    <text y="62" text-anchor="middle" font-size="20" font-weight="750" fill="#ffffff" opacity="0.78">BREAD ARCADE</text>
+    ${face}
     </g>
   </g>`;
 }
@@ -116,7 +142,8 @@ function ballVisual(data) {
     <circle r="165" fill="#0b0b0e" stroke="#393442" stroke-width="7"/>
     <circle r="86" fill="#6256bb" stroke="#8f82eb" stroke-width="5"/>
     <path d="M0 -65 L58 43 L-58 43 Z" fill="#17151f" opacity="0.82"/>
-    <text y="2" text-anchor="middle" font-size="22" font-weight="750" fill="#f4f2f8">${escapeXml(truncate(data.answer, 22))}</text>
+    <circle cx="0" cy="-3" r="17" fill="#f4f2f8" opacity="0.9"/>
+    <path d="M-31 42 H31" stroke="#f4f2f8" stroke-width="8" stroke-linecap="round" opacity="0.9"/>
   </g>`;
 }
 
@@ -147,6 +174,7 @@ function buildArcadeSvg({ type, title, username, status, detail, accent = '#8f82
   return `<svg width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <clipPath id="brandLogoClip"><circle cx="58" cy="54" r="24"/></clipPath>
+      <clipPath id="coinLogoClip"><circle cx="0" cy="0" r="82"/></clipPath>
       <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#000" flood-opacity="0.4"/></filter>
       <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b1926"/><stop offset="0.55" stop-color="#111116"/><stop offset="1" stop-color="#17151f"/></linearGradient>
       <style>

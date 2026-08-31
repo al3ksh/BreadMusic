@@ -2,15 +2,17 @@ const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { getBalance, addBalance, removeBalance, hasBalance, checkGamblingCooldown } = require('./economy');
 const { renderArcadeImage, compactNumber } = require('./arcadeRenderer');
 const { renderSlotsAnimation, renderRouletteAnimation, renderCoinflipAnimation } = require('./arcadeAnimation');
-
-const SLOTS_SYMBOLS = ['🍞', '🍒', '🔔', '💎', '7️⃣'];
-const SLOTS_MULTIPLIERS = {
-  '🍞🍞🍞': 2,
-  '🍒🍒🍒': 3,
-  '🔔🔔🔔': 5,
-  '💎💎💎': 10,
-  '7️⃣7️⃣7️⃣': 25,
-};
+const {
+  COINFLIP_MULTIPLIER,
+  COINFLIP_WIN_CHANCE,
+  ROULETTE_EVEN_MONEY_MULTIPLIER,
+  ROULETTE_GREEN_MULTIPLIER,
+  ROULETTE_NUMBER_MULTIPLIER,
+  SLOTS_MULTIPLIERS,
+  SLOTS_PAIR_MULTIPLIER,
+  SLOTS_SYMBOLS,
+  roundExpectedPayout,
+} = require('./arcadeOdds');
 
 const ROULETTE_NUMBERS = {
   red: [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36],
@@ -48,8 +50,8 @@ function playSlots(userId, bet) {
     winnings = bet * multiplier;
     addBalance(userId, winnings);
   } else if (result[0] === result[1] || result[1] === result[2] || result[0] === result[2]) {
-    multiplier = 1.5;
-    winnings = Math.floor(bet * multiplier);
+    multiplier = SLOTS_PAIR_MULTIPLIER;
+    winnings = roundExpectedPayout(bet * multiplier);
     addBalance(userId, winnings);
   }
 
@@ -81,22 +83,22 @@ function playRoulette(userId, bet, betType, number = null) {
 
   if (betType === 'number' && number !== null) {
     isWin = spinResult === number;
-    multiplier = 35;
+    multiplier = ROULETTE_NUMBER_MULTIPLIER;
   } else if (betType === 'red') {
     isWin = ROULETTE_NUMBERS.red.includes(spinResult);
-    multiplier = 2;
+    multiplier = ROULETTE_EVEN_MONEY_MULTIPLIER;
   } else if (betType === 'black') {
     isWin = ROULETTE_NUMBERS.black.includes(spinResult);
-    multiplier = 2;
+    multiplier = ROULETTE_EVEN_MONEY_MULTIPLIER;
   } else if (betType === 'green') {
     isWin = spinResult === 0;
-    multiplier = 14;
+    multiplier = ROULETTE_GREEN_MULTIPLIER;
   } else if (betType === 'odd') {
     isWin = spinResult !== 0 && spinResult % 2 === 1;
-    multiplier = 2;
+    multiplier = ROULETTE_EVEN_MONEY_MULTIPLIER;
   } else if (betType === 'even') {
     isWin = spinResult !== 0 && spinResult % 2 === 0;
-    multiplier = 2;
+    multiplier = ROULETTE_EVEN_MONEY_MULTIPLIER;
   }
 
   let winnings = 0;
@@ -133,12 +135,12 @@ function playCoinflip(userId, bet, choice) {
   }
 
   removeBalance(userId, bet);
-  const result = Math.random() < 0.5 ? 'heads' : 'tails';
-  const isWin = result === choice;
+  const isWin = Math.random() < COINFLIP_WIN_CHANCE;
+  const result = isWin ? choice : (choice === 'heads' ? 'tails' : 'heads');
 
   let winnings = 0;
   if (isWin) {
-    winnings = bet * 2;
+    winnings = bet * COINFLIP_MULTIPLIER;
     addBalance(userId, winnings);
   }
 
@@ -271,7 +273,7 @@ async function buildCoinflipMessage(username, result, choice, bet, isWin, winnin
     data: { result },
     metrics: [
       { label: 'BET', value: bet > 0 ? `${compactNumber(bet)} BREAD` : 'JUST FOR FUN' },
-      { label: 'YOUR PICK', value: String(choice).toUpperCase() },
+      { label: 'RESULT / YOUR PICK', value: `${String(result).toUpperCase()} / ${String(choice).toUpperCase()}` },
       { label: 'BALANCE', value: `${compactNumber(newBalance)} BREAD` },
     ],
   }, buildCoinflipEmbed(result, choice, bet, isWin, winnings, newBalance), renderCoinflipAnimation);

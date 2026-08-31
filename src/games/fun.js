@@ -404,12 +404,11 @@ async function build8BallMessage(username, question, answer) {
     title: 'Magic 8 Ball',
     username,
     status: answer.toUpperCase(),
-    detail: question,
+    detail: 'The ball has spoken',
     accent: '#8f82eb',
-    data: { answer },
+    data: {},
     metrics: [
       { label: 'QUESTION', value: String(question).slice(0, 24) },
-      { label: 'VERDICT', value: answer.toUpperCase() },
       { label: 'CERTAINTY', value: 'MYSTERIOUS' },
     ],
   }, build8BallEmbed(question, answer));
