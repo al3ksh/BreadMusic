@@ -40,8 +40,10 @@ function json(route: Route, body: unknown, statusCode = 200) {
   });
 }
 
-async function mockApi(page: Page, options: { canControlPlayer?: boolean } = {}) {
+async function mockApi(page: Page, options: { canControlPlayer?: boolean; currentTrack?: typeof track } = {}) {
   const canControlPlayer = options.canControlPlayer ?? true;
+  const currentTrack = options.currentTrack ?? track;
+  const playerStatus = { ...status, currentTrack };
   const access = {
     accessLevel: canControlPlayer ? 'admin' : 'member',
     dashboardAccess: canControlPlayer ? 'admin' : 'members',
@@ -68,7 +70,7 @@ async function mockApi(page: Page, options: { canControlPlayer?: boolean } = {})
       return json(route, [{ id: guildId, name: 'Test Guild', icon: null, permissions: 8, member_count: 4, bot_present: true, access_level: 'admin', dashboard_access: 'admin', can_access: true, can_invite: false }]);
     }
     if (path.endsWith('/access')) return json(route, access);
-    if (path.endsWith('/status')) return json(route, status);
+    if (path.endsWith('/status')) return json(route, playerStatus);
     if (path.endsWith('/health')) return json(route, {
       api: { ok: true, timestamp: Date.now() },
       discord: { ok: true, wsStatusCode: 0, ping: 30 },
@@ -77,13 +79,13 @@ async function mockApi(page: Page, options: { canControlPlayer?: boolean } = {})
       playerMessageChannel: { configured: false, channelId: null, channelName: null, sendable: null },
     });
     if (path.endsWith('/insights')) return json(route, { range: '7d', summary: { totalPlays: 1, uniqueTracks: 1, uniqueUsers: 1, lastPlayAt: Date.now() }, topTracks: [], topUsers: [], trend14d: [] });
-    if (path.endsWith('/queue')) return json(route, { current: track, tracks: [track], total: 1, page: 0, totalPages: 1, revision: 'test-revision' });
+    if (path.endsWith('/queue')) return json(route, { current: currentTrack, tracks: [currentTrack], total: 1, page: 0, totalPages: 1, revision: 'test-revision' });
     if (path.endsWith('/player/events')) {
       return route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
         headers: { 'Cache-Control': 'no-cache' },
-        body: `event: snapshot\ndata: ${JSON.stringify({ status, queue: { current: track, tracks: [track], total: 1, page: 0, totalPages: 1, revision: 'test-revision' } })}\n\n`,
+        body: `event: snapshot\ndata: ${JSON.stringify({ status: playerStatus, queue: { current: currentTrack, tracks: [currentTrack], total: 1, page: 0, totalPages: 1, revision: 'test-revision' } })}\n\n`,
       });
     }
     if (path.endsWith('/player/search')) return json(route, { tracks: [{ ...track, encoded: 'encoded-test' }], playlist: null });
@@ -235,3 +237,39 @@ test('Activity can upload with the bot offline and reports playback starting', a
   await expect(activity.getByText('Playing now: Uploaded audio')).toBeVisible();
   await expect(activity.getByRole('complementary', { name: 'queue panel' })).toBeVisible();
 });
+
+for (const { name, uri, linked } of [
+  { name: 'internal local upload', uri: `http://bot:3001/api/uploads/${guildId}/file-id/demo%20track.flac?expires=9999999999&signature=test-only`, linked: false },
+  { name: 'public local upload', uri: `https://bread.example/api/uploads/${guildId}/file-id/demo.mp3?expires=9999999999&signature=test-only`, linked: false },
+  { name: 'YouTube track', uri: track.uri, linked: true },
+]) {
+  test(`Activity title links handle ${name} in full and compact views`, async ({ page }) => {
+    await mockApi(page, { currentTrack: { ...track, uri } });
+    await page.addInitScript(() => {
+      window.__BREAD_TEST_ACTIVITY_SDK__ = {
+        guildId: '123456789012345678',
+        channelId: 'voice-1',
+        ready: async () => undefined,
+        commands: {
+          authorize: async () => ({ code: 'test-code' }),
+          authenticate: async () => ({ access_token: 'test-activity-token' }),
+          openExternalLink: async () => ({ opened: true }),
+          setActivity: async (options) => options.activity,
+        },
+      };
+    });
+    await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><iframe title="Bread Activity" src="http://127.0.0.1:3100/activity?frame_id=test&instance_id=test&platform=desktop" style="width:100%;height:100vh;border:0"></iframe>');
+    const activity = page.frameLocator('iframe[title="Bread Activity"]');
+    await expect(activity.getByText('Music Activity')).toBeVisible({ timeout: 30_000 });
+    const titles = activity.locator('.activity-track-copy h1, .activity-compact-copy h1');
+    await expect(titles).toHaveText(['Test track', 'Test track']);
+    await expect(titles.locator('a')).toHaveCount(linked ? 2 : 0);
+    if (linked) {
+      for (const link of await titles.locator('a').all()) await expect(link).toHaveAttribute('href', uri);
+    }
+    await expect(activity.locator('.activity-track-copy h1')).toBeVisible();
+    await page.setViewportSize({ width: 400, height: 260 });
+    await expect(activity.locator('.activity-compact-copy h1')).toBeVisible();
+    await expect(titles.locator('a')).toHaveCount(linked ? 2 : 0);
+  });
+}

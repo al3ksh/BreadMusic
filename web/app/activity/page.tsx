@@ -1164,7 +1164,10 @@ export default function ActivityPage() {
   const displayedVolume = Math.min(volumeLimit, volumeDraft ?? status.volume);
   const currentDuration = status.currentTrack?.duration || 0;
   const displayedPosition = seekDraft ?? position;
-  const currentTrackLink = /^https?:\/\//i.test(status.currentTrack?.uri || '') ? status.currentTrack?.uri || '' : '';
+  // Signed upload URLs are for playback, not public track pages.
+  const currentTrackLink = /^https?:\/\//i.test(currentTrackUri) && !currentTrackUri.includes('/api/uploads/')
+    ? currentTrackUri
+    : '';
   const percent = currentDuration ? Math.min(100, (displayedPosition / currentDuration) * 100) : 0;
   const syncedLyrics = useMemo(() => parseSyncedLyrics(lyrics?.syncedLyrics), [lyrics?.syncedLyrics]);
   const activeLyricIndex = syncedLyrics.reduce((current, line, index) => (line.time <= displayedPosition ? index : current), -1);

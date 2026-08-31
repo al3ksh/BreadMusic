@@ -122,7 +122,7 @@ services:
       - LANDING_DEMO_CLIENT_IP_HEADER=${LANDING_DEMO_CLIENT_IP_HEADER:-}
       - NODE_ENV=production
     ports:
-      - "3000:3000"
+      - "${HOST_WEB_PORT:-3002}:3000"
     networks:
       - breadmusic-network
     healthcheck:

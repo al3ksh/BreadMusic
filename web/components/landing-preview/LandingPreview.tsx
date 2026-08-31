@@ -1,17 +1,19 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUpRight, AudioLines, Expand, Gamepad2, Github, Headphones, LayoutDashboard, ListMusic, Menu, Monitor, Plus, Radio, ShieldCheck, X } from 'lucide-react';
+import { ArrowDown, ArrowUpRight, AudioLines, BookOpenText, Expand, Github, Headphones, LayoutDashboard, ListMusic, Menu, Monitor, Plus, Radio, ShieldCheck, X } from 'lucide-react';
 import { AddToDiscordModal } from '@/components/landing/AddToDiscordModal';
 import { CommandDemo } from './CommandDemo';
 import { ArcadeCarousel } from './ArcadeCarousel';
+import { ScrollToTopNotch } from './ScrollToTopNotch';
 import { asset } from './demo';
 import styles from './preview.module.css';
 
+const heroView = { id: 'activity', label: 'Activity', file: 'activity.png', mobile: 'activity-phone.png', title: 'Music, together in Discord.', description: 'Find tracks, follow live lyrics and control playback from your voice channel.' };
 const views = [
-  { id: 'activity', label: 'Activity', icon: Headphones, file: 'activity.png', mobile: 'activity-phone.png', title: 'Music, together in Discord.', description: 'Find tracks, follow live lyrics and control playback from your voice channel.' },
-  { id: 'queue', label: 'Shared queue', icon: ListMusic, file: 'activity-queue.png', mobile: 'activity-queue-phone.png', title: 'A queue everyone can shape.', description: 'Add tracks together, drag them into order and vote to skip. DJ permissions stay in your hands.' },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, file: 'dashboard.png', mobile: 'dashboard-phone.png', title: 'Playback and server settings.', description: 'Manage your queue, listening history, DJ roles and volume limits from the web.' },
+  { id: 'queue', label: 'Shared queue', icon: ListMusic, file: 'activity-queue.png', mobile: 'activity-queue-phone.png', title: 'A queue everyone can shape.', description: 'Add tracks together, drag them into order and vote to skip. DJ permissions stay in your hands.' },
+  { id: 'lyrics', label: 'Live lyrics', icon: BookOpenText, file: 'lyrics.png', mobile: 'lyrics-phone.png', title: 'Lyrics that stay with the room.', description: 'Follow synced lines in the drawer or switch to a focused karaoke view without leaving Activity.' },
 ];
 const faqs = [
   ['Do I need to know the commands?', 'No. Open Activity in your Discord voice channel or use the web dashboard to search, queue and control playback. Slash commands are there when you want them.'],
@@ -24,13 +26,14 @@ const faqs = [
 export function LandingPreview({ preview = false, liveSearch = false }: { preview?: boolean; liveSearch?: boolean }) {
   const [view, setView] = useState(0);
   const [mobileNav, setMobileNav] = useState(false);
-  const [modal, setModal] = useState<'screen' | 'invite' | null>(null);
+  const [modal, setModal] = useState<'screen' | 'hero' | 'invite' | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const selected = views[view];
+  const expandedView = modal === 'hero' ? heroView : selected;
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    if (modal === 'screen') dialog.showModal(); else dialog.close();
+    if (modal === 'screen' || modal === 'hero') dialog.showModal(); else dialog.close();
   }, [modal]);
 
   return (
@@ -58,7 +61,7 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
           <div className={styles.heroActions}><button type="button" className={styles.primary} onClick={() => setModal('invite')}><Plus size={18} />Add to Discord</button><a className={styles.secondary} href="#playground">Try Bread <ArrowDown size={16} /></a></div>
         </div>
         <picture><source media="(max-width: 620px) and (max-height: 680px)" srcSet={asset('activity-compact.png')} /><source media="(max-width: 620px)" srcSet={asset('activity-mobile.png')} /><img className={styles.heroScreen} src={asset('activity-hero.png')} alt="Bread Activity playing Instant Crush with artwork and playback status" fetchPriority="high" /></picture>
-        <button type="button" className={styles.heroCaption} onClick={() => { setView(0); setModal('screen'); }}><Headphones size={15} /> Bread Activity <span>Inside your voice channel</span><Expand size={14} /></button>
+        <button type="button" className={styles.heroCaption} onClick={() => setModal('hero')}><Headphones size={15} /> Bread Activity <span>Inside your voice channel</span><Expand size={14} /></button>
       </section>
 
       <div className={styles.sourceBand}><span>Bring your music.</span><div><b>YouTube</b><b>Spotify</b><b>SoundCloud</b><b>Local audio</b></div><span>Keep your people.</span></div>
@@ -100,10 +103,11 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
 
       <footer className={styles.footer}><div className={styles.brand}><img src="/assets/breadicon.png" alt="" width={26} height={26} /><span>Bread</span></div><span>Made by <a href="https://aleksh.xyz" target="_blank" rel="noreferrer">aleksh</a></span><nav aria-label="Footer"><a href="https://github.com/al3ksh/BreadMusic/blob/main/LICENSE">AGPL-3.0</a><a href="/privacy">Privacy</a><a href="/cookies">Cookies</a><a href="/terms">Terms</a></nav>{preview && <span className={styles.previewStamp}><Monitor size={13} /> Local preview</span>}</footer>
 
+      <ScrollToTopNotch hidden={modal !== null} />
       <AddToDiscordModal open={modal === 'invite'} onClose={() => setModal(null)} />
-      <dialog ref={dialogRef} className={styles.screenDialog} aria-label={`${selected.label} screenshot`} onCancel={() => setModal(null)} onClick={(event) => { if (event.target === event.currentTarget) setModal(null); }}>
-        <div className={styles.dialogHead}><strong>{`Bread / ${selected.label}`}</strong><button type="button" aria-label="Close dialog" title="Close" onClick={() => setModal(null)}><X size={22} /></button></div>
-        <picture><source media="(max-width: 620px)" srcSet={asset(selected.mobile)} /><img src={asset(selected.file)} alt={`Full ${selected.label} screenshot with sample data`} /></picture>
+      <dialog ref={dialogRef} className={styles.screenDialog} aria-label={`${expandedView.label} screenshot`} onCancel={() => setModal(null)} onClick={(event) => { if (event.target === event.currentTarget) setModal(null); }}>
+        <div className={styles.dialogHead}><strong>{`Bread / ${expandedView.label}`}</strong><button type="button" aria-label="Close dialog" title="Close" onClick={() => setModal(null)}><X size={22} /></button></div>
+        <picture><source media="(max-width: 620px)" srcSet={asset(expandedView.mobile)} /><img src={asset(expandedView.file)} alt={`Full ${expandedView.label} screenshot with sample data`} /></picture>
       </dialog>
     </main>
   );

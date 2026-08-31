@@ -5,6 +5,7 @@ services:
     environment:
       LANDING_DEMO_SEARCH_URL: http://landing-search:3001
       LANDING_DEMO_TOKEN: ${LANDING_DEMO_TOKEN:?Set a separate random LANDING_DEMO_TOKEN}
+      LANDING_DEMO_LYRICS_ENABLED: ${LANDING_DEMO_LYRICS_ENABLED:-false}
     networks:
       - breadmusic-network
       - landing-metadata

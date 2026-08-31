@@ -214,6 +214,42 @@
 .footer nav { display: flex; gap: 22px; margin-left: auto; }
 .footer a:hover { color: white; }
 .previewStamp { display: inline-flex; align-items: center; gap: 6px; color: #99969f; }
+.scrollNotch {
+  --scroll-progress: 0;
+  position: fixed;
+  z-index: 180;
+  bottom: 0;
+  left: 50%;
+  width: 88px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #bcb8c7;
+  background: #171719;
+  border: 1px solid #3a393f;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, calc(100% - 2px));
+  transition: color 160ms ease, background 160ms ease, opacity 180ms ease, transform 260ms cubic-bezier(.22, 1, .36, 1);
+}
+.scrollNotch::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  background: var(--lilac);
+  transform: scaleX(var(--scroll-progress));
+  transform-origin: left;
+}
+.scrollNotch[data-visible='true'] { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.scrollNotch[data-visible='true']:hover { color: white; background: #242329; transform: translate(-50%, 0); }
+.scrollNotch svg { transition: transform 160ms ease; }
+.scrollNotch:hover svg { transform: translateY(-2px); }
 .screenDialog, .inviteDialog { position: fixed; inset: 0; margin: auto; background: #111114; color: #ebe8f0; border: 1px solid #49434f; border-radius: 8px; padding: 0; max-height: 92svh; width: min(1280px, 95vw); }
 .screenDialog::backdrop, .inviteDialog::backdrop { background: rgb(0 0 0 / .85); }
 .dialogHead { display: flex; align-items: center; justify-content: space-between; padding: 15px 20px; border-bottom: 1px solid #35303b; font-size: 13px; }
@@ -374,6 +410,7 @@
   .footer nav { width: 100%; margin: 0; gap: 20px; order: 3; }
   .footer a, .textLink { display: inline-flex; align-items: center; min-height: 44px; }
   .previewStamp { font-size: 9px; }
+  .scrollNotch { width: 76px; height: calc(32px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); }
 }
 @media (prefers-reduced-motion: reduce) {
   .page *, .page *::before, .page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

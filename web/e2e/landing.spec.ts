@@ -31,6 +31,34 @@ test('production catalogue works without a session and rejects untrusted writes'
   expect((await request.post('/preview/api/search', { headers, data: { query: 'test' } })).status()).toBe(404);
 });
 
+test('product showcase starts with Dashboard, exposes lyrics and the edge notch returns to top', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Bread Activity/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Activity screenshot' })).toContainText('Bread / Activity');
+  await page.keyboard.press('Escape');
+  const showcaseTabs = page.getByRole('tablist', { name: 'Explore Bread' });
+  await expect(showcaseTabs.getByRole('tab', { name: 'Dashboard' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#product-panel img')).toHaveAttribute('src', /dashboard\.png$/);
+  await showcaseTabs.getByRole('tab', { name: 'Live lyrics' }).click();
+  await expect(page.locator('#product-panel img')).toHaveAttribute('src', /lyrics\.png$/);
+
+  const notch = page.locator('button[aria-label="Back to top"]');
+  await expect(notch).toHaveAttribute('data-visible', 'false');
+  await expect(notch).toHaveAttribute('aria-hidden', 'true');
+  await page.evaluate(() => {
+    const hero = document.getElementById('main-content');
+    window.scrollTo(0, hero ? hero.offsetTop + hero.offsetHeight + 1 : innerHeight);
+  });
+  await expect(notch).toHaveAttribute('data-visible', 'true');
+  await expect(notch).toHaveAttribute('aria-hidden', 'false');
+  await notch.hover();
+  const notchBox = await notch.boundingBox();
+  expect(notchBox && Math.abs(notchBox.y + notchBox.height - (page.viewportSize()?.height || 0))).toBeLessThanOrEqual(1);
+  await notch.click();
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 3_000 }).toBeLessThan(2);
+  await expect(notch).toHaveAttribute('data-visible', 'false');
+});
+
 test('sample queue and native Activity keep working when live search is unavailable', async ({ page }) => {
   const api: string[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/')) api.push(request.url()); });
