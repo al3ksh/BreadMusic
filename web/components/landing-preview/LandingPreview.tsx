@@ -6,6 +6,7 @@ import { AddToDiscordModal } from '@/components/landing/AddToDiscordModal';
 import { CommandDemo } from './CommandDemo';
 import { ArcadeCarousel } from './ArcadeCarousel';
 import { ScrollToTopNotch } from './ScrollToTopNotch';
+import { BreadSky } from './BreadSky';
 import { asset } from './demo';
 import styles from './preview.module.css';
 
@@ -25,6 +26,7 @@ const faqs = [
 const galleryViews = [heroView, ...views];
 
 export function LandingPreview({ preview = false, liveSearch = false }: { preview?: boolean; liveSearch?: boolean }) {
+  const currentYear = new Date().getFullYear();
   const [view, setView] = useState(0);
   const [mobileNav, setMobileNav] = useState(false);
   const [modal, setModal] = useState<'screen' | 'hero' | 'invite' | null>(null);
@@ -88,9 +90,11 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
         </div>
       </header>
 
+      <div className={styles.introScene}>
+      <BreadSky />
       <section ref={heroRef} className={styles.hero} id="main-content" data-running={heroRunning}>
         <div className={styles.heroText}>
-          <h1>Bread<span className={styles.heroBars} aria-hidden="true"><i /><i /><i /><i /></span></h1>
+          <h1>Bread<span className={styles.heroWave} aria-hidden="true">{[8, 14, 24, 38, 25, 46, 58, 40, 26, 44, 30, 18, 10].map((height, index) => <i key={index} style={{ '--height': `${height}px`, '--delay': `${index * -.17}s` } as CSSProperties} />)}</span></h1>
           <p>Music for your Discord.</p>
           <span className={styles.heroDescription}>A shared player, live lyrics and a queue everyone can add to.</span>
           <div className={styles.heroActions}><button type="button" className={styles.primary} onClick={() => setModal('invite')}><Plus size={18} />Add to Discord</button><a className={`${styles.secondary} ${styles.tryBreadCue}`} href="#playground">Try Bread <ArrowDown size={16} /></a></div>
@@ -122,6 +126,7 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
         </div>
       </section>
 
+      </div>
       <section ref={playgroundRef} className={styles.playgroundBand} id="playground" data-highlight={playgroundSeen}><div className={styles.section}>
         <div className={styles.sectionTop}><h2>Try Bread.</h2><p>Slash commands or Activity.<br />{liveSearch ? 'Real search. Your own demo queue.' : 'Sample tracks. Your own demo queue.'}</p></div>
         <CommandDemo />
@@ -136,7 +141,7 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
 
       <section className={styles.closing}><img src="/assets/breadicon.png" alt="" width={64} height={64} loading="lazy" /><h2>Bring Bread to your server.</h2><div><button type="button" className={styles.primary} onClick={() => setModal('invite')}><Plus size={18} />Add to Discord</button><a className={styles.textLink} href="https://github.com/al3ksh/BreadMusic" target="_blank" rel="noreferrer"><Github size={17} />Explore the source <ArrowUpRight size={14} /></a></div></section>
 
-      <footer className={styles.footer}><div className={styles.brand}><img src="/assets/breadicon.png" alt="" width={26} height={26} /><span>Bread</span></div><span>Made by <a href="https://aleksh.xyz" target="_blank" rel="noreferrer">aleksh</a></span><nav aria-label="Footer"><a href="https://github.com/al3ksh/BreadMusic/blob/main/LICENSE">AGPL-3.0</a><a href="/privacy">Privacy</a><a href="/cookies">Cookies</a><a href="/terms">Terms</a></nav>{preview && <span className={styles.previewStamp}><Monitor size={13} /> Local preview</span>}</footer>
+      <footer className={styles.footer}><div className={styles.brand}><img src="/assets/breadicon.png" alt="" width={26} height={26} /><span>Bread</span></div><span>&copy; {currentYear} &middot; Made by <a href="https://aleksh.xyz" target="_blank" rel="noreferrer">aleksh</a></span><nav aria-label="Footer"><a href="https://github.com/al3ksh/BreadMusic/blob/main/LICENSE">AGPL-3.0</a><a href="/privacy">Privacy</a><a href="/cookies">Cookies</a><a href="/terms">Terms</a></nav>{preview && <span className={styles.previewStamp}><Monitor size={13} /> Local preview</span>}</footer>
 
       <ScrollToTopNotch hidden={modal !== null} />
       <AddToDiscordModal open={modal === 'invite'} onClose={() => setModal(null)} />

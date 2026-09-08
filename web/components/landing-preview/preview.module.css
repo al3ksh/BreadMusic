@@ -12,7 +12,7 @@
   --line: #29292d;
   --lilac: #b7a9eb;
   color: var(--paper);
-  background: #0a0a0b;
+  background: #0b0b0c;
   font-family: 'Bread Manrope', sans-serif;
   line-height: 1.6;
   letter-spacing: 0;
@@ -69,14 +69,27 @@
   32% { opacity: .65; transform: translateX(140%); }
   36%, 100% { opacity: 0; transform: translateX(140%); }
 }
-.heroBars { display: inline-flex; align-items: flex-end; height: 50px; gap: 6px; }
-.heroBars i { width: 8px; border-radius: 2px; height: 18px; background: #b7a9eb; animation: bars 2.6s ease-in-out infinite alternate; transform-origin: bottom; }
-.heroBars i:nth-child(2) { height: 37px; animation-delay: -.9s; }
-.heroBars i:nth-child(3) { height: 48px; animation-delay: -1.6s; }
-.heroBars i:nth-child(4) { height: 28px; animation-delay: -.5s; }
-.hero[data-running='false'] .heroBars i { animation-play-state: paused; }
-@keyframes bars { from { transform: scaleY(.58); } to { transform: scaleY(1); } }
-.heroScreen { position: absolute; z-index: -1; width: min(960px, calc(100% - 48px)); left: 50%; transform: translateX(-50%); height: calc(100% - 280px); bottom: 58px; object-fit: contain; object-position: center; }
+.heroWave { display: inline-flex; align-items: center; align-self: center; height: 62px; gap: 4px; }
+.heroWave i { width: 2px; border-radius: 2px; height: calc(var(--height) * .7); background: #96919f; transform-origin: center; }
+.hero[data-running='false'] .heroWave i { animation-play-state: paused; }
+.introScene { position: relative; isolation: isolate; background: #0b0b0c; }
+.introScene .hero { isolation: auto; }
+.breadSky { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: -1; mask-image: linear-gradient(to bottom, transparent, black 5%, black 90%, transparent); }
+.breadMeteor { position: absolute; width: var(--size); height: var(--size); opacity: 0; }
+.breadGlyph { display: block; width: 100%; height: 100%; background: #a4a4a4; mask-image: url('/assets/landing-preview/bread-graphite.png'); mask-mode: luminance; mask-size: contain; mask-repeat: no-repeat; mask-position: center; }
+@media (prefers-reduced-motion: no-preference) {
+  .heroWave i { animation: wavePulse 4.8s var(--delay) ease-in-out infinite; }
+  .breadMeteor { animation: breadDrift 32s var(--delay) linear infinite, breadFade 32s var(--delay) ease-in-out infinite; }
+  .breadSky[data-running='false'] .breadMeteor { animation-play-state: paused; }
+  .breadSky[data-running='false'] .breadGlyph { animation-play-state: paused; }
+}
+@keyframes wavePulse { 0%, 100% { transform: scaleY(.68); opacity: .68; } 50% { transform: scaleY(1.05); opacity: .94; } }
+@keyframes breadDrift {
+  from { transform: translate3d(0, -15px, 0) rotate(-8deg); }
+  to { transform: translate3d(-28px, 48px, 0) rotate(-3deg); }
+}
+@keyframes breadFade { 0%, 100% { opacity: 0; } 50% { opacity: .08; } }
+.heroScreen { position: absolute; z-index: -1; width: min(960px, calc(100% - 48px)); left: 50%; transform: translateX(-50%); height: calc(100% - 280px); bottom: 58px; object-fit: contain; object-position: center; mix-blend-mode: lighten; }
 .heroCaption { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); display: flex; gap: 9px; align-items: center; min-height: 44px; padding: 0 8px; color: #bbb9c6; font-size: 12px; white-space: nowrap; }
 .heroCaption span { color: #95949f; padding-left: 9px; border-left: 1px solid #49484f; }
 .heroCaption:hover { color: white; }
@@ -86,7 +99,7 @@
 .sourceBand b { font-size: 17px; font-weight: 650; color: #c4c3cd; }
 .section { max-width: 1160px; margin: auto; padding: 64px 0; scroll-margin-top: 0; }
 .sectionTop { display: flex; align-items: flex-end; justify-content: space-between; gap: 60px; margin-bottom: 28px; }
-.productSection { padding-top: 36px; }
+.productSection { padding-top: 64px; }
 .productSection h2, .playgroundBand h2 { font-size: 36px; }
 .playgroundBand .section { padding: 36px 0 48px; }
 .sectionTop p { font-size: 15px; line-height: 1.85; max-width: 370px; padding-bottom: 2px; }
@@ -383,8 +396,9 @@
   .hero { height: min(640px, calc(100svh - 140px)); min-height: 475px; }
   .heroText { padding-top: 16px; }
   .heroText h1 { font-size: 60px; gap: 15px; }
-  .heroBars { height: 38px; gap: 4px; }
-  .heroBars i { width: 6px; }
+  .heroWave { height: 48px; gap: 3px; }
+  .heroWave i { width: 2px; height: calc(var(--height) * .55); }
+  .breadMeteor:nth-child(even) { display: none; }
   .heroText > p { font-size: 20px; margin-top: 10px; }
   .heroDescription { font-size: 13px; line-height: 1.6; max-width: 340px; }
   .heroActions { margin-top: 22px; gap: 10px; }
