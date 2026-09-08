@@ -4,13 +4,14 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const base = process.env.PREVIEW_URL || 'http://127.0.0.1:3180';
+const dashboardOnly = process.argv.includes('--dashboard-only');
 const assets = path.resolve('public/assets/landing-preview');
 await fs.mkdir(assets, { recursive: true });
 const captures = path.resolve('../.tmp/landing-preview');
 await fs.mkdir(captures, { recursive: true });
 const require = createRequire(import.meta.url);
 const { renderArcadeImage } = require('../../src/games/arcadeRenderer');
-await fs.writeFile(path.join(assets, 'arcade.png'), await renderArcadeImage({
+if (!dashboardOnly) await fs.writeFile(path.join(assets, 'arcade.png'), await renderArcadeImage({
   type: 'slots', title: 'Slots', username: 'alex', status: 'JUST FOR FUN', detail: 'A little luck. No wager.',
   data: { symbols: ['🍞', '🍒', '💎'] },
   metrics: [{ label: 'BET', value: 'JUST FOR FUN' }, { label: 'RESULT', value: 'NO MATCH' }, { label: 'BALANCE', value: 'UNCHANGED' }],
@@ -20,7 +21,7 @@ const songs = [
   ['not-like-us', 'Kendrick Lamar Not Like Us', 'Not Like Us', 'Kendrick Lamar', 274000],
   ['bubbletea', 'Quebonafide BUBBLETEA', 'BUBBLETEA', 'Quebonafide', 284000],
 ];
-for (const [id, query, , artist] of songs) {
+for (const [id, query, , artist] of dashboardOnly ? [] : songs) {
   const destination = path.join(assets, `${id}.jpg`);
   try { await fs.access(destination); } catch {
     const trackIds = { 'not-like-us': '1781353929', 'bubbletea': '1633289330' };
@@ -76,14 +77,15 @@ try {
     if (p === '/api/guilds') return send([{ id: guildId, name: 'The listening room', icon: null, permissions: 8, bot_present: true, access_level: 'admin', can_access: true }]);
     if (p === '/api/activity/config') return send({ enabled: true, clientId: 'demo' });
     if (p === '/api/activity/token') return send({ access_token: 'demo' });
-    if (p.endsWith('/config')) return send({ defaultVolume: 60, maxVolume: 100, autoplay: true, dashboardAccess: 'admin', voteSkipPercent: 50 });
+    if (p.endsWith('/config')) return send({ defaultVolume: 60, maxVolume: 100, autoplay: true, autoplayMode: 'ai_assisted', dashboardAccess: 'admin', activityControl: 'dj', djRoleId: 'role-dj', djRoleName: 'DJ', modRoleId: 'role-mod', modRoleName: 'Moderator', voteSkipPercent: 0.5, afkTimeout: 300000, persistentQueue: true, voiceChannelStatus: true });
     if (p.endsWith('/health')) return send({ api: { ok: true }, discord: { ok: true, ping: 26 }, lavalink: { ok: true }, player: { exists: true, connected: true } });
-    if (p.endsWith('/channels') || p.endsWith('/roles')) return send([]);
+    if (p.endsWith('/roles')) return send([{ id: 'role-dj', name: 'DJ', color: '#b7a9eb' }, { id: 'role-mod', name: 'Moderator', color: '#61d59b' }]);
+    if (p.endsWith('/channels')) return send([]);
     if (p.endsWith('/player/filters')) return send({ presets: [] });
     return send({ success: true });
   });
-  await page.goto(`${base}/dashboard/${guildId}?view=player`);
-  await page.getByText('Instant Crush').first().waitFor();
+  await page.goto(`${base}/dashboard/${guildId}?view=settings`);
+  await page.getByText('Vote Skip Threshold', { exact: true }).waitFor();
   await page.evaluate(() => document.fonts.ready);
   await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
   await page.waitForTimeout(1500);
@@ -91,6 +93,9 @@ try {
   await page.setViewportSize({ width: 390, height: 680 });
   await page.waitForTimeout(400);
   await page.screenshot({ path: path.join(assets, 'dashboard-phone.png') });
+  if (dashboardOnly) {
+    console.log('Captured desktop and mobile server settings with sample permissions.');
+  } else {
   await page.setViewportSize({ width: 1000, height: 560 });
   await page.setContent(`<iframe title="Activity" src="${base}/activity?frame_id=demo&instance_id=demo&platform=desktop" style="width:100%;height:100vh;border:0"></iframe><style>body{margin:0}</style>`);
   const activity = page.frameLocator('iframe');
@@ -115,6 +120,7 @@ try {
   await page.waitForTimeout(400);
   await activity.locator('.activity-compact-player').screenshot({ path: path.join(assets, 'activity-compact.png') });
   console.log('Captured actual Bread UI with illustrative data. No backend or Discord connection.');
+  }
 } finally {
   await browser.close();
 }

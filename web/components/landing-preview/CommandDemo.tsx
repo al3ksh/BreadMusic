@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useReducer, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowUp, BookOpen, Check, Hash, Headphones, LayoutGrid, ListMusic, LoaderCircle, Pause, Play, Plus, Repeat2, RotateCcw, Shuffle, SkipBack, SkipForward, Square, Volume2 } from 'lucide-react';
 import { artwork, asset, commands, demoTracks, type DemoTrack } from './demo';
 import { demoReducer, initialState, queueEmbed, trackEmbed, type Embed, type Message, type Playback } from './demo-state';
@@ -164,7 +164,7 @@ export function CommandDemo() {
   };
 
   return <>
-    <div className={styles.demoModeBar}><div role="tablist" aria-label="Playground mode" className={styles.tabs}>{(['commands', 'activity'] as const).map(item => <button type="button" key={item} role="tab" id={`demo-tab-${item}`} aria-controls={`demo-panel-${item}`} aria-selected={mode === item} tabIndex={mode === item ? 0 : -1} onClick={() => { scrollTo.current = 'player'; setMode(item); }} onKeyDown={event => {
+    <div className={styles.demoModeBar}><div role="tablist" aria-label="Playground mode" className={`${styles.tabs} ${styles.showcaseTabs}`} style={{ '--tab-count': 2, '--view-index': mode === 'activity' ? 1 : 0 } as CSSProperties}>{(['commands', 'activity'] as const).map(item => <button type="button" key={item} role="tab" id={`demo-tab-${item}`} aria-controls={`demo-panel-${item}`} aria-selected={mode === item} tabIndex={mode === item ? 0 : -1} onClick={() => { scrollTo.current = 'player'; setMode(item); }} onKeyDown={event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault(); const next = event.key === 'Home' ? 'commands' : event.key === 'End' ? 'activity' : mode === 'commands' ? 'activity' : 'commands';
       scrollTo.current = 'player'; setMode(next); document.getElementById(`demo-tab-${next}`)?.focus();

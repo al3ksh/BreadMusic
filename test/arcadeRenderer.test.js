@@ -122,6 +122,23 @@ test('fun commands build graphical messages', async () => {
   );
 });
 
+test('RPS artwork keeps move labels in metrics instead of repeating them below icons', () => {
+  const { buildArcadeSvg } = require('../src/games/arcadeRenderer');
+  const svg = buildArcadeSvg({
+    type: 'rps',
+    title: 'RPS Duel',
+    username: 'Player',
+    status: 'YOU WIN',
+    detail: 'Paper covers rock',
+    data: { playerChoice: 'paper', botChoice: 'rock', playerName: 'Player', opponentName: 'Bread' },
+    metrics: [{ label: 'YOUR PICK', value: 'PAPER' }, { label: 'BREAD', value: 'ROCK' }],
+  });
+
+  assert.doesNotMatch(svg, /class="choice"/);
+  assert.match(svg, /class="owner">Player<\/text>/);
+  assert.match(svg, /class="owner">Bread<\/text>/);
+});
+
 test('RPS duel keeps every interaction state graphical', async () => {
   const challenge = {
     challengerId: '1',

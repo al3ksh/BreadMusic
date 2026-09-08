@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUpRight, AudioLines, BookOpenText, Expand, Github, Headphones, LayoutDashboard, ListMusic, Menu, Monitor, Plus, Radio, ShieldCheck, X } from 'lucide-react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { ArrowDown, ArrowUpRight, AudioLines, BookOpenText, ChevronLeft, ChevronRight, Expand, Github, Headphones, LayoutDashboard, ListMusic, Menu, Monitor, Plus, Radio, ShieldCheck, X } from 'lucide-react';
 import { AddToDiscordModal } from '@/components/landing/AddToDiscordModal';
 import { CommandDemo } from './CommandDemo';
 import { ArcadeCarousel } from './ArcadeCarousel';
@@ -11,7 +11,7 @@ import styles from './preview.module.css';
 
 const heroView = { id: 'activity', label: 'Activity', file: 'activity.png', mobile: 'activity-phone.png', title: 'Music, together in Discord.', description: 'Find tracks, follow live lyrics and control playback from your voice channel.' };
 const views = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, file: 'dashboard.png', mobile: 'dashboard-phone.png', title: 'Playback and server settings.', description: 'Manage your queue, listening history, DJ roles and volume limits from the web.' },
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, file: 'dashboard.png', mobile: 'dashboard-phone.png', title: 'Server settings and permissions.', description: 'Choose DJ roles, Activity permissions, vote skip thresholds and volume limits for your server.' },
   { id: 'queue', label: 'Shared queue', icon: ListMusic, file: 'activity-queue.png', mobile: 'activity-queue-phone.png', title: 'A queue everyone can shape.', description: 'Add tracks together, drag them into order and vote to skip. DJ permissions stay in your hands.' },
   { id: 'lyrics', label: 'Live lyrics', icon: BookOpenText, file: 'lyrics.png', mobile: 'lyrics-phone.png', title: 'Lyrics that stay with the room.', description: 'Follow synced lines in the drawer or switch to a focused karaoke view without leaving Activity.' },
 ];
@@ -22,14 +22,49 @@ const faqs = [
   ['Is this a live connection to my server?', 'No. Search returns real YouTube and SoundCloud metadata, but the player is silent and its queue stays in this browser tab. The preview does not connect to Discord or change any server. Screenshots and Arcade rounds use sample data.'],
   ['Can I self-host Bread?', 'Yes. Bread is open source under AGPL-3.0. The GitHub repository includes the source code and setup documentation.'],
 ];
+const galleryViews = [heroView, ...views];
 
 export function LandingPreview({ preview = false, liveSearch = false }: { preview?: boolean; liveSearch?: boolean }) {
   const [view, setView] = useState(0);
   const [mobileNav, setMobileNav] = useState(false);
   const [modal, setModal] = useState<'screen' | 'hero' | 'invite' | null>(null);
+  const [galleryIndex, setGalleryIndex] = useState(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const heroRef = useRef<HTMLElement>(null);
+  const [heroRunning, setHeroRunning] = useState(false);
+  const playgroundRef = useRef<HTMLElement>(null);
+  const [playgroundSeen, setPlaygroundSeen] = useState(false);
   const selected = views[view];
-  const expandedView = modal === 'hero' ? heroView : selected;
+  const expandedView = galleryViews[galleryIndex];
+  const openGallery = (index: number, kind: 'hero' | 'screen') => {
+    setGalleryIndex(index);
+    setModal(kind);
+  };
+  const stepGallery = (direction: number) => setGalleryIndex(index => (index + direction + galleryViews.length) % galleryViews.length);
+  useEffect(() => {
+    const section = playgroundRef.current;
+    if (!section) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      setPlaygroundSeen(true);
+      observer.disconnect();
+    }, { rootMargin: '0px 0px -120px 0px' });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const hero = heroRef.current;
+    if (!hero) return;
+    let visible = false;
+    const update = () => setHeroRunning(visible && !document.hidden);
+    const observer = new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+      update();
+    });
+    observer.observe(hero);
+    document.addEventListener('visibilitychange', update);
+    return () => { observer.disconnect(); document.removeEventListener('visibilitychange', update); };
+  }, []);
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -53,15 +88,15 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
         </div>
       </header>
 
-      <section className={styles.hero} id="main-content">
+      <section ref={heroRef} className={styles.hero} id="main-content" data-running={heroRunning}>
         <div className={styles.heroText}>
           <h1>Bread<span className={styles.heroBars} aria-hidden="true"><i /><i /><i /><i /></span></h1>
           <p>Music for your Discord.</p>
           <span className={styles.heroDescription}>A shared player, live lyrics and a queue everyone can add to.</span>
-          <div className={styles.heroActions}><button type="button" className={styles.primary} onClick={() => setModal('invite')}><Plus size={18} />Add to Discord</button><a className={styles.secondary} href="#playground">Try Bread <ArrowDown size={16} /></a></div>
+          <div className={styles.heroActions}><button type="button" className={styles.primary} onClick={() => setModal('invite')}><Plus size={18} />Add to Discord</button><a className={`${styles.secondary} ${styles.tryBreadCue}`} href="#playground">Try Bread <ArrowDown size={16} /></a></div>
         </div>
         <picture><source media="(max-width: 620px) and (max-height: 680px)" srcSet={asset('activity-compact.png')} /><source media="(max-width: 620px)" srcSet={asset('activity-mobile.png')} /><img className={styles.heroScreen} src={asset('activity-hero.png')} alt="Bread Activity playing Instant Crush with artwork and playback status" fetchPriority="high" /></picture>
-        <button type="button" className={styles.heroCaption} onClick={() => setModal('hero')}><Headphones size={15} /> Bread Activity <span>Inside your voice channel</span><Expand size={14} /></button>
+        <button type="button" className={styles.heroCaption} onClick={() => openGallery(0, 'hero')}><Headphones size={15} /> Bread Activity <span>Inside your voice channel</span><Expand size={14} /></button>
       </section>
 
       <div className={styles.sourceBand}><span>Bring your music.</span><div><b>YouTube</b><b>Spotify</b><b>SoundCloud</b><b>Local audio</b></div><span>Keep your people.</span></div>
@@ -69,7 +104,7 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
       <section id="inside-bread" className={`${styles.section} ${styles.productSection}`}>
         <div className={styles.sectionTop}><h2>Activity and dashboard.</h2><p>Your voice channel or your browser.<br />The same music and shared queue.</p></div>
         <div className={styles.showcaseToolbar}>
-          <div role="tablist" aria-label="Explore Bread" className={styles.tabs}>{views.map((item, index) => <button type="button" key={item.id} role="tab" id={`tab-${item.id}`} aria-controls="product-panel" aria-selected={index === view} tabIndex={index === view ? 0 : -1} onClick={() => setView(index)} onKeyDown={(event) => {
+          <div role="tablist" aria-label="Explore Bread" className={`${styles.tabs} ${styles.showcaseTabs}`} style={{ '--view-index': view } as CSSProperties}>{views.map((item, index) => <button type="button" key={item.id} role="tab" id={`tab-${item.id}`} aria-controls="product-panel" aria-selected={index === view} tabIndex={index === view ? 0 : -1} onClick={() => setView(index)} onKeyDown={(event) => {
             if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? views.length - 1 : (view + (event.key === 'ArrowRight' ? 1 : -1) + views.length) % views.length;
             setView(next); document.getElementById(`tab-${views[next].id}`)?.focus();
@@ -77,8 +112,8 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
           <span className={styles.exampleLabel}>Actual interface / sample session</span>
         </div>
         <div role="tabpanel" id="product-panel" aria-labelledby={`tab-${selected.id}`} className={styles.showcase}>
-          <button type="button" className={styles.screenButton} onClick={() => setModal('screen')} aria-label={`Expand ${selected.label} screenshot`}><picture key={selected.file}><source media="(max-width: 620px)" srcSet={asset(selected.mobile)} /><img src={asset(selected.file)} alt={`Bread ${selected.label}: ${selected.description}`} loading="lazy" /></picture><span className={styles.expand}><Expand size={18} /></span></button>
-          <div className={styles.screenCaption}><h3>{selected.title}</h3><p>{selected.description}</p></div>
+          <button type="button" className={styles.screenButton} onClick={() => openGallery(view + 1, 'screen')} aria-label={`Expand ${selected.label} screenshot`}><picture key={selected.file}><source media="(max-width: 620px)" srcSet={asset(selected.mobile)} /><img src={asset(selected.file)} alt={`Bread ${selected.label}: ${selected.description}`} loading="lazy" /></picture><span className={styles.expand}><Expand size={18} /></span></button>
+          <div key={selected.id} className={styles.screenCaption}><h3>{selected.title}</h3><p>{selected.description}</p></div>
         </div>
         <div className={styles.featureNotes}>
           <div><Radio size={20} /><h3>Autoplay with optional AI.</h3><p>Keep listening when the queue ends, with recommendations shaped by the tracks your room adds.</p></div>
@@ -87,7 +122,7 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
         </div>
       </section>
 
-      <section className={styles.playgroundBand} id="playground"><div className={styles.section}>
+      <section ref={playgroundRef} className={styles.playgroundBand} id="playground" data-highlight={playgroundSeen}><div className={styles.section}>
         <div className={styles.sectionTop}><h2>Try Bread.</h2><p>Slash commands or Activity.<br />{liveSearch ? 'Real search. Your own demo queue.' : 'Sample tracks. Your own demo queue.'}</p></div>
         <CommandDemo />
       </div></section>
@@ -105,8 +140,17 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
 
       <ScrollToTopNotch hidden={modal !== null} />
       <AddToDiscordModal open={modal === 'invite'} onClose={() => setModal(null)} />
-      <dialog ref={dialogRef} className={styles.screenDialog} aria-label={`${expandedView.label} screenshot`} onCancel={() => setModal(null)} onClick={(event) => { if (event.target === event.currentTarget) setModal(null); }}>
-        <div className={styles.dialogHead}><strong>{`Bread / ${expandedView.label}`}</strong><button type="button" aria-label="Close dialog" title="Close" onClick={() => setModal(null)}><X size={22} /></button></div>
+      <dialog ref={dialogRef} className={styles.screenDialog} aria-label={`${expandedView.label} screenshot`} onCancel={() => setModal(null)} onClick={(event) => { if (event.target === event.currentTarget) setModal(null); }} onKeyDown={event => {
+        if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        stepGallery(event.key === 'ArrowRight' ? 1 : -1);
+      }}>
+        <div className={styles.dialogHead}><strong aria-live="polite">{`Bread / ${expandedView.label}`}</strong><div className={styles.galleryControls}>
+          <span className={styles.galleryCount}>{galleryIndex + 1} / {galleryViews.length}</span>
+          <button type="button" aria-label="Previous screenshot" title="Previous screenshot" onClick={() => stepGallery(-1)}><ChevronLeft size={22} /></button>
+          <button type="button" aria-label="Next screenshot" title="Next screenshot" onClick={() => stepGallery(1)}><ChevronRight size={22} /></button>
+          <button type="button" autoFocus aria-label="Close dialog" title="Close" onClick={() => setModal(null)}><X size={22} /></button>
+        </div></div>
         <picture><source media="(max-width: 620px)" srcSet={asset(expandedView.mobile)} /><img src={asset(expandedView.file)} alt={`Full ${expandedView.label} screenshot with sample data`} /></picture>
       </dialog>
     </main>

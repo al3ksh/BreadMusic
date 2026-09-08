@@ -122,12 +122,10 @@ function rpsMark(choice, accent) {
 }
 
 function rpsIcon(choice, x, owner, accent) {
-  const labels = { rock: 'ROCK', paper: 'PAPER', scissors: 'SCISSORS' };
   return `<g transform="translate(${x} 236)">
     <rect width="320" height="218" rx="26" fill="#15141b" stroke="${accent}" stroke-width="3"/>
     ${rpsMark(choice, accent)}
-    <text x="160" y="180" text-anchor="middle" class="choice">${labels[choice] || 'HIDDEN'}</text>
-    <text x="160" y="207" text-anchor="middle" class="owner">${escapeXml(truncate(owner, 22))}</text>
+    <text x="160" y="198" text-anchor="middle" class="owner">${escapeXml(truncate(owner, 22))}</text>
   </g>`;
 }
 
@@ -186,7 +184,6 @@ function buildArcadeSvg({ type, title, username, status, detail, accent = '#8f82
         .metric-label { font-size: 15px; font-weight: 750; letter-spacing: 1.5px; fill: #8f899e; }
         .metric-value { font-size: 24px; font-weight: 800; fill: #f4f2f8; }
         .tile-label { font-size: 17px; font-weight: 850; letter-spacing: 1px; fill: #34303e; }
-        .choice { font-size: 28px; font-weight: 900; fill: #f4f2f8; }
         .owner { font-size: 18px; font-weight: 600; fill: #aaa5b6; }
       </style>
     </defs>
