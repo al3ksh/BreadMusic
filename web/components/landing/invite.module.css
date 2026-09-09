@@ -1,0 +1,32 @@
+@font-face { font-family: 'Bread Manrope'; src: url('/assets/landing-preview/manrope-latin.woff2') format('woff2'); font-weight: 400 800; font-display: swap; }
+.overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; font-family: 'Bread Manrope', sans-serif; letter-spacing: 0; }
+.backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .76); animation: backdrop-in 220ms ease-out both; }
+.dialog { position: relative; width: 100%; max-width: 460px; max-height: calc(100svh - 48px); overflow-y: auto; padding: 32px; border: 1px solid #3a3740; border-radius: 8px; background: #141416; color: #ededf0; animation: arrive 260ms cubic-bezier(.16,1,.3,1) both; }
+.closing { pointer-events: none; }
+.closing .backdrop { animation: backdrop-out 180ms ease-in both; }
+.closing .dialog { animation: depart 180ms cubic-bezier(.7,0,.84,0) both; }
+.close { position: absolute; right: 16px; top: 16px; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 6px; color: #a8a4af; transition: background 160ms, color 160ms; cursor: pointer; }
+.close:hover { background: #29252f; color: #fff; }
+.logo { border-radius: 8px; margin-bottom: 24px; }
+.dialog h2 { font-size: 28px; line-height: 1.25; font-weight: 600; margin: 0; }
+.description { margin-top: 14px; color: #b6b2be; font-size: 14px; line-height: 1.8; }
+.actions { margin-top: 28px; border-top: 1px solid #343037; }
+.contact, .source { width: 100%; display: flex; align-items: center; gap: 16px; padding: 20px 12px; border-bottom: 1px solid #343037; text-align: left; color: #d7d3df; transition: background 180ms; cursor: pointer; }
+.contact:hover, .source:hover { background: #24212b; }
+.contact > svg { color: #b7a9eb; }
+.contact small { display: block; color: #a8a3b2; font-size: 12px; margin-bottom: 4px; }
+.contact strong { font-size: 18px; font-weight: 550; }
+.copyState { margin-left: auto; font-size: 12px; color: #c9bbea; }
+.source { font-size: 13px; }
+.source > svg:last-child { margin-left: auto; transition: transform 180ms; }
+.source:hover > svg:last-child { transform: translate(2px,-2px); }
+.footer { display: flex; gap: 18px; margin-top: 24px; color: #a6a0b0; font-size: 11px; }
+.footer span { margin-right: auto; }
+.footer a:hover { color: #e4dbfa; }
+.dialog :is(button,a):focus-visible { outline: 2px solid #b7a9eb; outline-offset: 3px; }
+@keyframes arrive { from { opacity: .4; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes depart { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(.99); } }
+@keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+@media (max-width: 540px) { .overlay { padding: 0; align-items: end; } .dialog { max-width: none; max-height: 90svh; border-radius: 8px 8px 0 0; padding: 28px 24px calc(24px + env(safe-area-inset-bottom)); } .footer a { min-height: 44px; display: inline-flex; align-items: center; } .footer { align-items: center; margin-top: 12px; } }
+@media (prefers-reduced-motion: reduce) { .backdrop, .dialog, .closing .backdrop, .closing .dialog { animation: none; } .dialog * { transition: none !important; } }

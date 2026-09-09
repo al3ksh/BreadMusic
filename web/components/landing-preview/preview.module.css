@@ -45,7 +45,7 @@
 .navAdd:hover { background: white; }
 .mobileMenu { display: none; }
 .hero { position: relative; isolation: isolate; height: min(740px, calc(100svh - 158px)); min-height: 450px; max-width: 1440px; margin: auto; }
-.heroText { position: relative; z-index: 1; text-align: center; padding: 25px 20px 0; }
+.heroText { position: relative; z-index: 1; text-align: center; padding: 49px 20px 0; }
 .heroText h1 { font-size: 72px; line-height: 1.08; font-weight: 650; display: flex; align-items: baseline; justify-content: center; gap: 20px; }
 .heroText > p { font-size: 22px; line-height: 1.4; margin: 10px 0; color: #e0dfe5; font-weight: 450; }
 .heroDescription { display: block; color: var(--muted); font-size: 15px; max-width: 560px; margin: auto; }
@@ -89,7 +89,7 @@
   to { transform: translate3d(-28px, 48px, 0) rotate(-3deg); }
 }
 @keyframes breadFade { 0%, 100% { opacity: 0; } 50% { opacity: .08; } }
-.heroScreen { position: absolute; z-index: -1; width: min(960px, calc(100% - 48px)); left: 50%; transform: translateX(-50%); height: calc(100% - 280px); bottom: 58px; object-fit: contain; object-position: center; mix-blend-mode: lighten; }
+.heroScreen { position: absolute; z-index: -1; width: min(1120px, calc(100% - 48px)); left: 50%; transform: translateX(-50%); height: calc(100% - 280px); bottom: 58px; object-fit: contain; object-position: center 56%; mix-blend-mode: lighten; }
 .heroCaption { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); display: flex; gap: 9px; align-items: center; min-height: 44px; padding: 0 8px; color: #bbb9c6; font-size: 12px; white-space: nowrap; }
 .heroCaption span { color: #95949f; padding-left: 9px; border-left: 1px solid #49484f; }
 .heroCaption:hover { color: white; }
@@ -403,7 +403,7 @@
   .heroDescription { font-size: 13px; line-height: 1.6; max-width: 340px; }
   .heroActions { margin-top: 22px; gap: 10px; }
   .primary, .secondary { font-size: 12px; padding: 0 16px; min-height: 44px; }
-  .heroScreen { bottom: 54px; width: calc(100% - 32px); height: calc(100% - 310px); }
+  .heroScreen { bottom: 54px; width: calc(100% - 32px); height: calc(100% - 310px); object-position: center; }
   .heroCaption { font-size: 12px; gap: 6px; bottom: 4px; }
   .heroCaption span { font-size: 11px; padding-left: 6px; }
   .sourceBand { width: calc(100% - 40px); padding: 23px 0; }
@@ -544,7 +544,7 @@
 @media (prefers-reduced-motion: no-preference) {
   .heroText h1 { animation: titleCue 620ms cubic-bezier(.16, 1, .3, 1) both; }
   .heroText > p, .heroDescription { animation: copyCue 500ms 100ms ease-out both; }
-  .heroScreen { animation: playerCue 780ms 100ms cubic-bezier(.16, 1, .3, 1) both; }
+  .heroScreen { animation: playerCue 680ms 100ms cubic-bezier(.16, 1, .3, 1) both; }
   .screenButton > picture { animation: channelCue 420ms cubic-bezier(.16, 1, .3, 1); }
   .screenCaption > * { animation: copyCue 280ms ease-out; }
   .secondary svg, .textLink svg, .expand svg { transition: transform 220ms cubic-bezier(.16, 1, .3, 1); }
@@ -559,8 +559,8 @@
 }
 @keyframes copyCue { from { opacity: .4; } to { opacity: 1; } }
 @keyframes playerCue {
-  from { clip-path: inset(0 12% 0 12%); opacity: .3; transform: translateX(-50%) scale(.96); }
-  to { clip-path: inset(0); opacity: 1; transform: translateX(-50%) scale(1); }
+  from { opacity: .55; transform: translateX(-50%) translateY(10px) scale(.985); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 }
 @keyframes channelCue {
   from { clip-path: inset(0 4% 0 0); opacity: .35; transform: translateX(8px); }

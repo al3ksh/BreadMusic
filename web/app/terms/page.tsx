@@ -1,8 +1,9 @@
+import { LegalLayout } from '@/components/legal/LegalLayout';
+
 export default function TermsPage() {
   return (
-    <main className="min-h-screen bg-bg-primary px-4 sm:px-6 py-10">
+    <LegalLayout active="/terms">
       <div className="max-w-3xl mx-auto rounded-xl border border-border bg-bg-card p-6 sm:p-8">
-        <p className="text-xs uppercase tracking-wider text-text-muted">Legal</p>
         <h1 className="text-2xl font-bold mt-2 text-text-primary">Terms of Use</h1>
         <p className="text-sm text-text-secondary mt-2">Last updated: 2026-06-14</p>
 
@@ -70,6 +71,6 @@ export default function TermsPage() {
           </a>
         </div>
       </div>
-    </main>
+    </LegalLayout>
   );
 }

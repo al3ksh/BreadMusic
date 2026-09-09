@@ -1,0 +1,32 @@
+@font-face { font-family: 'Bread Manrope'; src: url('/assets/landing-preview/manrope-latin.woff2') format('woff2'); font-weight: 400 800; font-display: swap; }
+.page { min-height: 100svh; background: #0b0b0c; color: #ededf0; font-family: 'Bread Manrope', sans-serif; letter-spacing: 0; }
+.header { height: 88px; padding: 0 max(24px, calc((100% - 1240px) / 2)); border-bottom: 1px solid #29292d; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.header a, .footer a { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.header .brand { font-size: 20px; font-weight: 650; gap: 12px; }
+.brand img { border-radius: 8px; }
+.brand span { color: #a2a2ad; font-size: 14px; font-weight: 400; }
+.layout { max-width: 1120px; margin: auto; padding: 72px 24px 100px; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 88px; }
+.layout aside { position: sticky; top: 32px; align-self: start; }
+.layout nav { display: grid; gap: 6px; }
+.layout nav a { display: flex; align-items: center; gap: 12px; padding: 14px; color: #b7b4c0; border-radius: 6px; font-size: 14px; transition: background 180ms, color 180ms; }
+.layout nav a > svg:last-child { margin-left: auto; opacity: 0; }
+.layout nav a[aria-current] { background: #262230; color: #e4dbfa; }
+.layout nav a[aria-current] > svg:last-child, .layout nav a:hover > svg:last-child { opacity: 1; }
+.layout nav a:hover { background: #202023; color: #fff; }
+.back { display: flex; align-items: center; gap: 10px; margin: 26px 14px; font-size: 12px; color: #a2a2ad; }
+.document { min-width: 0; }
+.document > div { max-width: none; padding: 0; margin: 0; background: transparent; border: 0; border-radius: 0; }
+.document h1 { margin: 0; font-size: 40px; line-height: 1.2; font-weight: 600; color: #ededf0; }
+.document h1 + p { margin-top: 16px; color: #97939f; font-size: 12px; padding-bottom: 28px; border-bottom: 1px solid #29292d; }
+.document section { margin-top: 32px; }
+.document h2 { color: #e5e3eb; font-size: 18px; font-weight: 600; line-height: 1.4; margin-bottom: 12px; }
+.document p, .document li { color: #bcbac5; font-size: 14px; line-height: 1.9; }
+.document li { padding-left: 4px; margin-top: 8px; }
+.document a { text-decoration: underline; text-decoration-color: #62566f; text-underline-offset: 4px; }
+.document a:hover { color: #e4dbfa; text-decoration-color: currentColor; }
+.document pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.85; color: #bcbac5; margin-top: 32px; }
+.footer { border-top: 1px solid #29292d; padding: 28px max(24px, calc((100% - 1240px) / 2)); display: flex; justify-content: space-between; gap: 24px; color: #aaa6b2; font-size: 12px; }
+.page a:focus-visible { outline: 2px solid #b7a9eb; outline-offset: 4px; }
+.page ::selection { background: #d5c8fa; color: #17141f; }
+@media (max-width: 700px) { .header { height: 72px; } .header > a:last-child { font-size: 0; gap: 0; } .layout { grid-template-columns: 1fr; gap: 36px; padding-top: 24px; } .layout aside { position: static; } .layout nav { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 4px; } .layout nav a { flex-direction: column; gap: 8px; padding: 12px 4px; font-size: 12px; } .layout nav a > svg:last-child, .back { display: none; } .document h1 { font-size: 32px; } .footer { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .page * { transition: none !important; } }

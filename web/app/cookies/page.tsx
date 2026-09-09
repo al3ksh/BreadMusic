@@ -1,8 +1,9 @@
+import { LegalLayout } from '@/components/legal/LegalLayout';
+
 export default function CookiesPage() {
   return (
-    <main className="min-h-screen bg-bg-primary px-4 sm:px-6 py-10">
+    <LegalLayout active="/cookies">
       <div className="max-w-3xl mx-auto rounded-xl border border-border bg-bg-card p-6 sm:p-8">
-        <p className="text-xs uppercase tracking-wider text-text-muted">Legal</p>
         <h1 className="text-2xl font-bold mt-2 text-text-primary">Cookies Policy</h1>
         <p className="text-sm text-text-secondary mt-2">Last updated: 2026-06-14</p>
 
@@ -54,6 +55,6 @@ export default function CookiesPage() {
           </a>
         </div>
       </div>
-    </main>
+    </LegalLayout>
   );
 }

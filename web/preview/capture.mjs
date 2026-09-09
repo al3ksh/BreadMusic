@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 
 const base = process.env.PREVIEW_URL || 'http://127.0.0.1:3180';
 const dashboardOnly = process.argv.includes('--dashboard-only');
+const activityHeroOnly = process.argv.includes('--activity-hero-only');
 const assets = path.resolve('public/assets/landing-preview');
 await fs.mkdir(assets, { recursive: true });
 const captures = path.resolve('../.tmp/landing-preview');
@@ -44,7 +45,7 @@ const queue = { current: tracks[0], tracks: tracks.slice(1), total: 2, page: 0, 
 const guildId = '123456789012345678';
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1000, height: 640 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 1000, height: 640 }, deviceScaleFactor: activityHeroOnly ? 2 : 1 });
   page.setDefaultTimeout(20000);
   await page.addInitScript(() => {
     localStorage.setItem('bread_cookie_notice_v1', 'accepted');
@@ -84,15 +85,17 @@ try {
     if (p.endsWith('/player/filters')) return send({ presets: [] });
     return send({ success: true });
   });
-  await page.goto(`${base}/dashboard/${guildId}?view=settings`);
-  await page.getByText('Vote Skip Threshold', { exact: true }).waitFor();
-  await page.evaluate(() => document.fonts.ready);
-  await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: path.join(assets, 'dashboard.png') });
-  await page.setViewportSize({ width: 390, height: 680 });
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: path.join(assets, 'dashboard-phone.png') });
+  if (!activityHeroOnly) {
+    await page.goto(`${base}/dashboard/${guildId}?view=settings`);
+    await page.getByText('Vote Skip Threshold', { exact: true }).waitFor();
+    await page.evaluate(() => document.fonts.ready);
+    await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: path.join(assets, 'dashboard.png') });
+    await page.setViewportSize({ width: 390, height: 680 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(assets, 'dashboard-phone.png') });
+  }
   if (dashboardOnly) {
     console.log('Captured desktop and mobile server settings with sample permissions.');
   } else {
@@ -103,8 +106,11 @@ try {
   await page.waitForTimeout(2000);
   const frame = page.frames().find((entry) => entry.url().includes('/activity'));
   await frame.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
-  await page.screenshot({ path: path.join(assets, 'activity.png') });
+  if (!activityHeroOnly) await page.screenshot({ path: path.join(assets, 'activity.png') });
   await activity.locator('.activity-player-stage').screenshot({ path: path.join(assets, 'activity-hero.png') });
+  if (activityHeroOnly) {
+    console.log('Captured high-resolution Activity hero with sample data.');
+  } else {
   await activity.getByRole('button', { name: /^Queue/ }).click();
   await activity.getByRole('complementary', { name: 'queue panel' }).waitFor();
   await page.waitForTimeout(500);
@@ -120,6 +126,7 @@ try {
   await page.waitForTimeout(400);
   await activity.locator('.activity-compact-player').screenshot({ path: path.join(assets, 'activity-compact.png') });
   console.log('Captured actual Bread UI with illustrative data. No backend or Discord connection.');
+  }
   }
 } finally {
   await browser.close();
