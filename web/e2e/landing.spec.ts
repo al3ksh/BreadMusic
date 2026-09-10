@@ -47,8 +47,9 @@ test('product showcase starts with Dashboard, exposes lyrics and the edge notch 
   await expect(notch).toHaveAttribute('aria-hidden', 'true');
   await page.evaluate(() => {
     const hero = document.getElementById('main-content');
-    window.scrollTo(0, hero ? hero.offsetTop + hero.offsetHeight + 1 : innerHeight);
+    window.scrollTo(0, hero ? window.scrollY + hero.getBoundingClientRect().bottom + 1 : innerHeight);
   });
+  await expect.poll(() => page.locator('#main-content').evaluate(hero => hero.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
   await expect(notch).toHaveAttribute('data-visible', 'true');
   await expect(notch).toHaveAttribute('aria-hidden', 'false');
   await notch.hover();
