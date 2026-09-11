@@ -15,6 +15,7 @@ function load(relative) {
     if (name === 'discord.js') return discord;
     if (name === './autoplay') return { isAutoplayEnabled: () => false };
     if (name === './playbackErrors') return {};
+    if (name === './uploadArtworkUrls') return { uploadArtworkUrl: () => null };
     const resolved = path.relative(root, path.resolve(path.dirname(filename), `${name}.js`)).replaceAll('\\', '/');
     return load(resolved);
   };

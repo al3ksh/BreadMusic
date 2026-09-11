@@ -2,6 +2,7 @@ const fs = require('fs');
 const { FileStore } = require('./fileStore');
 const { getConfig } = require('./guildConfig');
 const { createSignedUploadUrl, getUploadPlaybackBaseUrl } = require('../music/uploadUrls');
+const { artworkPath, uploadArtworkUrl } = require('../music/uploadArtworkUrls');
 
 const queueStore = new FileStore('queues.json', {});
 
@@ -87,6 +88,9 @@ async function refreshLocalUploadTrack(node, entry, fallbackRequester) {
     const track = result?.tracks?.[0];
     if (!track) return null;
 
+    const cover = await fs.promises.stat(artworkPath(localUpload.filePath)).catch(() => null);
+    const uploadArtwork = cover?.size > 0 ? entry.info?.uploadArtwork : null;
+
     return {
       ...track,
       info: {
@@ -95,6 +99,8 @@ async function refreshLocalUploadTrack(node, entry, fallbackRequester) {
         uri: playbackUrl,
         sourceName: 'localUpload',
         isLocalUpload: true,
+        uploadArtwork,
+        artworkUrl: uploadArtwork ? uploadArtworkUrl(uploadArtwork, { publicUrl: true }) : null,
       },
       requester: entry.requester || track.requester,
       localUpload,

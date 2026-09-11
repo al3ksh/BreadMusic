@@ -1,4 +1,5 @@
 'use client';
+import { ArtworkImage } from '@/components/ArtworkImage';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -751,7 +752,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
         <div className="p-5">
           <div className="flex gap-5">
             {status.currentTrack?.artwork ? (
-              <img src={status.currentTrack.artwork} alt="" className="w-24 h-24 rounded-lg object-cover shadow-xl" />
+              <ArtworkImage src={status.currentTrack.artwork} className="w-24 h-24 rounded-lg shrink-0 object-cover shadow-xl" />
             ) : (
               <div className="w-24 h-24 rounded-lg bg-bg-hover flex items-center justify-center border border-border/70">
                 <Music2 size={32} className="text-text-muted" />
@@ -943,7 +944,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                     className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-bg-hover transition-colors text-left cursor-pointer border-b border-border/50 last:border-0"
                   >
                     {track.artwork ? (
-                      <img src={track.artwork} alt="" className="w-8 h-8 rounded shrink-0 object-cover" />
+                      <ArtworkImage src={track.artwork} className="w-8 h-8 rounded shrink-0 object-cover" />
                     ) : (
                       <span className="text-xs text-text-muted w-5 tabular-nums text-center">{i + 1}</span>
                     )}

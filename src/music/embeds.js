@@ -3,6 +3,7 @@ const { formatDuration, buildProgressBar } = require('../utils/time');
 const { isAutoplayEnabled } = require('./autoplay');
 const { normalizeSourceName } = require('./sourceNames');
 const { BRAND_COLORS } = require('../theme');
+const { uploadArtworkUrl } = require('./uploadArtworkUrls');
 
 const LABELS = {
   TITLE: '🎶',
@@ -158,6 +159,7 @@ function isUnknownTrackAuthor(author) {
 }
 
 function resolveArtwork(track) {
+  if (track?.info?.uploadArtwork) return uploadArtworkUrl(track.info.uploadArtwork, { publicUrl: true });
   if (track?.info?.artworkUrl) return track.info.artworkUrl;
   const identifier = track?.info?.identifier;
   if (

@@ -27,6 +27,7 @@ function loadPresenter(relative) {
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module, exports: module.exports, process: { env: {} }, require(name) {
     if (name === 'discord.js') return require('discord.js');
     if (name === './autoplay') return { isAutoplayEnabled: () => false };
+    if (name === './uploadArtworkUrls') return { uploadArtworkUrl: () => null };
     return loadPresenter(path.relative(root, path.resolve(path.dirname(filename), `${name}.js`)).replaceAll('\\', '/'));
   } }, { filename });
   return module.exports;

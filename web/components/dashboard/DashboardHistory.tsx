@@ -1,4 +1,5 @@
 'use client';
+import { ArtworkImage } from '@/components/ArtworkImage';
 
 import { useEffect, useState } from 'react';
 import { apiFetch, type HistoryPage, formatDuration } from '@/lib/api';
@@ -53,7 +54,7 @@ export function DashboardHistory({ guildId, canQueue = false, onRequeue }: Dashb
             return (
               <div key={entry.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                 {entry.track.artwork ? (
-                  <img src={entry.track.artwork} alt="" className="h-11 w-11 shrink-0 rounded-md object-cover" />
+                  <ArtworkImage src={entry.track.artwork} className="h-11 w-11 shrink-0 rounded-md object-cover" />
                 ) : (
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-bg-hover"><Play size={16} className="text-text-muted" /></div>
                 )}

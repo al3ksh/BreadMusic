@@ -156,7 +156,7 @@ async function withUploadPlayer(options, callback) {
     safeDeleteFile: async (file) => {
       if (file) await fs.promises.rm(file, { force: true });
     },
-    makeRoomForAudioUpload: async () => true,
+    makeRoomForAudioUpload: async (size) => !options.coverQuotaFull || size === options.audio?.length,
     renameFileWithRetry: fs.promises.rename,
     createSignedUploadUrl: () => 'http://uploads.test/signed.mp3',
     getUploadPlaybackBaseUrl: () => 'http://uploads.test',
@@ -182,7 +182,7 @@ async function withUploadPlayer(options, callback) {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/guilds/${guildId}/player/upload`, {
       method: 'POST',
       headers: { 'X-File-Name': options.fileName || 'demo.mp3', 'Content-Type': 'audio/mpeg' },
-      body: Buffer.from('test-audio'),
+      body: options.audio || Buffer.from('test-audio'),
     });
     await callback({ response, body: await response.json(), calls, player });
   } finally {
@@ -199,6 +199,31 @@ test('Activity upload summons an absent bot and starts playback after loading au
       ['stream', 'resolve', 'create', 'connect', 'voiceReady', 'restore', 'queue', 'play', 'refresh', 'save']);
     assert.equal(player.queue.tracks[0].info.sourceName, 'localUpload');
   });
+});
+
+test('embedded upload artwork reaches the queued track without changing auto-join or playback', async () => {
+  const sharp = require('sharp');
+  const cover = await sharp({ create: { width: 24, height: 24, channels: 3, background: '#27b079' } }).png().toBuffer();
+  const payload = Buffer.concat([Buffer.from([0]), Buffer.from('image/png\0'), Buffer.from([3, 0]), cover]);
+  const frame = Buffer.alloc(10); frame.write('APIC'); frame.writeUInt32BE(payload.length, 4);
+  const size = frame.length + payload.length;
+  const header = Buffer.from([73, 68, 51, 3, 0, 0, (size >> 21) & 127, (size >> 14) & 127, (size >> 7) & 127, size & 127]);
+  const audioFrame = Buffer.alloc(417); Buffer.from([255, 251, 144, 0]).copy(audioFrame);
+  const audio = Buffer.concat([header, frame, payload, audioFrame, audioFrame, audioFrame, audioFrame]);
+  for (const coverQuotaFull of [false, true]) {
+    await withUploadPlayer({ audio, coverQuotaFull }, async ({ response, body, player }) => {
+      assert.equal(response.status, 200);
+      assert.equal(body.started, true);
+      const queued = player.queue.tracks[0];
+      assert.equal(Boolean(queued.info.uploadArtwork), !coverQuotaFull);
+      if (!coverQuotaFull) {
+        assert.equal(queued.info.uploadArtwork.uploadId, 'a'.repeat(64));
+        const metadata = await sharp(`${queued.localUpload.filePath}.cover.jpg`).metadata();
+        assert.equal(metadata.width, 24);
+        assert.equal(metadata.format, 'jpeg');
+      }
+    });
+  }
 });
 
 test('Activity upload reconnects an existing idle player before starting', async () => {

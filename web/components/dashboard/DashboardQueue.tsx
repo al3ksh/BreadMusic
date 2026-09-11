@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, GripVertical, Play, Trash2 } from 'lucide-re
 import type { DragEvent } from 'react';
 import type { QueueTrack } from '@/lib/api';
 import { formatDuration } from '@/lib/api';
+import { ArtworkImage } from '@/components/ArtworkImage';
 
 type DashboardQueueData = {
   current: QueueTrack | null;
@@ -64,7 +65,7 @@ export function DashboardQueue({
       <div className="p-5">
         {queue.current && (
           <div className="mb-2 px-3 py-2.5 rounded-md bg-accent/10 border border-accent/20 flex items-center gap-3">
-            {queue.current.artwork ? <img src={queue.current.artwork} alt="" className="w-8 h-8 rounded shrink-0 object-cover" /> : <Play size={14} className="text-accent shrink-0" />}
+            {queue.current.artwork ? <ArtworkImage src={queue.current.artwork} className="w-8 h-8 rounded shrink-0 object-cover" /> : <Play size={14} className="text-accent shrink-0" />}
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{queue.current.title}</p>
               <p className="text-xs text-text-muted truncate">{queue.current.author}{queue.current.requester ? ` • Requested by ${queue.current.requester}` : ''}</p>
@@ -87,7 +88,7 @@ export function DashboardQueue({
               className={`group flex items-center gap-3 px-3 py-2 border rounded-md hover:bg-bg-hover/50 transition-colors ${canUseDJControls ? 'cursor-grab active:cursor-grabbing' : ''} ${dropTargetIdx === index && draggedIdx !== index ? 'border-accent/70 bg-accent/10' : 'border-transparent'} ${draggedIdx === index ? 'opacity-50' : ''}`}
             >
               {canUseDJControls && <div className="flex items-center justify-center w-5 text-text-muted cursor-move opacity-50 hover:opacity-100"><GripVertical size={14} /></div>}
-              {track.artwork ? <img src={track.artwork} alt="" className="w-8 h-8 rounded shrink-0 object-cover" /> : <span className="text-xs text-text-muted w-4 ml-1 tabular-nums flex-shrink-0">{queuePage * 20 + index + 1}</span>}
+              {track.artwork ? <ArtworkImage src={track.artwork} className="w-8 h-8 rounded shrink-0 object-cover" /> : <span className="text-xs text-text-muted w-4 ml-1 tabular-nums flex-shrink-0">{queuePage * 20 + index + 1}</span>}
               <div className="flex-1 min-w-0 ml-1">
                 <p className="text-sm truncate select-none">{track.title}</p>
                 <p className="text-xs text-text-muted truncate select-none">{track.author}{track.requester ? ` • Requested by ${track.requester}` : ''}</p>

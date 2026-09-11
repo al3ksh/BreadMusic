@@ -1,7 +1,10 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const guildId = '123456789012345678';
 const artwork = 'https://i.ytimg.com/vi/test/hqdefault.jpg';
+const localArtwork = `/api/uploads/${guildId}/${'a'.repeat(64)}/artwork.mp3.jpg?expires=9999999999&signature=test`;
 
 const track = {
   title: 'Test track',
@@ -273,3 +276,56 @@ for (const { name, uri, linked } of [
     await expect(titles.locator('a')).toHaveCount(linked ? 2 : 0);
   });
 }
+
+test('Dashboard displays local artwork and falls back when a cover is gone', async ({ page }, testInfo) => {
+  await mockApi(page, { currentTrack: { ...track, artwork: localArtwork, source: 'localUpload', uri: 'http://bot:3001/api/uploads/demo.mp3' } });
+  let available = true;
+  await page.route('**/api/uploads/**', (route) => available
+    ? route.fulfill({ contentType: 'image/png', body: readFileSync(join(process.cwd(), 'public/assets/breadicon.png')) })
+    : route.fulfill({ status: 404 }));
+  await page.goto(`/dashboard/${guildId}?view=player`);
+  const covers = page.locator('img[src*="/api/uploads/"]');
+  await expect(covers).toHaveCount(3);
+  for (const cover of await covers.all()) await expect.poll(() => cover.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await page.screenshot({ path: testInfo.outputPath('dashboard-upload-cover.png') });
+  available = false;
+  await page.reload();
+  await expect(page.getByText('Test track').first()).toBeVisible();
+  await expect(covers).toHaveCount(0);
+  const dimensions = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+  expect(dimensions[0]).toBeLessThanOrEqual(dimensions[1] + 1);
+});
+
+test('Activity loads upload artwork directly, preserves unlinked titles and handles missing covers', async ({ page }, testInfo) => {
+  await mockApi(page, { currentTrack: { ...track, artwork: localArtwork, source: 'localUpload', uri: 'http://bot:3001/api/uploads/demo.mp3' } });
+  const proxyRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/activity/artwork')) proxyRequests.push(request.url());
+  });
+  let available = true;
+  await page.route('**/api/uploads/**', (route) => available
+    ? route.fulfill({ contentType: 'image/png', body: readFileSync(join(process.cwd(), 'public/assets/breadicon.png')) })
+    : route.fulfill({ status: 404 }));
+  await page.addInitScript(() => {
+    window.__BREAD_TEST_ACTIVITY_SDK__ = {
+      guildId: '123456789012345678', channelId: 'voice-1', ready: async () => undefined,
+      commands: {
+        authorize: async () => ({ code: 'test-code' }),
+        authenticate: async () => ({ access_token: 'test-activity-token' }),
+        openExternalLink: async () => ({ opened: true }), setActivity: async (options) => options.activity,
+      },
+    };
+  });
+  const open = () => page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><iframe title="Bread Activity" src="http://127.0.0.1:3100/activity?frame_id=test&instance_id=test&platform=desktop" style="width:100%;height:100vh;border:0"></iframe>');
+  await open();
+  const activity = page.frameLocator('iframe');
+  const cover = activity.locator('.activity-track-art img');
+  await expect(cover).toBeVisible({ timeout: 30000 });
+  await expect.poll(() => cover.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect(activity.locator('.activity-track-copy h1 a')).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('activity-upload-cover.png') });
+  available = false;
+  await open();
+  await expect(activity.locator('.activity-art-fallback').first()).toBeVisible({ timeout: 30000 });
+  expect(proxyRequests).toEqual([]);
+});

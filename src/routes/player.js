@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { prepareUploadArtwork, storeUploadArtwork } = require('../music/uploadArtwork');
+const { uploadArtworkUrl } = require('../music/uploadArtworkUrls');
 
 function createPlayerRouter({
   client,
@@ -159,6 +161,7 @@ function createPlayerRouter({
       let uploadTempPath = null;
       let activeUploadTempPath = null;
       let storedFilePath = null;
+      let protectedUploadPath = null;
 
       try {
         const guildConfig = getConfig(guildId);
@@ -236,6 +239,8 @@ function createPlayerRouter({
             uploadTempPath = null;
             storedFilePath = filePath;
           }
+          protectedUploadPath = path.resolve(filePath);
+          activeUploadTempPaths.add(protectedUploadPath);
         } finally {
           releaseQuota();
         }
@@ -289,6 +294,25 @@ function createPlayerRouter({
           expiresAt: Date.now() + audioUploadTtlMs,
           cached: alreadyStored,
         };
+
+        // Artwork is optional and bounded; finish it before publishing the queue
+        // so SSE clients see the same track and cover in their first snapshot.
+        try {
+          const artwork = await prepareUploadArtwork(filePath);
+          let available = artwork?.cached && artwork.hasCover;
+          if (artwork && !artwork.cached) {
+            const releaseArtworkQuota = await acquireUploadQuotaMutex();
+            try {
+              if (await makeRoomForAudioUpload(artwork.data.length, client)) {
+                available = await storeUploadArtwork(filePath, artwork.data) && artwork.hasCover;
+              }
+            } finally { releaseArtworkQuota(); }
+          }
+          if (available) {
+            queuedTrack.info.uploadArtwork = { guildId, uploadId: streamedUploadId, extension: ext };
+            queuedTrack.info.artworkUrl = uploadArtworkUrl(queuedTrack.info.uploadArtwork, { publicUrl: true });
+          }
+        } catch { /* Cover failures must never reject a playable upload. */ }
 
         // Uploads can take minutes. Recheck voice state before joining, and
         // only summon the bot once Lavalink has accepted the audio file.
@@ -354,6 +378,7 @@ function createPlayerRouter({
         }
       } finally {
         if (activeUploadTempPath) activeUploadTempPaths.delete(activeUploadTempPath);
+        if (protectedUploadPath) activeUploadTempPaths.delete(protectedUploadPath);
         releaseUpload();
       }
     },

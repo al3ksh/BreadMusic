@@ -1,4 +1,5 @@
 'use client';
+import { ArtworkImage } from '@/components/ArtworkImage';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, type GuildHealth, type GuildInsights, type GuildInsightsRange, type PlayerStatus, formatDuration } from '@/lib/api';
@@ -270,7 +271,7 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
                       <div key={track.key} className="flex items-center gap-2.5 rounded-md border border-border/50 px-2.5 py-2">
                         <span className="w-7 text-xs tabular-nums text-text-muted">#{track.rank}</span>
                         {track.artwork ? (
-                          <img src={track.artwork} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                          <ArtworkImage src={track.artwork} className="w-8 h-8 rounded object-cover shrink-0" />
                         ) : (
                           <div className="w-8 h-8 rounded bg-bg-hover flex items-center justify-center shrink-0">
                             <Play size={12} className="text-text-muted" />
@@ -327,7 +328,7 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
             {hasNowPlaying && status.currentTrack ? (
               <div className="flex gap-4">
                 {status.currentTrack.artwork ? (
-                  <img src={status.currentTrack.artwork} alt="" className="w-20 h-20 rounded-lg object-cover shadow-lg" />
+                  <ArtworkImage src={status.currentTrack.artwork} className="w-20 h-20 rounded-lg shrink-0 object-cover shadow-lg" />
                 ) : (
                   <div className="w-20 h-20 rounded-lg bg-bg-hover flex items-center justify-center">
                     <Music2 size={28} className="text-text-muted" />
@@ -392,7 +393,7 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
                 {sessionHistory.map((track, index) => (
                   <div key={`${track.uri || track.title}-${index}`} className="flex items-center gap-2.5 rounded-md border border-border/50 bg-bg-secondary/20 px-2.5 py-2">
                     {track.artwork ? (
-                      <img src={track.artwork} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                      <ArtworkImage src={track.artwork} className="w-8 h-8 rounded object-cover shrink-0" />
                     ) : (
                       <div className="w-8 h-8 rounded bg-bg-hover flex items-center justify-center shrink-0">
                         <Play size={12} className="text-text-muted" />

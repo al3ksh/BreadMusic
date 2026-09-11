@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { artworkPath, groupUploadFiles, uploadArtworkUrl } = require('./music/uploadArtworkUrls');
 const { Transform } = require('stream');
 const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
 const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
@@ -1360,6 +1361,11 @@ async function renameFileWithRetry(source, destination, attempts = 5) {
 
 async function safeDeleteFile(filePath) {
   try {
+    if (AUDIO_UPLOAD_EXTENSIONS.has(path.extname(filePath))) {
+      await fs.promises.unlink(artworkPath(filePath)).catch((error) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    }
     await fs.promises.unlink(filePath);
     return true;
   } catch {}
@@ -1383,7 +1389,7 @@ async function touchFile(filePath) {
 }
 
 function getProtectedAudioUploadPaths(client) {
-  const protectedPaths = new Set();
+  const protectedPaths = new Set(activeUploadTempPaths);
   const players = client?.lavalink?.players;
   if (players) {
     for (const player of players.values()) {
@@ -1436,7 +1442,7 @@ async function listAudioUploadFiles() {
       }
     }
   }
-  return files;
+  return groupUploadFiles(files);
 }
 
 async function cleanupExpiredAudioUploads(client) {
@@ -1446,7 +1452,7 @@ async function cleanupExpiredAudioUploads(client) {
   for (const file of files) {
     if (file.activeIncoming) continue;
     const cutoff = now - (file.incoming ? AUDIO_UPLOAD_TEMP_TTL_MS : AUDIO_UPLOAD_TTL_MS);
-    if (file.mtimeMs < cutoff && !protectedPaths.has(path.resolve(file.path))) {
+    if ((file.orphan || file.mtimeMs < cutoff) && !protectedPaths.has(path.resolve(file.path))) {
       await safeDeleteFile(file.path);
     }
   }
@@ -1637,6 +1643,10 @@ function buildQueueRevision(tracks) {
     hash.update(String(track?.requester?.id || track?.requester?.username || ''));
     hash.update('\0');
     hash.update(track?.isAutoplay ? '1' : '0');
+    if (info.uploadArtwork) {
+      hash.update(JSON.stringify(info.uploadArtwork));
+      hash.update(String(Math.floor(Date.now() / 3600000)));
+    }
   }
   return hash.digest('base64url').slice(0, 16);
 }
@@ -1687,6 +1697,7 @@ function writeSseEvent(res, event, data) {
 }
 
 function extractArtwork(info) {
+  if (info.uploadArtwork) return uploadArtworkUrl(info.uploadArtwork);
   if (info.artworkUrl) return info.artworkUrl;
   if (info.uri && (info.uri.includes('youtube.com') || info.uri.includes('youtu.be')) && info.identifier) {
     return `https://i.ytimg.com/vi/${info.identifier}/mqdefault.jpg`;
@@ -1826,5 +1837,5 @@ function buildTrustedOrigins(webUrl) {
 module.exports = {
   createApiServer,
   broadcastPlayerUpdate,
-  __testing: { resolveRequestAuth },
+  __testing: { resolveRequestAuth, cleanupExpiredAudioUploads, makeRoomForAudioUpload },
 };

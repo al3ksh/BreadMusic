@@ -228,6 +228,28 @@ UPLOAD_STORAGE_LIMIT_MB=1024
 UPLOAD_SIGNING_SECRET=long_random_value
 ```
 
+Embedded cover artwork is extracted locally during upload (including ID3/APIC,
+FLAC pictures and M4A cover tags). No artwork search or audio-file rewriting is
+performed. Activity, Dashboard and Discord embeds use the same cover; files
+without usable artwork retain the existing placeholder.
+
+The bot runs at most one artwork subprocess, separate from the Arcade workers,
+with a four-second deadline and a 64 MB JavaScript heap limit. The heap limit is
+not a total RSS limit: image decoding also uses native memory. Busy, timed-out
+or failed extractions never prevent playback. Images are limited to 5 MB and
+16 megapixels, then converted to a metadata-free JPEG of at most 512 x 512 pixels
+and 256 KB. Animated pictures and SVG are rejected.
+
+Each thumbnail is cached as `<audio-file>.cover.jpg`; an empty sidecar records
+that no usable cover was found. These files share the audio upload's quota,
+retention and queue protection, and are deleted with it. Old uploads gain a
+cover when uploaded again; there is no background scan of existing files.
+Cover links use the upload signing secret, remain valid for 24-25 hours and
+are renewed in live snapshots and restored queues. Discord embeds require
+`WEB_URL` to be the public HTTPS origin, with `/api/uploads` routed to the bot.
+Activity uses a relative URL and does not proxy local covers through the external
+artwork allowlist. Missing or expired historical covers fall back to an icon.
+
 The Compose deployment also applies bounded CPU and memory defaults to Lavalink,
 the bot and the web process. Override `LAVALINK_*_LIMIT`, `BOT_*_LIMIT` or
 `WEB_*_LIMIT` variables only when the host needs different limits.
