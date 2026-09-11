@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowDown, ArrowUpRight, AudioLines, BookOpenText, ChevronLeft, ChevronRight, Expand, Github, Headphones, LayoutDashboard, ListMusic, Menu, Monitor, Plus, Radio, ShieldCheck, X } from 'lucide-react';
+import { ArrowDown, ArrowUpRight, AudioLines, BookOpenText, Expand, Github, Headphones, LayoutDashboard, ListMusic, Menu, Monitor, Plus, Radio, ShieldCheck, X } from 'lucide-react';
 import { AddToDiscordModal } from '@/components/landing/AddToDiscordModal';
 import { CommandDemo } from './CommandDemo';
 import { ArcadeCarousel } from './ArcadeCarousel';
 import { ScrollToTopNotch } from './ScrollToTopNotch';
 import { BreadSky } from './BreadSky';
+import { ScreenshotGallery } from './ScreenshotGallery';
+import { useGallerySwipe } from './useGallerySwipe';
 import { asset } from './demo';
 import styles from './preview.module.css';
 
@@ -31,13 +33,14 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
   const [mobileNav, setMobileNav] = useState(false);
   const [modal, setModal] = useState<'screen' | 'hero' | 'invite' | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const menuRef = useRef<HTMLButtonElement>(null);
   const heroRef = useRef<HTMLElement>(null);
   const [heroRunning, setHeroRunning] = useState(false);
   const playgroundRef = useRef<HTMLElement>(null);
   const [playgroundSeen, setPlaygroundSeen] = useState(false);
   const selected = views[view];
-  const expandedView = galleryViews[galleryIndex];
+  const showcaseSwipe = useGallerySwipe(direction => setView(value => (value + direction + views.length) % views.length));
   const openGallery = (index: number, kind: 'hero' | 'screen') => {
     setGalleryIndex(index);
     setModal(kind);
@@ -68,25 +71,32 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
     return () => { observer.disconnect(); document.removeEventListener('visibilitychange', update); };
   }, []);
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (modal === 'screen' || modal === 'hero') dialog.showModal(); else dialog.close();
-  }, [modal]);
+    if (!mobileNav) return;
+    const outside = (event: Event) => { if (!navRef.current?.contains(event.target as Node)) setMobileNav(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setMobileNav(false); menuRef.current?.focus(); } };
+    const wide = matchMedia('(min-width: 951px)');
+    const resize = () => { if (wide.matches) setMobileNav(false); };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('focusin', outside);
+    document.addEventListener('keydown', escape);
+    wide.addEventListener('change', resize);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('focusin', outside); document.removeEventListener('keydown', escape); wide.removeEventListener('change', resize); };
+  }, [mobileNav]);
 
   return (
     <main className={styles.page}>
       <a className={styles.skipLink} href="#main-content">Skip to content</a>
-      <header className={styles.nav}>
+      <header ref={navRef} className={styles.nav}>
         <div className={styles.navInner}>
           <a href="#main-content" className={styles.brand}><img src="/assets/breadicon.png" width={34} height={34} alt="" /><span>Bread</span></a>
-          <nav aria-label="Main navigation" className={`${styles.navLinks} ${mobileNav ? styles.navOpen : ''}`}>
+          <nav id="landing-navigation" aria-label="Main navigation" className={`${styles.navLinks} ${mobileNav ? styles.navOpen : ''}`}>
             <a href="#inside-bread" onClick={() => setMobileNav(false)}>Experience</a>
             <a href="#playground" onClick={() => setMobileNav(false)}>Try Bread</a>
             <a href="#arcade" onClick={() => setMobileNav(false)}>Arcade</a>
             <a className={styles.mobileDashboard} href={preview ? 'https://breadmusic.aleksh.xyz/dashboard' : '/dashboard'} target={preview ? '_blank' : undefined} rel={preview ? 'noreferrer' : undefined}>Dashboard <ArrowUpRight size={12} /></a>
             <a href="https://github.com/al3ksh/BreadMusic" target="_blank" rel="noreferrer">Source <ArrowUpRight size={12} /></a>
           </nav>
-          <div className={styles.navActions}><a className={styles.dashboardLink} href={preview ? 'https://breadmusic.aleksh.xyz/dashboard' : '/dashboard'} target={preview ? '_blank' : undefined} rel={preview ? 'noreferrer' : undefined}>Dashboard <ArrowUpRight size={14} /></a><button type="button" className={styles.navAdd} onClick={() => setModal('invite')}><Plus size={16} /><span>Add to Discord</span></button><button type="button" className={styles.mobileMenu} aria-label="Toggle navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(!mobileNav)}>{mobileNav ? <X size={22} /> : <Menu size={22} />}</button></div>
+          <div className={styles.navActions}><a className={styles.dashboardLink} href={preview ? 'https://breadmusic.aleksh.xyz/dashboard' : '/dashboard'} target={preview ? '_blank' : undefined} rel={preview ? 'noreferrer' : undefined}>Dashboard <ArrowUpRight size={14} /></a><button type="button" className={styles.navAdd} onClick={() => { setMobileNav(false); setModal('invite'); }}><Plus size={16} /><span>Add to Discord</span></button><button ref={menuRef} type="button" className={styles.mobileMenu} aria-label="Toggle navigation" aria-controls="landing-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(!mobileNav)}><Menu size={22} /><X size={22} /></button></div>
         </div>
       </header>
 
@@ -112,11 +122,11 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
             if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? views.length - 1 : (view + (event.key === 'ArrowRight' ? 1 : -1) + views.length) % views.length;
             setView(next); document.getElementById(`tab-${views[next].id}`)?.focus();
-          }}><item.icon size={16} /><span>{item.label}</span></button>)}</div>
+          }}><item.icon size={18} /><span>{item.label}</span></button>)}</div>
           <span className={styles.exampleLabel}>Actual interface / sample session</span>
         </div>
         <div role="tabpanel" id="product-panel" aria-labelledby={`tab-${selected.id}`} className={styles.showcase}>
-          <button type="button" className={styles.screenButton} onClick={() => openGallery(view + 1, 'screen')} aria-label={`Expand ${selected.label} screenshot`}><picture key={selected.file}><source media="(max-width: 620px)" srcSet={asset(selected.mobile)} /><img src={asset(selected.file)} alt={`Bread ${selected.label}: ${selected.description}`} loading="lazy" /></picture><span className={styles.expand}><Expand size={18} /></span></button>
+          <button type="button" className={styles.screenButton} {...showcaseSwipe} onClick={() => openGallery(view + 1, 'screen')} aria-label={`Expand ${selected.label} screenshot`}><picture key={selected.file}><source media="(max-width: 620px)" srcSet={asset(selected.mobile)} /><img draggable={false} src={asset(selected.file)} alt={`Bread ${selected.label}: ${selected.description}`} loading="lazy" /></picture><span className={styles.expand}><Expand size={18} /></span></button>
           <div key={selected.id} className={styles.screenCaption}><h3>{selected.title}</h3><p>{selected.description}</p></div>
         </div>
         <div className={styles.featureNotes}>
@@ -145,19 +155,7 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
 
       <ScrollToTopNotch hidden={modal !== null} />
       <AddToDiscordModal open={modal === 'invite'} onClose={() => setModal(null)} />
-      <dialog ref={dialogRef} className={styles.screenDialog} aria-label={`${expandedView.label} screenshot`} onCancel={() => setModal(null)} onClick={(event) => { if (event.target === event.currentTarget) setModal(null); }} onKeyDown={event => {
-        if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-        event.preventDefault();
-        stepGallery(event.key === 'ArrowRight' ? 1 : -1);
-      }}>
-        <div className={styles.dialogHead}><strong aria-live="polite">{`Bread / ${expandedView.label}`}</strong><div className={styles.galleryControls}>
-          <span className={styles.galleryCount}>{galleryIndex + 1} / {galleryViews.length}</span>
-          <button type="button" aria-label="Previous screenshot" title="Previous screenshot" onClick={() => stepGallery(-1)}><ChevronLeft size={22} /></button>
-          <button type="button" aria-label="Next screenshot" title="Next screenshot" onClick={() => stepGallery(1)}><ChevronRight size={22} /></button>
-          <button type="button" autoFocus aria-label="Close dialog" title="Close" onClick={() => setModal(null)}><X size={22} /></button>
-        </div></div>
-        <picture><source media="(max-width: 620px)" srcSet={asset(expandedView.mobile)} /><img src={asset(expandedView.file)} alt={`Full ${expandedView.label} screenshot with sample data`} /></picture>
-      </dialog>
+      <ScreenshotGallery open={modal === 'screen' || modal === 'hero'} views={galleryViews} index={galleryIndex} step={stepGallery} onClose={() => setModal(null)} />
     </main>
   );
 }

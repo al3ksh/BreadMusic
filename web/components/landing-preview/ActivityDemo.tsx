@@ -13,15 +13,14 @@ import { artwork, type DemoTrack } from './demo';
 import { duration, time, type DemoAction, type DemoState } from './demo-state';
 import { usePreviewSearch, type SearchResult } from './usePreviewSearch';
 import { usePreviewLyrics } from './usePreviewLyrics';
+import { useDemoDrawer } from './useDemoDrawer';
+import styles from './preview.module.css';
 
 const asQueueTrack = (track: DemoTrack): QueueTrack => ({ title: track.title, author: track.artist, uri: track.uri || `https://www.youtube.com/results?search_query=${encodeURIComponent(`${track.artist} ${track.title}`)}`, duration: duration(track) * 1000, artwork: artwork(track), requester: 'You', seekable: track.seekable !== false, source: track.source || 'youtube' });
-type Panel = 'queue' | 'search' | 'lyrics' | null;
 
 export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: DemoState; dispatch: Dispatch<DemoAction>; reset: () => void; lyricsRequest?: number }) {
   const root = useRef<HTMLElement | null>(null);
-  const [panel, setPanel] = useState<Panel>(null);
-  const [closing, setClosing] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { panel, closing, drawerRef, closePanel, openPanel, togglePanel: toggleDrawer, gestureHandlers } = useDemoDrawer();
   const [queueView, setQueueView] = useState<'queue' | 'history'>('queue');
   const [query, setQuery] = useState('');
   const [completed, setCompleted] = useState('');
@@ -42,11 +41,8 @@ export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: De
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollFrame = useRef<number | null>(null);
   const scrollSpeed = useRef(0);
-  const gestureStart = useRef<number | null>(null);
-  const [drawerY, setDrawerY] = useState<number | null>(null);
   const stopScroll = useCallback(() => { if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current); scrollFrame.current = null; scrollSpeed.current = 0; }, []);
-  const closePanel = useCallback(() => { stopScroll(); setClosing(true); if (closeTimer.current) clearTimeout(closeTimer.current); closeTimer.current = setTimeout(() => { setPanel(null); setClosing(false); setDrawerY(null); }, 220); }, [stopScroll]);
-  const togglePanel = (next: Exclude<Panel, null>) => { setVolumeOpen(false); if (panel === next) closePanel(); else { if (closeTimer.current) clearTimeout(closeTimer.current); setClosing(false); setDrawerY(null); setPanel(next); } };
+  const togglePanel = (next: 'queue' | 'search' | 'lyrics') => { setVolumeOpen(false); stopScroll(); toggleDrawer(next); };
 
   const [sync, setSync] = useState(false);
   const [karaoke, setKaraoke] = useState(false);
@@ -56,11 +52,11 @@ export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: De
   const lines = lyrics?.lines || [];
   const position = seekDraft ?? state.position;
   const activeLyricIndex = lines.reduce((active, line, index) => line.time <= position * 1000 ? index : active, -1);
-  useEffect(() => { if (lyricsRequest) { setPanel('lyrics'); setClosing(false); } }, [lyricsRequest]);
+  useEffect(() => { if (lyricsRequest) openPanel('lyrics'); }, [lyricsRequest, openPanel]);
 
-  useEffect(() => () => { stopScroll(); if (closeTimer.current) clearTimeout(closeTimer.current); if (volumeCommitTimerRef.current) clearTimeout(volumeCommitTimerRef.current); }, [stopScroll]);
+  useEffect(() => () => { stopScroll(); if (volumeCommitTimerRef.current) clearTimeout(volumeCommitTimerRef.current); }, [stopScroll]);
   useEffect(() => { setSeekDraft(null); setSeekPreview(null); }, [state.current]);
-  useEffect(() => { if (dragIndex === null || panel !== 'queue') stopScroll(); }, [dragIndex, panel, stopScroll]);
+  useEffect(() => { if (dragIndex === null || panel !== 'queue' || closing) stopScroll(); }, [dragIndex, panel, closing, stopScroll]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 3500); return () => clearTimeout(timer); }, [notice]);
   useEffect(() => {
     const document = root.current?.ownerDocument;
@@ -112,7 +108,7 @@ export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: De
   const trackTitle = status.currentTrack?.title || 'Nothing is playing';
   const titleLink = status.currentTrack?.uri;
 
-  return <main ref={root} className="activity-shell activity-workspace-shell" data-testid="activity-demo">
+  return <main ref={root} className={`activity-shell activity-workspace-shell ${styles.activityDemo}`} data-testid="activity-demo">
     <header className="activity-header"><button type="button" className="activity-brand" onClick={() => window.open('https://breadmusic.aleksh.xyz', '_blank', 'noopener,noreferrer')} aria-label="Open Bread website"><img src="/assets/breadicon.png?v=3" alt="" /><div><strong>Bread</strong><span>Music Activity</span></div></button><div className="activity-context"><span className="activity-live-dot" /><span>listening room</span><span className="activity-context-divider" /><span>DJ controls</span></div></header>
     {(notice || error) && <div className={`activity-notice tone-${error ? 'error' : 'success'}`} role={error ? 'alert' : 'status'}>{error ? <AlertTriangle className="activity-notice-icon" size={17} /> : <CheckCircle2 className="activity-notice-icon" size={17} />}<span>{error || notice}</span><button type="button" aria-label="Dismiss message" onClick={() => { setNotice(''); cancel(); }}><X size={16} /></button></div>}
     <div className="activity-workspace">
@@ -128,8 +124,8 @@ export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: De
         </section>
       </>}
       <ActivityPanelNav activePanel={panel} queueTotal={state.queue.length} canQueue hasTrack={hasTrack} togglePanel={togglePanel} />
-      {panel && <><button type="button" className={`activity-drawer-backdrop ${closing ? 'is-closing' : ''}`} onClick={closePanel} aria-label="Close panel" /><aside className={`activity-drawer ${closing ? 'is-closing' : ''}${drawerY !== null ? ' is-dragging' : ''}`} aria-label={`${panel} panel`} style={drawerY === null ? undefined : { transform: `translateY(${drawerY}px)`, transition: 'none' }}>
-        <div className="activity-drawer-header" onPointerDown={event => { if ((event.target as Element).closest?.('button')) return; if ((root.current?.ownerDocument.defaultView?.innerWidth || 2000) > 980) return; gestureStart.current = event.clientY; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={event => { if (gestureStart.current !== null) setDrawerY(Math.max(0, event.clientY - gestureStart.current)); }} onPointerUp={() => { if ((drawerY || 0) > 80) closePanel(); else setDrawerY(null); gestureStart.current = null; }} onPointerCancel={() => { gestureStart.current = null; setDrawerY(null); }}><div><strong>{panel === 'queue' ? 'Queue' : panel === 'search' ? 'Add music' : 'Live lyrics'}</strong><span>{panel === 'queue' ? `${state.queue.length} tracks` : panel === 'search' ? 'Search or upload audio' : trackTitle}</span></div><button type="button" onClick={closePanel} aria-label="Close panel"><X size={18} /></button></div>
+      {panel && <><button type="button" className={`activity-drawer-backdrop ${closing ? 'is-closing' : ''}`} onClick={closePanel} aria-label="Close panel" /><aside ref={drawerRef} className={`activity-drawer ${closing ? 'is-closing' : ''}`} aria-label={`${panel} panel`}>
+        <div className="activity-drawer-header" {...gestureHandlers}><div><strong>{panel === 'queue' ? 'Queue' : panel === 'search' ? 'Add music' : 'Live lyrics'}</strong><span>{panel === 'queue' ? `${state.queue.length} tracks` : panel === 'search' ? 'Search or upload audio' : trackTitle}</span></div><button type="button" onClick={closePanel} aria-label="Close panel"><X size={18} /></button></div>
         <div className="activity-drawer-body" ref={scrollRef} onDragOver={event => { if (dragIndex === null) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); scrollSpeed.current = event.clientY < bounds.top + 55 ? -9 : event.clientY > bounds.bottom - 55 ? 9 : 0; if (scrollFrame.current === null) { const step = () => { if (scrollRef.current) scrollRef.current.scrollTop += scrollSpeed.current; scrollFrame.current = requestAnimationFrame(step); }; scrollFrame.current = requestAnimationFrame(step); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) stopScroll(); }}>
           {panel === 'queue' && <><div className="activity-queue-switch" role="tablist" aria-label="Queue panel view">{(['queue', 'history'] as const).map(view => <button type="button" key={view} role="tab" aria-selected={queueView === view} className={queueView === view ? 'active' : ''} onClick={() => setQueueView(view)}>{view === 'queue' ? 'Queue' : 'History'}</button>)}</div>{queueView === 'history' ? <ActivityHistoryPanel canDj actionBusy={null} fetchHistoryPage={fetchHistory} onRequeue={uri => replay(uri, 'queue')} onPlayNow={uri => replay(uri, 'now')} /> : <ActivityQueuePanel queue={{ tracks: state.queue.slice(0, loaded).map(asQueueTrack), total: state.queue.length }} canDj queueRestore={null} dragIndex={dragIndex} dropIndex={dropIndex} queueLoadingMore={false} setDragIndex={setDragIndex} setDropIndex={setDropIndex} stopQueueAutoScroll={stopScroll} handleQueueDrop={index => { if (dragIndex !== null) dispatch({ type: 'move', from: dragIndex, to: index }); setDragIndex(null); setDropIndex(null); stopScroll(); }} handleQueueRemove={index => dispatch({ type: 'remove', index })} loadMoreQueue={() => setLoaded(loaded + 20)} />}</>}
           {panel === 'search' && <ActivitySearchPanel canDj canQueue uploadDisabled hasTrack={hasTrack} actionBusy={null} searchQuery={query} searching={searching} searchPlaylist={result.playlist ? { key: completed, name: result.playlist.name, trackCount: result.tracks.length, totalDuration: result.tracks.reduce((total, track) => total + duration(track) * 1000, 0), artwork: result.tracks[0] ? artwork(result.tracks[0]) : null } : null} searchResults={result.tracks.map(asQueueTrack)} searchCompletedQuery={completed} uploadFile={null} uploading={false} onQueryChange={value => { cancel(); setQuery(value); setCompleted(''); setResult({ tracks: [], playlist: null }); }} submitSearch={submitSearch} handleUploadSelection={() => {}} handleUpload={() => {}} addSearchPlaylist={() => playResult(result.tracks)} playSearchResult={(track, mode) => { const found = result.tracks.find(item => asQueueTrack(item).uri === track.uri); if (found) playResult([found], mode); }} />}

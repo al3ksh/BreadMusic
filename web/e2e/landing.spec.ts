@@ -36,6 +36,7 @@ test('product showcase starts with Dashboard, exposes lyrics and the edge notch 
   await page.getByRole('button', { name: /Bread Activity/ }).click();
   await expect(page.getByRole('dialog', { name: 'Activity screenshot' })).toContainText('Bread / Activity');
   await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Activity screenshot' })).not.toBeVisible();
   const showcaseTabs = page.getByRole('tablist', { name: 'Explore Bread' });
   await expect(showcaseTabs.getByRole('tab', { name: 'Dashboard' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#product-panel img')).toHaveAttribute('src', /dashboard\.png$/);
@@ -43,6 +44,7 @@ test('product showcase starts with Dashboard, exposes lyrics and the edge notch 
   await expect(page.locator('#product-panel img')).toHaveAttribute('src', /lyrics\.png$/);
 
   const notch = page.locator('button[aria-label="Back to top"]');
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   await expect(notch).toHaveAttribute('data-visible', 'false');
   await expect(notch).toHaveAttribute('aria-hidden', 'true');
   await page.evaluate(() => {

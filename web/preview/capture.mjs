@@ -6,13 +6,14 @@ import { createRequire } from 'node:module';
 const base = process.env.PREVIEW_URL || 'http://127.0.0.1:3180';
 const dashboardOnly = process.argv.includes('--dashboard-only');
 const activityHeroOnly = process.argv.includes('--activity-hero-only');
+const activityMobileOnly = process.argv.includes('--activity-mobile-only');
 const assets = path.resolve('public/assets/landing-preview');
 await fs.mkdir(assets, { recursive: true });
 const captures = path.resolve('../.tmp/landing-preview');
 await fs.mkdir(captures, { recursive: true });
 const require = createRequire(import.meta.url);
 const { renderArcadeImage } = require('../../src/games/arcadeRenderer');
-if (!dashboardOnly) await fs.writeFile(path.join(assets, 'arcade.png'), await renderArcadeImage({
+if (!dashboardOnly && !activityHeroOnly && !activityMobileOnly) await fs.writeFile(path.join(assets, 'arcade.png'), await renderArcadeImage({
   type: 'slots', title: 'Slots', username: 'alex', status: 'JUST FOR FUN', detail: 'A little luck. No wager.',
   data: { symbols: ['🍞', '🍒', '💎'] },
   metrics: [{ label: 'BET', value: 'JUST FOR FUN' }, { label: 'RESULT', value: 'NO MATCH' }, { label: 'BALANCE', value: 'UNCHANGED' }],
@@ -45,7 +46,7 @@ const queue = { current: tracks[0], tracks: tracks.slice(1), total: 2, page: 0, 
 const guildId = '123456789012345678';
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1000, height: 640 }, deviceScaleFactor: activityHeroOnly ? 2 : 1 });
+  const page = await browser.newPage({ viewport: { width: 1000, height: 640 }, deviceScaleFactor: activityMobileOnly ? 3 : activityHeroOnly ? 2 : 1 });
   page.setDefaultTimeout(20000);
   await page.addInitScript(() => {
     localStorage.setItem('bread_cookie_notice_v1', 'accepted');
@@ -85,7 +86,7 @@ try {
     if (p.endsWith('/player/filters')) return send({ presets: [] });
     return send({ success: true });
   });
-  if (!activityHeroOnly) {
+  if (!activityHeroOnly && !activityMobileOnly) {
     await page.goto(`${base}/dashboard/${guildId}?view=settings`);
     await page.getByText('Vote Skip Threshold', { exact: true }).waitFor();
     await page.evaluate(() => document.fonts.ready);
@@ -106,15 +107,15 @@ try {
   await page.waitForTimeout(2000);
   const frame = page.frames().find((entry) => entry.url().includes('/activity'));
   await frame.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
-  if (!activityHeroOnly) await page.screenshot({ path: path.join(assets, 'activity.png') });
-  await activity.locator('.activity-player-stage').screenshot({ path: path.join(assets, 'activity-hero.png') });
+  if (!activityHeroOnly && !activityMobileOnly) await page.screenshot({ path: path.join(assets, 'activity.png') });
+  if (!activityMobileOnly) await activity.locator('.activity-player-stage').screenshot({ path: path.join(assets, 'activity-hero.png') });
   if (activityHeroOnly) {
     console.log('Captured high-resolution Activity hero with sample data.');
   } else {
   await activity.getByRole('button', { name: /^Queue/ }).click();
   await activity.getByRole('complementary', { name: 'queue panel' }).waitFor();
   await page.waitForTimeout(500);
-  await page.screenshot({ path: path.join(assets, 'activity-queue.png') });
+  if (!activityMobileOnly) await page.screenshot({ path: path.join(assets, 'activity-queue.png') });
   await page.setViewportSize({ width: 360, height: 600 });
   await page.waitForTimeout(400);
   await page.screenshot({ path: path.join(assets, 'activity-queue-phone.png') });

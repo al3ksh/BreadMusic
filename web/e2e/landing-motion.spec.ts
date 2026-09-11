@@ -23,8 +23,7 @@ test('landing motion preserves navigation and pauses the Arcade clock during int
   await gallery.getByRole('button', { name: 'Slots', exact: true }).click();
   await expect(gallery.getByRole('button', { name: 'Slots', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await gallery.getByRole('button', { name: 'Resume slideshow' }).click();
-  await gallery.evaluate(() => (document.activeElement as HTMLElement)?.blur());
-  await page.mouse.move(0, 0);
+  // Resume must work while the activating pointer and keyboard focus remain here.
   await expect.poll(clockState).toBe('running');
   await gallery.evaluate(el => {
     const clock = el.getAnimations({ subtree: true }).find(animation => animation.effect?.getTiming().duration === 6000);
@@ -48,13 +47,15 @@ test('reduced motion keeps the landing static and all gallery tabs usable', asyn
   expect(await gallery.evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0);
 });
 
-test('screenshot gallery gives its close control visible pointer and keyboard feedback', async ({ page }) => {
+test('screenshot gallery gives its close control visible pointer and keyboard feedback', async ({ page, isMobile }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Bread Activity/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Activity screenshot' });
   const close = dialog.getByRole('button', { name: 'Close dialog' });
-  await close.hover();
-  await expect.poll(() => close.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  if (!isMobile) {
+    await close.hover();
+    await expect.poll(() => close.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  }
   await close.focus();
   await expect(close).toBeFocused();
   await page.keyboard.press('Enter');
