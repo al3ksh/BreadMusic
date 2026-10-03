@@ -77,10 +77,12 @@ const {
   scheduleAutoplayPrefetch,
   clearAutoplayState,
   addToRecentTracks,
+  recordTrackPlayed,
   blockAutoplayAfterPlaybackFailure,
   resumeAutoplayAfterPlaybackSuccess,
   autoplayEvents,
 } = require('./music/autoplay');
+const { flush: flushAutoplayProfiles } = require('./music/autoplay/profileStore');
 const {
   clearVoiceTrackStatus,
   handleVoiceStatusGatewayEvent,
@@ -547,6 +549,7 @@ client.lavalink.on('trackStart', safeEventHandler('trackStart', async (player, t
   await clearVoteSkip(player.guildId);
   clearIdleTimer(player.guildId);
   addToRecentTracks(player.guildId, track);
+  recordTrackPlayed(player.guildId, track);
   scheduleAutoplayPrefetch(player, track, client);
   recordTrackPlay(player.guildId, track, { botUserId: client.user?.id });
   await savePlayerState(player).catch((error) =>
@@ -604,7 +607,8 @@ client.lavalink.on('queueEnd', safeEventHandler('queueEnd', async (player, track
 
 client.lavalink.on('playerDestroy', safeEventHandler('playerDestroy', async (player) => {
   clearEmptyChannelTimer(player.guildId);
-  clearAutoplayState(player.guildId);
+  // Players destroyed by a shutdown are restored on start, so their autoplay session is kept.
+  if (!isShuttingDown) clearAutoplayState(player.guildId);
   await clearVoteSkip(player.guildId);
   await clearVoiceTrackStatus(client, player);
   await client.musicUI.clear(player.guildId);
@@ -1567,6 +1571,7 @@ async function gracefulShutdown(signal) {
   await flushQueueStore().catch((error) => {
     console.error('Failed to flush queue store:', error);
   });
+  flushAutoplayProfiles();
   client.lyricsUI?.clearAll();
 
   try {

@@ -1,5 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+process.env.BREAD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bread-autoplay-'));
+
 const {
   addManualSeed,
   blockAutoplayAfterPlaybackFailure,
@@ -8,6 +14,12 @@ const {
   resumeAutoplayAfterPlaybackSuccess,
   __testing,
 } = require('../src/music/autoplay');
+const { closeDatabases } = require('../src/state/sqliteStore');
+
+test.after(() => {
+  closeDatabases();
+  fs.rmSync(process.env.BREAD_DATA_DIR, { recursive: true, force: true });
+});
 
 function track(title, author, identifier, overrides = {}) {
   return {

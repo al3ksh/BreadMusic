@@ -18,13 +18,13 @@ const {
   discoverySource,
 } = require('./autoplay/sources');
 const pool = require('./autoplay/pool');
+const profileStore = require('./autoplay/profileStore');
 const { autoplayEvents } = require('./autoplay/events');
+const { getGuildHistory } = require('../state/analyticsStore');
 
-const recentTracks = new Map();
-const skippedAutoplayTracks = new Map();
-const manualSeedPools = new Map();
-const manualSeedCursors = new Map();
-const currentAutoplaySeed = new Map();
+// Per-guild listening session (manual seeds, rotation cursor, accepted seed, recent tracks),
+// hydrated from the profile store so a restart resumes the same profile.
+const sessions = new Map();
 const autoplayInProgress = new Set();
 const autoplayEpoch = new Map();
 const autoplayBlockedUntil = new Map();
@@ -33,10 +33,12 @@ const prepareTimers = new Map();
 const exhaustedNoticeAt = new Map();
 
 const MAX_RECENT_TRACKS = 40;
-const MAX_SKIPPED_TRACKS = 40;
 const MAX_MANUAL_SEEDS = 40;
 const ACTIVE_MANUAL_SEEDS = 3;
 const SKIP_MEMORY_TTL = 2 * 60 * 60 * 1000;
+const SKIP_DAY_MS = 24 * 60 * 60 * 1000;
+const REBUILD_HISTORY_SEEDS = 12;
+const REBUILD_LIKED_SEEDS = 6;
 const QUICK_SKIP_MAX_MS = 75_000;
 const QUICK_SKIP_MAX_RATIO = 0.35;
 const ACCEPTED_PLAY_MIN_MS = 90_000;
@@ -69,11 +71,7 @@ function setAutoplay(guildId, enabled) {
     bumpEpoch(guildId);
     clearAutoplayPrefetch(guildId);
     pool.clearPool(guildId);
-    recentTracks.delete(guildId);
-    skippedAutoplayTracks.delete(guildId);
-    manualSeedPools.delete(guildId);
-    manualSeedCursors.delete(guildId);
-    currentAutoplaySeed.delete(guildId);
+    clearSession(guildId);
     resetGeminiAutoplayState(guildId);
   }
 }
@@ -92,19 +90,78 @@ function bumpEpoch(guildId) {
   autoplayEpoch.set(guildId, getEpoch(guildId) + 1);
 }
 
+function getSession(guildId) {
+  let session = sessions.get(guildId);
+  if (!session) {
+    const stored = profileStore.getSession(guildId);
+    session = {
+      manualSeeds: stored?.manualSeeds ?? [],
+      seedCursor: stored?.seedCursor ?? 0,
+      currentSeed: stored?.currentSeed ?? null,
+      recent: (stored?.recent ?? []).map((info) => normalizeTrack({ info })).filter(Boolean),
+    };
+    sessions.set(guildId, session);
+  }
+  return session;
+}
+
+function persistSession(guildId) {
+  const session = sessions.get(guildId);
+  if (!session) return;
+  profileStore.saveSession(guildId, {
+    manualSeeds: session.manualSeeds,
+    seedCursor: session.seedCursor,
+    currentSeed: session.currentSeed,
+    recent: session.recent.map((entry) => snapshotTrackInfo(entry)),
+  });
+}
+
+function clearSession(guildId) {
+  sessions.delete(guildId);
+  profileStore.clearSession(guildId);
+}
+
+function setCurrentSeed(guildId, seed) {
+  const session = getSession(guildId);
+  session.currentSeed = seed;
+  persistSession(guildId);
+}
+
+function tasteEntry(normalized, extra = {}) {
+  return {
+    key: normalized.key,
+    artistKey: normalized.artistKey,
+    authorKey: normalized.authorKey,
+    title: normalized.title,
+    author: normalized.author,
+    identifier: normalized.identifier,
+    uri: normalized.uri,
+    duration: normalized.duration,
+    sourceName: normalized.sourceName,
+    ...extra,
+  };
+}
+
 function addToRecentTracks(guildId, track) {
   const normalized = normalizeTrack(track);
   if (!guildId || !normalized) return;
 
-  const recent = recentTracks.get(guildId) ?? [];
+  const { recent } = getSession(guildId);
   if (recent.some((entry) => entry.key === normalized.key)) return;
 
   recent.push(normalized);
   if (recent.length > MAX_RECENT_TRACKS) {
     recent.splice(0, recent.length - MAX_RECENT_TRACKS);
   }
+  persistSession(guildId);
+}
 
-  recentTracks.set(guildId, recent);
+// Every started track counts as played so autoplay does not bring it back soon after.
+function recordTrackPlayed(guildId, track) {
+  if (!guildId || isLocalUploadTrack(track) || isStreamTrack(track)) return;
+  const normalized = normalizeTrack(track);
+  if (!normalized) return;
+  profileStore.recordPlayed(guildId, { key: normalized.key, artistKey: normalized.artistKey });
 }
 
 // The pool survives skips: the skip is recorded as feedback and the next pick re-scores
@@ -121,26 +178,12 @@ function recordAutoplaySkip(guildId, track, playback = {}) {
     return false;
   }
 
-  const currentSeed = currentAutoplaySeed.get(guildId);
+  const { currentSeed } = getSession(guildId);
   if (currentSeed && normalizeTrack({ info: currentSeed })?.key === normalized.key) {
-    currentAutoplaySeed.delete(guildId);
+    setCurrentSeed(guildId, null);
   }
 
-  const skipped = pruneSkippedEntries(skippedAutoplayTracks.get(guildId) ?? []);
-  const next = skipped.filter((entry) => entry.key !== normalized.key);
-  next.push({
-    ...normalized,
-    skippedAt: Date.now(),
-    strength: feedback.strength,
-    position: feedback.position,
-    ratio: feedback.ratio,
-  });
-
-  if (next.length > MAX_SKIPPED_TRACKS) {
-    next.splice(0, next.length - MAX_SKIPPED_TRACKS);
-  }
-
-  skippedAutoplayTracks.set(guildId, next);
+  profileStore.recordSkip(guildId, tasteEntry(normalized, { strength: feedback.strength }));
   logAutoplay('info', `${feedback.strength} negative feedback saved for "${normalized.title}" by ${normalized.artist || 'unknown'} (${formatPlaybackFeedback(feedback)})`);
   return true;
 }
@@ -181,21 +224,41 @@ function formatPlaybackFeedback(feedback) {
   return `${seconds}s/${ratio}%`;
 }
 
-function pruneSkippedEntries(entries) {
-  const cutoff = Date.now() - SKIP_MEMORY_TTL;
-  return entries.filter((entry) => Number.isFinite(entry.skippedAt) && entry.skippedAt >= cutoff);
+// Skip feedback fades: full weight for two hours, half for the rest of the day, then a quarter.
+function skipWeight(age) {
+  if (age < SKIP_MEMORY_TTL) return 1;
+  if (age < SKIP_DAY_MS) return 0.5;
+  return 0.25;
 }
 
-function getSkippedEntries(guildId) {
-  const skipped = pruneSkippedEntries(skippedAutoplayTracks.get(guildId) ?? []);
-  skippedAutoplayTracks.set(guildId, skipped);
-  return skipped;
+function getSkippedEntries(guildId, taste = profileStore.getTaste(guildId), now = Date.now()) {
+  return taste.skips.map((entry) => ({
+    ...entry,
+    skippedAt: entry.at,
+    weight: skipWeight(now - entry.at),
+  }));
 }
 
 function wasRecentlySkipped(guildId, track) {
   const normalized = normalizeTrack(track);
   if (!normalized) return false;
-  return getSkippedEntries(guildId).some((entry) => entry.key === normalized.key);
+  const cutoff = Date.now() - SKIP_MEMORY_TTL;
+  return profileStore.getTaste(guildId).skips.some((entry) => entry.key === normalized.key && entry.at >= cutoff);
+}
+
+function buildTasteContext(taste, now) {
+  const dislikedArtistCounts = new Map();
+  for (const entry of taste.dislikes) {
+    if (entry.artistKey) dislikedArtistCounts.set(entry.artistKey, (dislikedArtistCounts.get(entry.artistKey) || 0) + 1);
+  }
+  return {
+    now,
+    likedKeys: new Set(taste.likes.map((entry) => entry.key)),
+    likedArtists: new Set(taste.likes.map((entry) => entry.artistKey).filter(Boolean)),
+    dislikedKeys: new Set(taste.dislikes.map((entry) => entry.key)),
+    dislikedArtistCounts,
+    played: new Map(taste.played.map((entry) => [entry.key, entry.at])),
+  };
 }
 
 // Cancels the pending preparation and forgets the prepared track. The candidate pool is kept.
@@ -213,8 +276,8 @@ function addManualSeed(guildId, trackOrInfo, options = {}) {
   const normalized = info ? normalizeTrack({ info }) : null;
   if (!info || !normalized) return false;
 
-  const existing = manualSeedPools.get(guildId) ?? [];
-  const next = existing.filter((entry) => entry.key !== normalized.key);
+  const session = getSession(guildId);
+  const next = session.manualSeeds.filter((entry) => entry.key !== normalized.key);
   next.push({
     ...info,
     key: normalized.key,
@@ -225,10 +288,11 @@ function addManualSeed(guildId, trackOrInfo, options = {}) {
     next.splice(0, next.length - MAX_MANUAL_SEEDS);
   }
 
-  manualSeedPools.set(guildId, next);
+  session.manualSeeds = next;
+  session.seedCursor = 0;
+  session.currentSeed = null;
+  persistSession(guildId);
   resetGeminiAutoplayState(guildId);
-  manualSeedCursors.set(guildId, 0);
-  currentAutoplaySeed.delete(guildId);
   autoplayBlockedUntil.delete(guildId);
   autoplayPlaybackFailureBlocks.delete(guildId);
   if (options.invalidatePrefetch !== false) clearAutoplayPrefetch(guildId);
@@ -237,15 +301,16 @@ function addManualSeed(guildId, trackOrInfo, options = {}) {
 }
 
 function getManualSeedPool(guildId) {
-  return manualSeedPools.get(guildId) ?? [];
+  return getSession(guildId).manualSeeds;
 }
 
 function selectManualSeeds(guildId, limit = ACTIVE_MANUAL_SEEDS) {
-  const seeds = getManualSeedPool(guildId);
+  const session = getSession(guildId);
+  const seeds = session.manualSeeds;
   if (!seeds.length || limit <= 0) return [];
 
   const count = Math.min(limit, seeds.length);
-  const cursor = manualSeedCursors.get(guildId) ?? 0;
+  const cursor = session.seedCursor % seeds.length;
   const selected = [];
 
   for (let offset = 0; offset < count; offset += 1) {
@@ -253,7 +318,8 @@ function selectManualSeeds(guildId, limit = ACTIVE_MANUAL_SEEDS) {
     selected.push(seeds[seeds.length - 1 - reverseIndex]);
   }
 
-  manualSeedCursors.set(guildId, (cursor + 1) % seeds.length);
+  session.seedCursor = (cursor + 1) % seeds.length;
+  persistSession(guildId);
   return selected;
 }
 
@@ -273,10 +339,13 @@ function buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds = []) {
     .map((entry) => normalizeTrack({ info: entry }))
     .filter(Boolean);
   const root = manualSeeds.at(-1) ?? null;
-  const current = currentAutoplaySeed.has(guildId) ? normalizeTrack({ info: currentAutoplaySeed.get(guildId) }) : null;
+  const session = getSession(guildId);
+  const current = session.currentSeed ? normalizeTrack({ info: session.currentSeed }) : null;
   const primary = activeSeeds[0] || (manualSeeds.length ? root : current) || seed || last;
-  const recent = recentTracks.get(guildId) ?? [];
-  const skipped = getSkippedEntries(guildId);
+  const recent = session.recent;
+  const now = Date.now();
+  const taste = profileStore.getTaste(guildId, now);
+  const skipped = getSkippedEntries(guildId, taste, now);
 
   return {
     guildId,
@@ -289,6 +358,7 @@ function buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds = []) {
     activeSeeds: activeSeeds.length ? activeSeeds : [primary].filter(Boolean),
     recent,
     skipped,
+    taste: buildTasteContext(taste, now),
     seedArtist: primary?.artist || last?.artist || '',
     seedTitle: primary?.cleanTitle || primary?.title || last?.cleanTitle || last?.title || '',
     seedDuration: primary?.duration || last?.duration || 0,
@@ -300,7 +370,7 @@ function noteSeedTrack(guildId, lastTrack) {
   if (lastTrack.isAutoplay) {
     if (wasRecentlySkipped(guildId, lastTrack)) return;
     const acceptedSeed = snapshotTrackInfo(lastTrack);
-    if (acceptedSeed) currentAutoplaySeed.set(guildId, acceptedSeed);
+    if (acceptedSeed) setCurrentSeed(guildId, acceptedSeed);
   } else if (!isLocalUploadTrack(lastTrack) && !getManualSeedPool(guildId).length) {
     if (addManualSeed(guildId, lastTrack, { invalidatePrefetch: false })) {
       logAutoplay('debug', `Recovered missing manual seed from the current track: "${lastTrack.info.title}"`);
@@ -322,7 +392,7 @@ async function buildPool(player, lastTrack, client) {
   }
 
   const selectedManualSeeds = selectManualSeeds(guildId);
-  const activeSeed = selectedManualSeeds[0] || currentAutoplaySeed.get(guildId) || (
+  const activeSeed = selectedManualSeeds[0] || getSession(guildId).currentSeed || (
     isLocalUploadTrack(lastTrack) ? null : snapshotTrackInfo(lastTrack)
   );
   if (!activeSeed) {
@@ -674,27 +744,61 @@ function clearAutoplayState(guildId) {
   autoplayBlockedUntil.set(guildId, Date.now() + 15_000);
   clearAutoplayPrefetch(guildId);
   pool.clearPool(guildId);
-  recentTracks.delete(guildId);
-  skippedAutoplayTracks.delete(guildId);
-  manualSeedPools.delete(guildId);
-  manualSeedCursors.delete(guildId);
-  currentAutoplaySeed.delete(guildId);
+  clearSession(guildId);
   autoplayPlaybackFailureBlocks.delete(guildId);
   exhaustedNoticeAt.delete(guildId);
   resetGeminiAutoplayState(guildId);
 }
 
-const cleanupTimer = setInterval(() => {
-  for (const [guildId, entries] of skippedAutoplayTracks) {
-    const pruned = pruneSkippedEntries(entries);
-    if (pruned.length) {
-      skippedAutoplayTracks.set(guildId, pruned);
-    } else {
-      skippedAutoplayTracks.delete(guildId);
-    }
+// Re-seeds the session from what people actually queued recently (plus a few liked tracks),
+// for when autoplay has drifted away from the server's taste.
+function rebuildProfileFromHistory(guildId) {
+  if (!guildId) return { seeds: 0 };
+
+  const { items } = getGuildHistory(guildId, { page: 0, limit: 100 });
+  const picked = new Map();
+  for (const item of items) {
+    if (picked.size >= REBUILD_HISTORY_SEEDS) break;
+    if (item.autoplay || !item.track) continue;
+    const info = { ...item.track, identifier: item.track.identifier ?? identifierFromUri(item.track.uri) };
+    // History keeps no stream flag; a known duration or a YouTube id marks a regular track.
+    if (isLocalUploadTrack(info) || (isStreamTrack(info) && !info.identifier)) continue;
+    const normalized = normalizeTrack({ info });
+    if (!normalized || picked.has(normalized.key)) continue;
+    picked.set(normalized.key, info);
   }
-}, 10 * 60 * 1000);
-cleanupTimer.unref?.();
+
+  for (const like of profileStore.listLikes(guildId).slice(0, REBUILD_LIKED_SEEDS)) {
+    if (!picked.has(like.key)) picked.set(like.key, like);
+  }
+
+  // History is newest first; seeds are stored oldest first so the newest stays the root.
+  const seeds = [...picked.entries()].reverse().map(([key, info]) => ({
+    ...snapshotTrackInfo(info),
+    key,
+    addedAt: Date.now(),
+  }));
+
+  const session = getSession(guildId);
+  session.manualSeeds = seeds.slice(-MAX_MANUAL_SEEDS);
+  session.seedCursor = 0;
+  session.currentSeed = null;
+  persistSession(guildId);
+
+  bumpEpoch(guildId);
+  clearAutoplayPrefetch(guildId);
+  pool.clearPool(guildId);
+  resetGeminiAutoplayState(guildId);
+  autoplayPlaybackFailureBlocks.delete(guildId);
+  logAutoplay('info', `Profile rebuilt from history for guild ${guildId}: ${seeds.length} seeds`);
+  return { seeds: seeds.length };
+}
+
+function identifierFromUri(uri) {
+  if (typeof uri !== 'string') return undefined;
+  const match = uri.match(/[?&]v=([a-zA-Z0-9_-]{11})/) || uri.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+  return match?.[1];
+}
 
 module.exports = {
   autoplayEvents,
@@ -713,6 +817,8 @@ module.exports = {
   addToRecentTracks,
   recordAutoplaySkip,
   addManualSeed,
+  recordTrackPlayed,
+  rebuildProfileFromHistory,
   __testing: {
     buildContext,
     buildDiscoveryQueries,
@@ -724,5 +830,6 @@ module.exports = {
     wasRecentlySkipped,
     prepareNext,
     isPlaybackFailureBlocked: (guildId) => autoplayPlaybackFailureBlocks.has(guildId),
+    forgetSessionCache: () => sessions.clear(),
   },
 };

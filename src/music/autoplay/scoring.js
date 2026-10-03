@@ -7,6 +7,11 @@ const SELECTION_JITTER = 6;
 const MAX_SAME_ARTIST_IN_ROW = 2;
 const SKIPPED_ARTIST_REJECT_THRESHOLD = 2;
 const SKIPPED_AUTHOR_REJECT_THRESHOLD = 1;
+const DISLIKED_ARTIST_REJECT_THRESHOLD = 2;
+const DISLIKED_ARTIST_PENALTY = 30;
+const PLAYED_REJECT_MS = 12 * 60 * 60 * 1000;
+const PLAYED_PENALTY = 18;
+const LIKED_ARTIST_BONUS = 10;
 
 const HARD_REJECT_TERMS = [
   'karaoke',
@@ -113,6 +118,14 @@ function isTrackRecent(recent, track) {
       normalizeComparable(entry.cleanTitle) === normalizeComparable(track.cleanTitle)
     )
   ));
+}
+
+function skipWeightOf(entry) {
+  return Number.isFinite(entry.weight) ? entry.weight : 1;
+}
+
+function sumWeights(entries) {
+  return entries.reduce((total, entry) => total + skipWeightOf(entry), 0);
 }
 
 function isArtistOverplayed(recent, artistName) {
@@ -265,34 +278,69 @@ function scoreCandidate(candidate, context) {
     reasons.push('title-overlap');
   }
 
-  if (skipped.some((entry) => entry.key === track.key)) {
-    return { score: -Infinity, rejected: true, reason: 'recently skipped' };
+  // Skips fade with age (entry.weight): recent ones reject, older ones only lower the score.
+  const skippedTrack = skipped.find((entry) => entry.key === track.key);
+  if (skippedTrack) {
+    if (skipWeightOf(skippedTrack) >= 0.5) {
+      return { score: -Infinity, rejected: true, reason: 'recently skipped' };
+    }
+    score -= 20;
+    reasons.push('skipped-before');
   }
 
   const skippedArtistMatches = skipped.filter((entry) => (
     entry.artistKey && track.artistKey && entry.artistKey === track.artistKey
   ));
-  const strongSkippedSameArtist = skippedArtistMatches.filter((entry) => entry.strength !== 'normal').length;
+  const strongSkippedSameArtist = sumWeights(skippedArtistMatches.filter((entry) => entry.strength !== 'normal'));
   if (strongSkippedSameArtist >= SKIPPED_ARTIST_REJECT_THRESHOLD) {
     return { score: -Infinity, rejected: true, reason: 'recently skipped artist' };
   }
   if (skippedArtistMatches.length > 0) {
-    const normalSkippedSameArtist = skippedArtistMatches.length - strongSkippedSameArtist;
-    score -= (strongSkippedSameArtist * 28) + (normalSkippedSameArtist * 14);
+    const normalSkippedSameArtist = sumWeights(skippedArtistMatches.filter((entry) => entry.strength === 'normal'));
+    score -= Math.round((strongSkippedSameArtist * 28) + (normalSkippedSameArtist * 14));
     reasons.push(`skipped-artist:${skippedArtistMatches.length}`);
   }
 
   const skippedAuthorMatches = skipped.filter((entry) => (
     entry.authorKey && track.authorKey && entry.authorKey === track.authorKey
   ));
-  const strongSkippedSameAuthor = skippedAuthorMatches.filter((entry) => entry.strength !== 'normal').length;
+  const strongSkippedSameAuthor = sumWeights(skippedAuthorMatches.filter((entry) => entry.strength !== 'normal'));
   if (strongSkippedSameAuthor >= SKIPPED_AUTHOR_REJECT_THRESHOLD) {
     return { score: -Infinity, rejected: true, reason: 'recently skipped channel' };
   }
   if (skippedAuthorMatches.length > 0) {
-    const normalSkippedSameAuthor = skippedAuthorMatches.length - strongSkippedSameAuthor;
-    score -= (strongSkippedSameAuthor * 32) + (normalSkippedSameAuthor * 16);
+    const normalSkippedSameAuthor = sumWeights(skippedAuthorMatches.filter((entry) => entry.strength === 'normal'));
+    score -= Math.round((strongSkippedSameAuthor * 32) + (normalSkippedSameAuthor * 16));
     reasons.push(`skipped-channel:${skippedAuthorMatches.length}`);
+  }
+
+  const taste = context.taste;
+  if (taste) {
+    if (taste.dislikedKeys?.has(track.key)) {
+      return { score: -Infinity, rejected: true, reason: 'disliked' };
+    }
+    const dislikedArtist = track.artistKey ? (taste.dislikedArtistCounts?.get(track.artistKey) || 0) : 0;
+    if (dislikedArtist >= DISLIKED_ARTIST_REJECT_THRESHOLD) {
+      return { score: -Infinity, rejected: true, reason: 'disliked artist' };
+    }
+    if (dislikedArtist > 0) {
+      score -= DISLIKED_ARTIST_PENALTY;
+      reasons.push('disliked-artist');
+    }
+
+    const playedAt = taste.played?.get(track.key);
+    if (Number.isFinite(playedAt)) {
+      if ((taste.now ?? Date.now()) - playedAt < PLAYED_REJECT_MS) {
+        return { score: -Infinity, rejected: true, reason: 'played recently' };
+      }
+      score -= PLAYED_PENALTY;
+      reasons.push('played-earlier');
+    }
+
+    if (track.artistKey && taste.likedArtists?.has(track.artistKey)) {
+      score += LIKED_ARTIST_BONUS;
+      reasons.push('liked-artist');
+    }
   }
 
   score -= Math.min(10, candidate.sourceIndex || 0);
