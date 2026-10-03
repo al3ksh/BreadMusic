@@ -11,9 +11,13 @@ const {
   addManualSeed,
   autoplayEvents,
   clearAutoplayState,
+  dislikeTrack,
   getAutoplayNext,
+  getTrackFeedback,
+  likeTrack,
   handleAutoplay,
   recordAutoplaySkip,
+  rerollNext,
   setAutoplay,
   setAutoplayMode,
   __testing,
@@ -251,4 +255,63 @@ test('a new profile replaces the old pool only once the rebuild has results', ()
 
   pool.mergeCandidates(guildId, [{ track: track('New', 'Artist', 'newprofilen'), source: 'search' }], { profileKey: 'new' });
   assert.deepEqual(pool.getCandidates(guildId).map((entry) => entry.track.info.title), ['New']);
+});
+
+test('reroll replaces the prepared track and keeps its artist eligible', async () => {
+  const guildId = 'pool-reroll';
+  const { player, client, node, seed } = setup(guildId);
+  await __testing.prepareNext(player, seed, client);
+  const first = getAutoplayNext(guildId);
+  const callsBefore = node.calls.length;
+
+  const result = await rerollNext(player, client);
+  assert.equal(result.ok, true);
+  assert.notEqual(result.next.identifier, first.identifier);
+  assert.equal(getAutoplayNext(guildId).identifier, result.next.identifier);
+  assert.equal(node.calls.length, callsBefore, 'reroll picks from the existing pool');
+
+  const again = await rerollNext(player, client);
+  assert.deepEqual(again, { ok: false, reason: 'cooldown' });
+
+  // Only the exact track is excluded, not the artist.
+  const sameArtist = track('Other Song', first.author, 'otherother1');
+  const context = __testing.buildContext(guildId, seed, seed, []);
+  const verdict = __testing.scoreCandidate({
+    track: sameArtist,
+    normalized: require('../src/music/autoplay/normalize').normalizeTrack(sameArtist),
+    source: 'search',
+    sourceIndex: 0,
+    anchorKeys: new Set(),
+    anchorRank: 0,
+  }, context);
+  assert.equal(verdict.rejected, false, verdict.reason);
+  __testing.resetRerollCooldown();
+});
+
+test('reroll needs autoplay and an empty queue', async () => {
+  const { player, client } = setup('pool-reroll-queue');
+  player.queue.tracks.push(track('Queued', 'Someone', 'queuedqueue'));
+  assert.deepEqual(await rerollNext(player, client), { ok: false, reason: 'unavailable' });
+  setAutoplay('pool-reroll-queue', false);
+  assert.deepEqual(await rerollNext(player, client), { ok: false, reason: 'disabled' });
+});
+
+test('like toggles and dislike drops the seed and the prepared track', async () => {
+  const guildId = 'pool-feedback';
+  const { player, client, seed } = setup(guildId);
+  assert.deepEqual(likeTrack(guildId, seed), { liked: true });
+  assert.equal(getTrackFeedback(guildId, seed), 'like');
+  assert.deepEqual(likeTrack(guildId, seed), { liked: false });
+  assert.equal(getTrackFeedback(guildId, seed), null);
+
+  await __testing.prepareNext(player, seed, client);
+  assert.ok(getAutoplayNext(guildId));
+  assert.deepEqual(dislikeTrack(guildId, seed), { disliked: true });
+  assert.equal(getTrackFeedback(guildId, seed), 'dislike');
+  assert.equal(getAutoplayNext(guildId), null);
+  assert.deepEqual(__testing.getManualSeedPool(guildId), []);
+
+  const stream = { info: { ...seed.info, identifier: 'livelivelive', isStream: true } };
+  assert.equal(likeTrack(guildId, stream), null);
+  assert.equal(getTrackFeedback(guildId, stream), null);
 });

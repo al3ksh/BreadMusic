@@ -32,6 +32,7 @@ const autoplayBlockedUntil = new Map();
 const autoplayPlaybackFailureBlocks = new Set();
 const prepareTimers = new Map();
 const exhaustedNoticeAt = new Map();
+const rerollAt = new Map();
 
 const MAX_RECENT_TRACKS = 40;
 const MAX_MANUAL_SEEDS = 40;
@@ -48,6 +49,7 @@ const PREPARE_DELAY_MS = 3_000;
 const GENRE_LOCK_MIN = 3;
 const GENRE_LOCK_BACKUP = 4;
 const EXHAUSTED_NOTICE_COOLDOWN_MS = 2 * 60 * 1000;
+const REROLL_COOLDOWN_MS = 1_500;
 
 function isAutoplayEnabled(guildId) {
   const config = getConfig(guildId);
@@ -572,7 +574,7 @@ function getAutoplayNext(guildId) {
   return describeNext(pool.getNext(guildId));
 }
 
-async function prepareNext(player, track, client) {
+async function prepareNext(player, track, client, { useAi = true } = {}) {
   const guildId = player.guildId;
   const trackKey = getTrackCacheKey(track);
   const epoch = getEpoch(guildId);
@@ -585,7 +587,7 @@ async function prepareNext(player, track, client) {
   if (!stillCurrent()) return null;
 
   noteSeedTrack(guildId, track);
-  const result = await pickFromPool(player, track, client, { useAi: true });
+  const result = await pickFromPool(player, track, client, { useAi });
   if (!result || !stillCurrent()) return null;
 
   const { selected, eligibleCount } = result;
@@ -796,6 +798,71 @@ function rebuildProfileFromHistory(guildId) {
   return { seeds: seeds.length };
 }
 
+function feedbackEntry(track) {
+  if (!track || isLocalUploadTrack(track) || isStreamTrack(track)) return null;
+  const normalized = normalizeTrack(track);
+  return normalized ? tasteEntry(normalized) : null;
+}
+
+// 'like', 'dislike' or null for the given track.
+function getTrackFeedback(guildId, track) {
+  const entry = feedbackEntry(track);
+  return entry ? profileStore.getTrackFeedback(guildId, entry.key) : null;
+}
+
+// Returns { liked } or null when the track cannot carry feedback (streams, uploads).
+function likeTrack(guildId, track) {
+  const entry = feedbackEntry(track);
+  if (!guildId || !entry) return null;
+  const liked = profileStore.toggleLike(guildId, entry);
+  logAutoplay('info', `${liked ? 'Liked' : 'Like removed'}: "${entry.title}" by ${entry.author || 'unknown'}`);
+  return { liked };
+}
+
+// Records the dislike and drops the track from the seeds. The caller skips the track; the
+// next pick re-scores the pool, so the prepared track is redone as well.
+function dislikeTrack(guildId, track) {
+  const entry = feedbackEntry(track);
+  if (!guildId || !entry) return null;
+  profileStore.recordDislike(guildId, entry);
+
+  const session = getSession(guildId);
+  const seeds = session.manualSeeds.filter((seed) => seed.key !== entry.key);
+  const currentSeedKey = session.currentSeed ? normalizeTrack({ info: session.currentSeed })?.key : null;
+  if (seeds.length !== session.manualSeeds.length || currentSeedKey === entry.key) {
+    session.manualSeeds = seeds;
+    session.seedCursor = 0;
+    if (currentSeedKey === entry.key) session.currentSeed = null;
+    persistSession(guildId);
+  }
+
+  clearAutoplayPrefetch(guildId);
+  logAutoplay('info', `Disliked: "${entry.title}" by ${entry.author || 'unknown'}`);
+  return { disliked: true };
+}
+
+// Replaces the prepared track. The rejected pick is remembered as a 'reroll' skip, which only
+// excludes that exact track (not its artist), and the next one comes from the existing pool.
+async function rerollNext(player, client) {
+  const guildId = player?.guildId;
+  if (!guildId || !isAutoplayEnabled(guildId)) return { ok: false, reason: 'disabled' };
+  const current = player.queue.current;
+  if (!current?.info || !isPlayerIdle(player) || isStreamTrack(current)) return { ok: false, reason: 'unavailable' };
+
+  const now = Date.now();
+  if (now - (rerollAt.get(guildId) || 0) < REROLL_COOLDOWN_MS) return { ok: false, reason: 'cooldown' };
+  rerollAt.set(guildId, now);
+
+  const rejected = feedbackEntry(pool.getNext(guildId)?.track);
+  if (rejected) profileStore.recordSkip(guildId, { ...rejected, strength: 'reroll' });
+  clearAutoplayPrefetch(guildId);
+
+  const track = await prepareNext(player, current, client, { useAi: false });
+  if (!track) return { ok: false, reason: 'exhausted' };
+  logAutoplay('info', `Rerolled next track: "${track.info.title}"${rejected ? ` instead of "${rejected.title}"` : ''}`);
+  return { ok: true, next: getAutoplayNext(guildId) };
+}
+
 function identifierFromUri(uri) {
   if (typeof uri !== 'string') return undefined;
   const match = uri.match(/[?&]v=([a-zA-Z0-9_-]{11})/) || uri.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
@@ -821,6 +888,10 @@ module.exports = {
   addManualSeed,
   recordTrackPlayed,
   rebuildProfileFromHistory,
+  getTrackFeedback,
+  likeTrack,
+  dislikeTrack,
+  rerollNext,
   __testing: {
     buildContext,
     buildDiscoveryQueries,
@@ -833,5 +904,6 @@ module.exports = {
     prepareNext,
     isPlaybackFailureBlocked: (guildId) => autoplayPlaybackFailureBlocks.has(guildId),
     forgetSessionCache: () => sessions.clear(),
+    resetRerollCooldown: () => rerollAt.clear(),
   },
 };

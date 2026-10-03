@@ -289,7 +289,9 @@ function scoreCandidate(candidate, context) {
     reasons.push('skipped-before');
   }
 
-  const skippedArtistMatches = skipped.filter((entry) => (
+  // A reroll only rejects that exact pick, never its artist or channel.
+  const artistSkips = skipped.filter((entry) => entry.strength !== 'reroll');
+  const skippedArtistMatches = artistSkips.filter((entry) => (
     entry.artistKey && track.artistKey && entry.artistKey === track.artistKey
   ));
   const strongSkippedSameArtist = sumWeights(skippedArtistMatches.filter((entry) => entry.strength !== 'normal'));
@@ -302,7 +304,7 @@ function scoreCandidate(candidate, context) {
     reasons.push(`skipped-artist:${skippedArtistMatches.length}`);
   }
 
-  const skippedAuthorMatches = skipped.filter((entry) => (
+  const skippedAuthorMatches = artistSkips.filter((entry) => (
     entry.authorKey && track.authorKey && entry.authorKey === track.authorKey
   ));
   const strongSkippedSameAuthor = sumWeights(skippedAuthorMatches.filter((entry) => entry.strength !== 'normal'));
