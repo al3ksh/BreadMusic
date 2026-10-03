@@ -609,8 +609,11 @@ async function getGenreRadioPlan(context, options = {}) {
       options,
     );
     const artists = validateDiscoveryArtists(parsed.artists, payload.coreArtists);
-    if (artists.length < 3) throw new Error('Gemini genre radio plan contained too few valid artists');
     recordGeminiSuccess(now);
+    if (artists.length < 3) {
+      options.logger?.('info', `Genre radio plan had only ${artists.length} usable artists; using standard retrieval`);
+      return [];
+    }
     const genre = safeText(parsed.genre, 80);
     options.logger?.('info', `Genre radio plan (${genre || 'unknown scene'}): ${artists.map((entry) => `${entry.name}:${entry.distance}`).join(', ')}`);
     return artists;
@@ -638,8 +641,11 @@ async function getDiscoveryArtists(context, options = {}) {
       options,
     );
     const artists = validateDiscoveryArtists(parsed.artists, payload.coreArtists);
-    if (artists.length < 3) throw new Error('Gemini discovery plan contained too few valid artists');
     recordGeminiSuccess(now);
+    if (artists.length < 3) {
+      options.logger?.('info', `Discovery plan had only ${artists.length} usable artists; using existing retrieval`);
+      return [];
+    }
     options.logger?.('info', `Discovery plan: ${artists.map((entry) => `${entry.name}:${entry.distance}`).join(', ')}`);
     return artists;
   } catch (error) {

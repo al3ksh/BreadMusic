@@ -396,3 +396,20 @@ test('genre radio failure returns an empty plan and trips the breaker', async ()
   assert.deepEqual(second, []);
   assert.equal(requests, 1);
 });
+
+test('a thin planner answer is a valid empty plan, not a provider failure', async () => {
+  let requests = 0;
+  const fetchImpl = async () => {
+    requests += 1;
+    return discoveryResponse([
+      { name: 'Seed Artist', distance: 'close' },
+      { name: 'Only One', distance: 'close' },
+    ]);
+  };
+  const options = { apiKey: 'test-key', fetchImpl };
+
+  assert.deepEqual(await getDiscoveryArtists(context(), options), []);
+  assert.deepEqual(await getGenreRadioPlan(context(), options), []);
+  assert.equal(requests, 2, 'the breaker must stay closed after a thin plan');
+  assert.equal(getGeminiStatus().consecutiveFailures, 0);
+});
