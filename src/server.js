@@ -15,6 +15,7 @@ const {
   recordAutoplaySkip,
   clearAutoplayState,
   clearAutoplayPrefetch,
+  getAutoplayNext,
   handleAutoplay,
 } = require('./music/autoplay');
 const { applyPreferredSource } = require('./music/searchUtils');
@@ -1540,6 +1541,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
       filters: null,
       autoplay: config.autoplay ?? false,
       autoplayMode: config.autoplayMode ?? 'ai_assisted',
+      autoplayNext: null,
       voteSkip: null,
       sessionHistory: [],
     };
@@ -1594,8 +1596,23 @@ function buildPlayerStatusSnapshot(client, guildId) {
     filters: player.filterManager?.activePreset || null,
     autoplay: config.autoplay ?? false,
     autoplayMode: config.autoplayMode ?? 'ai_assisted',
+    autoplayNext: buildAutoplayNextSnapshot(guildId, config),
     voteSkip: getVoteSkipSnapshot(player, config, guild),
     sessionHistory,
+  };
+}
+
+function buildAutoplayNextSnapshot(guildId, config) {
+  if (!config.autoplay) return null;
+  const next = getAutoplayNext(guildId);
+  if (!next) return null;
+  return {
+    title: next.title || 'Unknown',
+    author: next.author || 'Unknown',
+    uri: next.uri || '',
+    duration: next.duration || 0,
+    artwork: extractArtwork(next),
+    source: next.source || null,
   };
 }
 

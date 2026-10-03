@@ -79,6 +79,7 @@ const {
   addToRecentTracks,
   blockAutoplayAfterPlaybackFailure,
   resumeAutoplayAfterPlaybackSuccess,
+  autoplayEvents,
 } = require('./music/autoplay');
 const {
   clearVoiceTrackStatus,
@@ -643,6 +644,20 @@ client.lavalink.nodeManager.on('error', (node, error) => {
 });
 
 const { createApiServer, broadcastPlayerUpdate } = require('./server');
+
+const AUTOPLAY_EXHAUSTED_MESSAGE = "Autoplay couldn't find a fitting track — add a song to keep going.";
+
+autoplayEvents.on('next-changed', (guildId) => {
+  broadcastPlayerUpdate(guildId);
+});
+
+autoplayEvents.on('exhausted', (guildId) => {
+  const player = client.lavalink.getPlayer(guildId);
+  if (player) {
+    client.musicUI.sendAutoplayNotice(player, AUTOPLAY_EXHAUSTED_MESSAGE).catch(() => {});
+  }
+  client.emit('breadPlayerNotice', { guildId, message: AUTOPLAY_EXHAUSTED_MESSAGE, tone: 'warning' });
+});
 
 function getConnectedNode() {
   const nodes = client.lavalink?.nodeManager?.nodes;

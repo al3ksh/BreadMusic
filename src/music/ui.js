@@ -1,9 +1,10 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { buildNowPlayingEmbed } = require('./embeds');
 const { buildPlaybackErrorEmbed, buildReplacementEmbed } = require('./playbackErrors');
 
 const BUTTON_PREFIX = 'music';
 const PLAYBACK_ERROR_TTL_MS = 30_000;
+const AUTOPLAY_NOTICE_COLOR = '#f59e0b';
 const BUTTONS = {
   PLAY_PAUSE: 'playpause',
   SKIP: 'skip',
@@ -173,6 +174,33 @@ class MusicUI {
       timeout.unref?.();
     } catch (error) {
       console.error('Failed to send replacement notice:', error);
+    }
+  }
+
+  async sendAutoplayNotice(player, message) {
+    const channelId = player?.textChannelId;
+    if (!channelId || !message) return;
+
+    const channel =
+      this.client.channels.cache.get(channelId) ??
+      await this.client.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased()) return;
+
+    const embed = new EmbedBuilder()
+      .setDescription(`📻 ${message}`)
+      .setColor(AUTOPLAY_NOTICE_COLOR);
+    try {
+      const sent = await channel.send({ embeds: [embed] });
+      const timeout = setTimeout(() => {
+        sent.delete().catch((error) => {
+          if (error.code !== 10008) {
+            console.warn('Failed to delete autoplay notice:', error.message);
+          }
+        });
+      }, PLAYBACK_ERROR_TTL_MS);
+      timeout.unref?.();
+    } catch (error) {
+      console.error('Failed to send autoplay notice:', error);
     }
   }
 
