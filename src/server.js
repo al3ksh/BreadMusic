@@ -17,7 +17,14 @@ const {
   clearAutoplayPrefetch,
   getAutoplayNext,
   handleAutoplay,
+  getTrackFeedback,
+  likeTrack,
+  dislikeTrack,
+  rerollNext,
+  rebuildProfileFromHistory,
+  scheduleAutoplayPrefetch,
 } = require('./music/autoplay');
+const { getLastfmClient } = require('./music/autoplay/lastfm');
 const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
 const { clearVoiceTrackStatus, setVoiceTrackStatus } = require('./music/voiceStatus');
@@ -538,6 +545,9 @@ function createApiServer(client) {
     savePlayerState,
     broadcastPlayerUpdate,
     playerTextChannelDisabled: PLAYER_TEXT_CHANNEL_DISABLED,
+    rebuildProfileFromHistory,
+    scheduleAutoplayPrefetch,
+    getLastfmStatus: () => getLastfmClient().getStatus(),
   }));
 
   app.use(createPlayerRouter({
@@ -611,6 +621,9 @@ function createApiServer(client) {
     handleSkipRequest,
     getRequestUser,
     setAutoplay,
+    likeTrack,
+    dislikeTrack,
+    rerollNext,
     filterPresets: FILTER_PRESETS,
     isTrackSeekable,
     seekTrack,
@@ -1542,6 +1555,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
       autoplay: config.autoplay ?? false,
       autoplayMode: config.autoplayMode ?? 'ai_assisted',
       autoplayNext: null,
+      autoplayFeedback: null,
       voteSkip: null,
       sessionHistory: [],
     };
@@ -1597,6 +1611,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
     autoplay: config.autoplay ?? false,
     autoplayMode: config.autoplayMode ?? 'ai_assisted',
     autoplayNext: buildAutoplayNextSnapshot(guildId, config),
+    autoplayFeedback: config.autoplay ? getTrackFeedback(guildId, player.queue.current) : null,
     voteSkip: getVoteSkipSnapshot(player, config, guild),
     sessionHistory,
   };

@@ -22,6 +22,9 @@ function createGuildConfigRouter({
   savePlayerState,
   broadcastPlayerUpdate,
   playerTextChannelDisabled,
+  rebuildProfileFromHistory,
+  scheduleAutoplayPrefetch,
+  getLastfmStatus,
 }) {
   const router = express.Router();
 
@@ -183,6 +186,7 @@ function createGuildConfigRouter({
       defaultVolume: config.defaultVolume,
       autoplay: config.autoplay,
       autoplayMode: config.autoplayMode,
+      lastfm: getLastfmStatus(),
       activityControl: config.activityControl,
       voiceChannelStatus: config.voiceChannelStatus,
       dashboardAccess: config.dashboardAccess,
@@ -282,6 +286,16 @@ function createGuildConfigRouter({
       await setVoiceTrackStatus(client, player, player.queue.current);
     }
     res.json({ success: true, config: fresh });
+  });
+
+  router.post('/api/guilds/:guildId/autoplay/rebuild', requireAuth, requireGuildAdmin, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
+    const guildId = req.params.guildId;
+    const result = rebuildProfileFromHistory(guildId);
+    // The rebuild drops the prepared pick; prepare a fresh one from the new seeds.
+    const player = client.lavalink?.players?.get(guildId);
+    if (player?.queue?.current) scheduleAutoplayPrefetch(player, player.queue.current, client);
+    broadcastPlayerUpdate(guildId);
+    res.json({ success: true, seeds: result.seeds });
   });
 
   return router;

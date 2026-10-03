@@ -5,6 +5,16 @@ const path = require('path');
 const { prepareUploadArtwork, storeUploadArtwork } = require('../music/uploadArtwork');
 const { uploadArtworkUrl } = require('../music/uploadArtworkUrls');
 
+// Anyone listening in the bot's voice channel may vote to skip and give autoplay feedback.
+const listenerActions = new Set(['skip', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
+
+const REROLL_FAILURES = {
+  disabled: 'Autoplay is off.',
+  unavailable: 'Autoplay only picks the next track once the queue is empty.',
+  cooldown: 'Give it a second before rerolling again.',
+  exhausted: "Autoplay couldn't find another fitting track right now.",
+};
+
 function createPlayerRouter({
   client,
   requireAuth,
@@ -75,6 +85,9 @@ function createPlayerRouter({
   handleSkipRequest,
   getRequestUser,
   setAutoplay,
+  likeTrack,
+  dislikeTrack,
+  rerollNext,
   filterPresets,
   isTrackSeekable,
   seekTrack,
@@ -436,7 +449,7 @@ function createPlayerRouter({
       const privileged = capabilities.canControlPlayer === true;
       const canQueue = capabilities.canQueue === true;
       const queueContributorAction = action === 'search' || action === 'play';
-      if (!privileged && action !== 'skip' && !(canQueue && queueContributorAction)) {
+      if (!privileged && !listenerActions.has(action) && !(canQueue && queueContributorAction)) {
         return res.status(403).json({ error: 'Player control is not enabled for your role' });
       }
 
@@ -668,6 +681,22 @@ function createPlayerRouter({
           if (player.paused) await player.resume();
           else await player.pause();
           break;
+        case 'autoplay_like': {
+          const result = likeTrack(guildId, player.queue.current);
+          if (!result) return res.status(409).json({ error: 'This track cannot be liked.' });
+          await client.musicUI?.refresh(player).catch(() => {});
+          return res.json({ success: true, liked: result.liked });
+        }
+        case 'autoplay_reroll': {
+          const result = await rerollNext(player, client);
+          if (!result.ok) return res.status(409).json({ error: REROLL_FAILURES[result.reason] ?? 'Could not reroll.', reason: result.reason });
+          await client.musicUI?.refresh(player).catch(() => {});
+          return res.json({ success: true });
+        }
+        // A dislike is remembered for autoplay and then goes through the normal skip rules.
+        case 'autoplay_dislike':
+          dislikeTrack(guildId, player.queue.current);
+        // falls through
         case 'skip':
           if (privileged) {
             const currentTrack = player.queue.current;
@@ -841,7 +870,7 @@ function createPlayerRouter({
           return res.status(400).json({ error: `Unknown action: ${action}` });
       }
 
-      if (['pause', 'resume', 'toggle', 'skip', 'shuffle'].includes(action)) {
+      if (['pause', 'resume', 'toggle', 'skip', 'autoplay_dislike', 'shuffle'].includes(action)) {
         await client.musicUI?.refresh(player).catch(() => {});
       }
       await savePlayerState(player).catch(() => {});
