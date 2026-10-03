@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { apiFetch, type GuildConfig } from '@/lib/api';
+import { apiFetch, type GuildConfig, type LastfmStatus } from '@/lib/api';
 import { useToast } from '@/components/ui/ToastProvider';
 import { Row, Section, Skeleton, ToggleSwitch } from '@/components/dashboard/DashboardPrimitives';
 
@@ -76,6 +76,23 @@ function NumberInput({
   );
 }
 
+function LastfmBadge({ status }: { status?: LastfmStatus }) {
+  const state = !status?.enabled
+    ? { dot: 'bg-text-muted', label: 'Not configured', hint: 'Set LASTFM_API_KEY on the bot to enable it' }
+    : status.available
+      ? { dot: 'bg-success', label: 'Connected', hint: null }
+      : { dot: 'bg-warning', label: 'Paused', hint: 'Rate limited, retrying shortly' };
+  return (
+    <div className="text-sm sm:w-48">
+      <div className="flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full shrink-0 ${state.dot}`} />
+        <span className="text-text-primary">{state.label}</span>
+      </div>
+      {state.hint && <p className="mt-0.5 text-xs text-text-muted">{state.hint}</p>}
+    </div>
+  );
+}
+
 export function DashboardSettings({ guildId }: { guildId: string }) {
   const toast = useToast();
   const [config, setConfig] = useState<GuildConfig | null>(null);
@@ -84,6 +101,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
   const [channels, setChannels] = useState<DiscordChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
 
   const compactValueInputClass = 'w-14 h-7 rounded-md border border-border bg-bg-input text-text-primary px-2 text-xs text-right tabular-nums outline-none focus:border-accent transition-colors font-[inherit]';
 
@@ -134,6 +152,19 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
       toast.error('Reset failed', 'Could not reset server configuration.');
     } finally {
       setSaving(false);
+    }
+  }, [guildId, toast]);
+
+  const rebuildAutoplay = useCallback(async () => {
+    setRebuilding(true);
+    try {
+      const res = await apiFetch<{ success: boolean; seeds: number }>(`/guilds/${guildId}/autoplay/rebuild`, { method: 'POST' });
+      if (res.seeds > 0) toast.success('Autoplay rebuilt', `Autoplay now follows ${res.seeds} recently queued or liked tracks.`);
+      else toast.error('Nothing to rebuild from', 'Queue a few tracks first, then try again.');
+    } catch (err) {
+      toast.error('Rebuild failed', err instanceof Error ? err.message : 'Could not rebuild autoplay.');
+    } finally {
+      setRebuilding(false);
     }
   }, [guildId, toast]);
 
@@ -295,6 +326,19 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
             <option value="ai_assisted">AI assisted</option>
             <option value="discovery">Discovery radio</option>
           </select>
+        </Row>
+        <Row label="Rebuild Autoplay" desc="Drifted off? Re-seed autoplay from what people queued here recently and from liked tracks">
+          <button
+            type="button"
+            onClick={rebuildAutoplay}
+            disabled={rebuilding}
+            className="w-full px-3 py-2 rounded-md border border-border text-sm font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-50 cursor-pointer transition-colors sm:w-48"
+          >
+            {rebuilding ? 'Rebuilding...' : 'Rebuild from history'}
+          </button>
+        </Row>
+        <Row label="Last.fm" desc="Similar-track suggestions from Last.fm listening data">
+          <LastfmBadge status={config.lastfm} />
         </Row>
         <Row label="Stay in Channel (24/7)" desc="Bot stays connected even when idle">
           <ToggleSwitch checked={config.stayInChannel} onChange={(v) => setConfig({ ...config, stayInChannel: v })} />

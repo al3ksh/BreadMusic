@@ -1,8 +1,9 @@
 import { ChevronLeft, ChevronRight, GripVertical, Play, Trash2 } from 'lucide-react';
 import type { DragEvent } from 'react';
-import type { QueueTrack } from '@/lib/api';
+import type { AutoplayNextTrack, QueueTrack } from '@/lib/api';
 import { formatDuration } from '@/lib/api';
 import { ArtworkImage } from '@/components/ArtworkImage';
+import { AutoplayUpNext } from '@/components/dashboard/DashboardAutoplay';
 
 type DashboardQueueData = {
   current: QueueTrack | null;
@@ -24,6 +25,8 @@ type DashboardQueueProps = {
   onDrop: (event: DragEvent<HTMLDivElement>, index: number) => void;
   onDragEnd: () => void;
   onRemove: (index: number) => void | Promise<unknown>;
+  autoplayNext: AutoplayNextTrack | null;
+  onAction: (action: string, body?: Record<string, unknown>) => Promise<boolean>;
 };
 
 export function DashboardQueue({
@@ -39,6 +42,8 @@ export function DashboardQueue({
   onDrop,
   onDragEnd,
   onRemove,
+  autoplayNext,
+  onAction,
 }: DashboardQueueProps) {
   return (
     <div className="bg-bg-card rounded-lg border border-border overflow-hidden">
@@ -74,7 +79,7 @@ export function DashboardQueue({
           </div>
         )}
 
-        {queue.tracks.length === 0 && <p className="text-sm text-text-muted text-center py-6">Queue is empty</p>}
+        {queue.tracks.length === 0 && !autoplayNext && <p className="text-sm text-text-muted text-center py-6">Queue is empty</p>}
         <div className="space-y-0.5">
           {queue.tracks.map((track, index) => (
             <div
@@ -100,6 +105,7 @@ export function DashboardQueue({
             </div>
           ))}
         </div>
+        {autoplayNext && queue.tracks.length === 0 && <AutoplayUpNext track={autoplayNext} onAction={onAction} />}
       </div>
     </div>
   );

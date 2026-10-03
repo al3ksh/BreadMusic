@@ -1081,6 +1081,20 @@ a { color: inherit; text-decoration: none; }
   outline: 1px solid rgba(162, 156, 229, 0.5);
 }
 
+.activity-queue-row.activity-autoplay-next {
+  border: 1px dashed rgba(162, 156, 229, 0.28);
+}
+
+.activity-autoplay-next img,
+.activity-autoplay-next .activity-queue-art {
+  opacity: 0.7;
+}
+
+.activity-autoplay-next .activity-queue-copy em {
+  color: #aaa4ed;
+  font-style: normal;
+}
+
 .activity-queue-row img,
 .activity-queue-art,
 .activity-search-result img {

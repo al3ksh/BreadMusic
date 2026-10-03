@@ -84,10 +84,28 @@ export interface GuildConfig {
   defaultVolume: number;
   autoplay: boolean;
   autoplayMode: 'classic' | 'ai_assisted' | 'discovery';
+  lastfm?: LastfmStatus;
   activityControl: 'inherit' | 'admin' | 'mod' | 'dj' | 'members';
   voiceChannelStatus: boolean;
   dashboardAccess: 'admin' | 'mod' | 'members';
 }
+
+export interface LastfmStatus {
+  enabled: boolean;
+  available: boolean;
+  retryAt: number | null;
+}
+
+export interface AutoplayNextTrack {
+  title: string;
+  author: string;
+  uri: string;
+  duration: number;
+  artwork?: string | null;
+  source: string | null;
+}
+
+export type AutoplayFeedback = 'like' | 'dislike' | null;
 
 export interface HistoryEntry {
   id: string;
@@ -151,6 +169,9 @@ export interface PlayerStatus {
   filters: string | null;
   autoplay: boolean;
   autoplayMode?: string;
+  autoplayNext?: AutoplayNextTrack | null;
+  autoplayFeedback?: AutoplayFeedback;
+  autoplayRateable?: boolean;
   voteSkip: {
     votes: number;
     requiredVotes: number;

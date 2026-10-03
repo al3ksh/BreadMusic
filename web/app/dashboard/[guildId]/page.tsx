@@ -15,6 +15,7 @@ import { DashboardHistory } from '@/components/dashboard/DashboardHistory';
 import { DashboardLyrics } from '@/components/dashboard/DashboardLyrics';
 import { DashboardEconomy } from '@/components/dashboard/DashboardEconomy';
 import { DashboardControl } from '@/components/dashboard/DashboardControl';
+import { AutoplayRating } from '@/components/dashboard/DashboardAutoplay';
 
 type Tab = 'settings' | 'status' | 'player' | 'history' | 'lyrics' | 'economy' | 'control';
 
@@ -420,6 +421,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       back: 'Switched to previous track.',
       pause: 'Playback paused.',
       resume: 'Playback resumed.',
+      autoplay_dislike: 'Disliked and skipped. Autoplay will avoid this track.',
+      autoplay_reroll: 'Autoplay picked a different next track.',
     };
 
     const silentActions = new Set(['seek', 'volume', 'search']);
@@ -452,6 +455,9 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
         const idx = modes.indexOf(newStatus.repeatMode);
         newStatus.repeatMode = modes[(idx + 1) % modes.length];
       }
+      if (action === 'autoplay_like') {
+        newStatus.autoplayFeedback = status.autoplayFeedback === 'like' ? null : 'like';
+      }
       if (action === 'autoplay' && typeof body?.enabled === 'boolean') {
         newStatus.autoplay = body.enabled as boolean;
       }
@@ -463,7 +469,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     }
 
     try {
-      const result = await apiFetch<{ message?: string; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/guilds/${guildId}/player/${action}`, {
+      const result = await apiFetch<{ message?: string; liked?: boolean; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/guilds/${guildId}/player/${action}`, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -471,9 +477,9 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       await fetchData();
 
       if (!silentActions.has(action)) {
-        const description = action === 'skip' && result.message
-          ? result.message
-          : actionDescriptions[action] || 'Player action completed.';
+        let description = actionDescriptions[action] || 'Player action completed.';
+        if ((action === 'skip' || (action === 'autoplay_dislike' && result.voteSkip)) && result.message) description = result.message;
+        if (action === 'autoplay_like') description = result.liked ? 'Autoplay will pick more like this.' : 'Like removed.';
         toast.success(result.voteSkip ? 'Vote registered' : 'Action applied', description);
       }
       return true;
@@ -762,8 +768,13 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
             <div className="flex-1 min-w-0">
               {hasCurrentTrack && status.currentTrack ? (
                 <>
-                  <p className="font-medium text-base truncate">{status.currentTrack.title}</p>
-                  <p className="text-sm text-text-secondary truncate mt-0.5">{status.currentTrack.author}</p>
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-base truncate">{status.currentTrack.title}</p>
+                      <p className="text-sm text-text-secondary truncate mt-0.5">{status.currentTrack.author}</p>
+                    </div>
+                    {status.autoplayRateable && <AutoplayRating feedback={status.autoplayFeedback ?? null} onAction={playerAction} />}
+                  </div>
                   <div className="mt-4 group/slider">
                     <div className="relative">
                       {seekPreview && canSeekTrack && (
@@ -980,6 +991,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
           onDrop={handleDrop}
           onDragEnd={resetDragState}
           onRemove={(index) => playerAction('remove', { start: queuePage * 20 + index })}
+          autoplayNext={status.autoplay ? status.autoplayNext ?? null : null}
+          onAction={playerAction}
         />
       )}
     </div>

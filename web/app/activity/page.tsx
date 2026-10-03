@@ -773,22 +773,30 @@ export default function ActivityPage() {
       const nextAutoplay = typeof body?.enabled === 'boolean' ? body.enabled : !status.autoplay;
       setStatus((current) => ({ ...current, autoplay: nextAutoplay }));
     }
+    if (action === 'autoplay_like') {
+      setStatus((current) => ({ ...current, autoplayFeedback: current.autoplayFeedback === 'like' ? null : 'like' }));
+    }
 
     setActionBusy(action);
     try {
-      const result = await activityFetch<{ message?: string; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
+      const result = await activityFetch<{ message?: string; liked?: boolean; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
-      if (action === 'skip' && result.message) {
+      if ((action === 'skip' || action === 'autoplay_dislike') && result.message) {
         if (result.voteSkip) notify(result.message, 'info');
       }
+      if (action === 'autoplay_like') {
+        setStatus((current) => ({ ...current, autoplayFeedback: result.liked ? 'like' : null }));
+        notify(result.liked ? 'Liked: autoplay will pick more like this' : 'Like removed', 'success');
+      }
+      if (action === 'autoplay_dislike' && !result.voteSkip) notify('Disliked: autoplay will avoid this track', 'success');
       return true;
     } catch (error) {
       if ((error as Error & { status?: number }).status === 403) {
         await refreshCapabilities();
       }
-      if (['toggle', 'autoplay', 'seek', 'volume'].includes(action)) {
+      if (['toggle', 'autoplay', 'autoplay_like', 'seek', 'volume'].includes(action)) {
         const rollbackClock = action === 'seek' ? seekRollbackRef.current || previousClock : previousClock;
         clockRef.current = rollbackClock;
         setStatus(previousStatus);
@@ -1671,6 +1679,9 @@ export default function ActivityPage() {
                         handleQueueDrop={handleQueueDrop}
                         handleQueueRemove={handleQueueRemove}
                         loadMoreQueue={loadMoreQueue}
+                        autoplayNext={status.autoplay ? status.autoplayNext ?? null : null}
+                        rerollBusy={actionBusy === 'autoplay_reroll'}
+                        onReroll={hasTrack ? () => playerAction('autoplay_reroll') : undefined}
                       />
                     )}
                   </>

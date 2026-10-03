@@ -1,4 +1,4 @@
-import { Pause, Play, Radio, Repeat, Shuffle, SkipBack, SkipForward, Square, Volume2 } from 'lucide-react';
+import { Pause, Play, Radio, Repeat, Shuffle, SkipBack, SkipForward, Square, ThumbsDown, ThumbsUp, Volume2 } from 'lucide-react';
 import type { CSSProperties, MutableRefObject, ReactNode } from 'react';
 import type { PlayerStatus } from '@/lib/api';
 import { ActivitySpinner } from '@/components/activity/ActivityArtwork';
@@ -65,6 +65,14 @@ export function ActivityPlayerControls({
       <div className="activity-secondary-controls">
         <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queueTotal || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
         <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
+        {status.autoplayRateable && (
+          <>
+            <ControlButton label={status.autoplayFeedback === 'like' ? 'Liked' : 'Like'} active={status.autoplayFeedback === 'like'} feedback={controlFeedback === 'autoplay_like'} disabled={!hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('autoplay_like')}>
+              <ThumbsUp size={16} fill={status.autoplayFeedback === 'like' ? 'currentColor' : 'none'} />
+            </ControlButton>
+            <ControlButton label="Dislike" feedback={controlFeedback === 'autoplay_dislike'} disabled={!hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('autoplay_dislike')}><ThumbsDown size={16} /></ControlButton>
+          </>
+        )}
         {iconOnly && <ControlButton label={`Autoplay ${status.autoplay ? 'on' : 'off'}`} active={status.autoplay} feedback={controlFeedback === 'autoplay'} disabled={autoplayDisabled || !canDj || Boolean(actionBusy)} onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}><Radio size={16} /></ControlButton>}
         <div className={`activity-volume-control ${volumeOpen ? 'is-open' : ''}`} ref={volumeControlRef}>
           <button

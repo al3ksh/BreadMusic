@@ -804,6 +804,11 @@ function feedbackEntry(track) {
   return normalized ? tasteEntry(normalized) : null;
 }
 
+// Streams and local uploads have no stable identity to rate.
+function canRateTrack(track) {
+  return feedbackEntry(track) !== null;
+}
+
 // 'like', 'dislike' or null for the given track.
 function getTrackFeedback(guildId, track) {
   const entry = feedbackEntry(track);
@@ -888,6 +893,7 @@ module.exports = {
   addManualSeed,
   recordTrackPlayed,
   rebuildProfileFromHistory,
+  canRateTrack,
   getTrackFeedback,
   likeTrack,
   dislikeTrack,

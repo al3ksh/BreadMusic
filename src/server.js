@@ -17,6 +17,7 @@ const {
   clearAutoplayPrefetch,
   getAutoplayNext,
   handleAutoplay,
+  canRateTrack,
   getTrackFeedback,
   likeTrack,
   dislikeTrack,
@@ -1556,6 +1557,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
       autoplayMode: config.autoplayMode ?? 'ai_assisted',
       autoplayNext: null,
       autoplayFeedback: null,
+      autoplayRateable: false,
       voteSkip: null,
       sessionHistory: [],
     };
@@ -1612,6 +1614,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
     autoplayMode: config.autoplayMode ?? 'ai_assisted',
     autoplayNext: buildAutoplayNextSnapshot(guildId, config),
     autoplayFeedback: config.autoplay ? getTrackFeedback(guildId, player.queue.current) : null,
+    autoplayRateable: Boolean(config.autoplay && canRateTrack(player.queue.current)),
     voteSkip: getVoteSkipSnapshot(player, config, guild),
     sessionHistory,
   };
