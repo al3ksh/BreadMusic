@@ -1,6 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const { formatDuration, buildProgressBar } = require('../utils/time');
-const { isAutoplayEnabled } = require('./autoplay');
+const { isAutoplayEnabled, getAutoplayNext } = require('./autoplay');
+const { isStreamTrack } = require('./autoplay/normalize');
 const { normalizeSourceName } = require('./sourceNames');
 const { BRAND_COLORS } = require('../theme');
 const { uploadArtworkUrl } = require('./uploadArtworkUrls');
@@ -13,7 +14,9 @@ const LABELS = {
   LOOP: '🔁 Loop',
   SOURCE: '📡 Source',
   CHANNEL: '🔈 Channel',
+  UP_NEXT: '📻 Up next',
 };
+const UP_NEXT_MAX_LENGTH = 200;
 
 function buildTrackEmbed(track, requester, voiceChannelId) {
   const requesterLabel = requester?.tag ?? requester?.username ?? requester?.id ?? 'Unknown user';
@@ -91,12 +94,13 @@ function buildNowPlayingEmbed(player, track) {
         inline: true,
       },
     )
-    .setFooter({
-      text: track.requester
-        ? `Requested by ${track.requester.username ?? track.requester.tag ?? track.requester.id}`
-        : 'Requested by Unknown',
-    })
+    .setFooter({ text: formatRequester(track) })
     .setTimestamp();
+
+  const upNext = autoplayOn ? formatUpNext(player, track) : null;
+  if (upNext) {
+    embed.addFields({ name: LABELS.UP_NEXT, value: upNext, inline: false });
+  }
 
   const artworkUrl = resolveArtwork(track);
   if (artworkUrl) {
@@ -104,6 +108,23 @@ function buildNowPlayingEmbed(player, track) {
   }
 
   return embed;
+}
+
+function formatRequester(track) {
+  if (track.isAutoplay) return 'Picked by autoplay';
+  return track.requester
+    ? `Requested by ${track.requester.username ?? track.requester.tag ?? track.requester.id}`
+    : 'Requested by Unknown';
+}
+
+// What autoplay will play once the queue runs out. Only shown when nothing else is queued.
+function formatUpNext(player, track) {
+  if (player.queue?.tracks?.length || isStreamTrack(track)) return null;
+  const next = getAutoplayNext(player.guildId);
+  if (!next) return '*Picking a track…*';
+  let label = `${next.author || 'Unknown'} - ${next.title || 'Unknown title'}`;
+  if (label.length > UP_NEXT_MAX_LENGTH) label = `${label.slice(0, UP_NEXT_MAX_LENGTH - 1)}…`;
+  return next.uri ? `[${label.replace(/[[\]]/g, '')}](${next.uri})` : label;
 }
 
 function formatLoopMode(mode) {

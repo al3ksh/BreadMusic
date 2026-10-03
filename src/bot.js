@@ -81,6 +81,9 @@ const {
   blockAutoplayAfterPlaybackFailure,
   resumeAutoplayAfterPlaybackSuccess,
   autoplayEvents,
+  likeTrack,
+  dislikeTrack,
+  rerollNext,
 } = require('./music/autoplay');
 const { flush: flushAutoplayProfiles } = require('./music/autoplay/profileStore');
 const {
@@ -653,6 +656,8 @@ const AUTOPLAY_EXHAUSTED_MESSAGE = "Autoplay couldn't find a fitting track — a
 
 autoplayEvents.on('next-changed', (guildId) => {
   broadcastPlayerUpdate(guildId);
+  const player = client.lavalink.getPlayer(guildId);
+  if (player) client.musicUI.scheduleAutoplayRefresh(player);
 });
 
 autoplayEvents.on('exhausted', (guildId) => {
@@ -728,6 +733,9 @@ async function handleMusicButton(interaction) {
     [BUTTONS.LOOP]: toggleLoop,
     [BUTTONS.SHUFFLE]: shuffleQueue,
     [BUTTONS.LYRICS]: showLyrics,
+    [BUTTONS.LIKE]: likeCurrent,
+    [BUTTONS.DISLIKE]: dislikeCurrent,
+    [BUTTONS.REROLL]: rerollAutoplayNext,
   };
 
   const handler = handlers[action];
@@ -1260,6 +1268,45 @@ async function skipTrack(interaction) {
   } else {
     await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
+}
+
+const REROLL_FAILURES = {
+  disabled: 'Autoplay is off.',
+  unavailable: 'Autoplay only picks the next track once the queue is empty.',
+  cooldown: 'Give it a second before rerolling again.',
+  exhausted: "Autoplay couldn't find another fitting track right now.",
+};
+
+async function likeCurrent(interaction) {
+  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+  await interaction.deferUpdate();
+  const result = likeTrack(player.guildId, player.queue.current);
+  if (!result) {
+    await interaction.followUp({ content: 'This track cannot be liked.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
+  broadcastPlayerUpdate(player.guildId);
+  await client.musicUI.refresh(player);
+}
+
+// A dislike is remembered for autoplay and then goes through the normal skip rules.
+async function dislikeCurrent(interaction) {
+  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+  dislikeTrack(player.guildId, player.queue.current);
+  await skipTrack(interaction);
+}
+
+async function rerollAutoplayNext(interaction) {
+  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+  await interaction.deferUpdate();
+  const result = await rerollNext(player, client);
+  if (!result.ok) {
+    await interaction
+      .followUp({ content: REROLL_FAILURES[result.reason] ?? 'Could not reroll.', flags: MessageFlags.Ephemeral })
+      .catch(() => {});
+  }
+  broadcastPlayerUpdate(player.guildId);
+  await client.musicUI.refresh(player);
 }
 
 async function stopPlayback(interaction) {

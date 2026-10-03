@@ -1,10 +1,13 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { buildNowPlayingEmbed } = require('./embeds');
+const { getAutoplayNext, getTrackFeedback, isAutoplayEnabled } = require('./autoplay');
+const { isLocalUploadTrack, isStreamTrack } = require('./autoplay/normalize');
 const { buildPlaybackErrorEmbed, buildReplacementEmbed } = require('./playbackErrors');
 
 const BUTTON_PREFIX = 'music';
 const PLAYBACK_ERROR_TTL_MS = 30_000;
 const AUTOPLAY_NOTICE_COLOR = '#f59e0b';
+const AUTOPLAY_REFRESH_DELAY_MS = 750;
 const BUTTONS = {
   PLAY_PAUSE: 'playpause',
   SKIP: 'skip',
@@ -14,6 +17,9 @@ const BUTTONS = {
   BACK: 'back',
   LYRICS: 'lyrics',
   ACTIVITY: 'activity',
+  LIKE: 'like',
+  DISLIKE: 'dislike',
+  REROLL: 'reroll',
 };
 
 const applicationEmojiIds = new Map(
@@ -38,6 +44,9 @@ const EMOJI = {
   SHUFFLE: playerEmoji('shuffle', '\uD83D\uDD00'),
   LYRICS: playerEmoji('lyrics', '\uD83D\uDCD6'),
   ACTIVITY: playerEmoji('dashboard', '\uD83C\uDFB5'),
+  LIKE: playerEmoji('like', '\uD83D\uDC4D'),
+  DISLIKE: playerEmoji('dislike', '\uD83D\uDC4E'),
+  REROLL: playerEmoji('reroll', '\uD83C\uDFB2'),
 };
 
 class MusicUI {
@@ -45,6 +54,7 @@ class MusicUI {
     this.client = client;
     this.messages = new Map(); 
     this.locks = new Map(); // guildId -> Promise (mutex to prevent race conditions)
+    this.autoplayRefreshTimers = new Map();
   }
 
   buildNowPlayingPayload(player, track) {
@@ -108,7 +118,34 @@ class MusicUI {
         .setStyle(ButtonStyle.Secondary),
     );
 
-    return [rowOne, rowTwo];
+    const autoplayRow = this.buildAutoplayRow(player);
+    return autoplayRow ? [rowOne, rowTwo, autoplayRow] : [rowOne, rowTwo];
+  }
+
+  // Taste feedback for the current track and a reroll for the prepared autoplay pick.
+  buildAutoplayRow(player) {
+    const track = player.queue.current;
+    if (!track || !isAutoplayEnabled(player.guildId)) return null;
+    if (isStreamTrack(track) || isLocalUploadTrack(track)) return null;
+
+    const feedback = getTrackFeedback(player.guildId, track);
+    const canReroll = player.queue.tracks.length === 0 && Boolean(getAutoplayNext(player.guildId));
+    return new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(this.buildCustomId(BUTTONS.LIKE, player.guildId))
+        .setEmoji(EMOJI.LIKE)
+        .setStyle(feedback === 'like' ? ButtonStyle.Success : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(this.buildCustomId(BUTTONS.DISLIKE, player.guildId))
+        .setEmoji(EMOJI.DISLIKE)
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(this.buildCustomId(BUTTONS.REROLL, player.guildId))
+        .setEmoji(EMOJI.REROLL)
+        .setLabel('Different next')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!canReroll),
+    );
   }
 
   buildCustomId(action, guildId) {
@@ -125,6 +162,22 @@ class MusicUI {
     const payload = this.buildNowPlayingPayload(player, player.queue.current);
     const trackId = player.queue.current?.info?.identifier ?? null;
     await this.withLock(player.guildId, () => this.upsertMessage(player, payload, trackId));
+  }
+
+  // The prepared autoplay track changes in bursts; only edit the message that already shows
+  // the current track, never post a new one from here.
+  scheduleAutoplayRefresh(player) {
+    const guildId = player?.guildId;
+    if (!guildId || this.autoplayRefreshTimers.has(guildId)) return;
+    const timeout = setTimeout(() => {
+      this.autoplayRefreshTimers.delete(guildId);
+      const record = this.messages.get(guildId);
+      const trackId = player.queue.current?.info?.identifier ?? null;
+      if (!record || !trackId || record.trackId !== trackId) return;
+      this.refresh(player).catch(() => {});
+    }, AUTOPLAY_REFRESH_DELAY_MS);
+    timeout.unref?.();
+    this.autoplayRefreshTimers.set(guildId, timeout);
   }
 
   async sendPlaybackError(player, track, payload) {
