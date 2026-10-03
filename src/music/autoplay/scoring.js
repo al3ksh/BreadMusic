@@ -84,7 +84,6 @@ const POSITIVE_TERMS = [
 
 const SOURCE_BONUS = {
   radio: 22,
-  lastfm: 20,
   search: 6,
   discovery: 8,
 };
@@ -178,6 +177,8 @@ function scoreCandidate(candidate, context) {
   if (candidate.source === 'radio') {
     reasons.push('radio');
   } else if (candidate.source === 'lastfm') {
+    // Stronger Last.fm similarity earns more: +10 for a weak match up to +22 for an exact one.
+    score += 10 + Math.round((candidate.lastfmMatch ?? 0) * 12);
     reasons.push('lastfm');
   } else if (candidate.source === 'discovery') {
     reasons.push(`ai-discovery:${candidate.discoveryDistance || 'unknown'}`);

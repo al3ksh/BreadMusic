@@ -16,6 +16,7 @@ const {
   radioSource,
   searchSource,
   discoverySource,
+  lastfmSource,
 } = require('./autoplay/sources');
 const pool = require('./autoplay/pool');
 const profileStore = require('./autoplay/profileStore');
@@ -420,6 +421,7 @@ async function buildPool(player, lastTrack, client) {
     radioSource({ node, requester, context, seedNormalized: context.seed }),
     searchSource({ node, requester, context }),
     discoverySource({ node, requester, context, planPromise }),
+    lastfmSource({ node, requester, context }),
   ]);
 
   if (getEpoch(guildId) !== epoch) {

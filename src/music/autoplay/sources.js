@@ -3,13 +3,19 @@ const {
   logAutoplay,
   normalizeComparable,
   isYouTubeIdentifier,
+  tokenOverlap,
 } = require('./normalize');
+const { getLastfmClient } = require('./lastfm');
 
 const SEARCH_TIMEOUT = 8000;
 const RETRIEVAL_BUDGET_MS = 9000;
 const MAX_SEARCH_QUERIES = 6;
 const MAX_SEARCH_TRACKS_PER_QUERY = 12;
 const MAX_DISCOVERY_TRACKS_PER_ARTIST = 4;
+const LASTFM_SEEDS = 2;
+const LASTFM_SUGGESTIONS = 8;
+const LASTFM_PER_ARTIST = 2;
+const LASTFM_FALLBACK_ARTISTS = 4;
 
 async function searchWithTimeout(node, query, requester, timeoutMs = SEARCH_TIMEOUT) {
   let timeout;
@@ -260,6 +266,112 @@ function discoverySource({ node, requester, context, planPromise }) {
   };
 }
 
+const squash = (value) => normalizeComparable(value).replace(/ /g, '');
+
+// Last.fm wants the real names: the normalized artist drops letters like "ł", and uploads often
+// carry "Artist - Title" in the title with a "VEVO" or "- Topic" channel as the author.
+function lastfmSeedQuery(seed) {
+  const title = cleanTitle(seed.title || '');
+  const author = String(seed.author || '')
+    .replace(/\s*-\s*topic$/i, '')
+    .replace(/\s*(vevo|official)$/i, '')
+    .trim();
+  const parts = title.split(/\s[-–—|]\s/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const first = parts[0];
+    const last = parts.at(-1);
+    // "Title - Artist" exists too; the channel name tells which side is the artist.
+    if (squash(author).includes(squash(last)) && !squash(author).includes(squash(first))) {
+      return { artist: last, title: parts.slice(0, -1).join(' - ') };
+    }
+    return { artist: first, title: parts.slice(1).join(' - ') };
+  }
+  return { artist: author || seed.artist, title };
+}
+
+// Similar tracks for up to two active seeds, interleaved so both seeds get a share. A seed Last.fm
+// does not know falls back to its similar artists. Seed artists, disliked artists and recent tracks
+// are left out before spending a search on them.
+async function buildLastfmSuggestions(client, context) {
+  const seeds = context.activeSeeds.slice(0, LASTFM_SEEDS);
+  const recentKeys = new Set(context.recent.map((entry) => `${entry.artistKey}|${normalizeComparable(entry.cleanTitle || entry.title)}`));
+  const dislikedArtists = context.taste?.dislikedArtistCounts ?? new Map();
+  const queries = seeds.map(lastfmSeedQuery);
+  // Radio and search already cover the seed artists; Last.fm is there for the neighbours.
+  const seedArtists = new Set(seeds.flatMap((seed, index) => [seed.artistKey, normalizeComparable(queries[index].artist)]).filter(Boolean));
+
+  const perSeed = await Promise.all(seeds.map(async (seed, anchorRank) => {
+    const { artist, title } = queries[anchorRank];
+    let suggestions = await client.getSimilarTracks({ artist, title });
+    if (!suggestions.length) {
+      const artists = await client.getSimilarArtists(artist);
+      suggestions = artists.slice(0, LASTFM_FALLBACK_ARTISTS).map((entry) => ({
+        artist: entry.name,
+        title: null,
+        match: entry.match * 0.8,
+      }));
+    }
+    return suggestions.map((entry) => ({ ...entry, anchorKey: seed.key || null, anchorRank }));
+  }));
+
+  const picked = [];
+  const seen = new Set();
+  const perArtist = new Map();
+  const queues = perSeed.map((list) => [...list]);
+  while (picked.length < LASTFM_SUGGESTIONS && queues.some((queue) => queue.length)) {
+    for (const queue of queues) {
+      while (queue.length) {
+        const entry = queue.shift();
+        const artistKey = normalizeComparable(entry.artist);
+        const key = `${artistKey}|${normalizeComparable(entry.title || '')}`;
+        if (seen.has(key) || recentKeys.has(key)) continue;
+        if (seedArtists.has(artistKey) || dislikedArtists.has(artistKey) || (perArtist.get(artistKey) || 0) >= LASTFM_PER_ARTIST) continue;
+        seen.add(key);
+        perArtist.set(artistKey, (perArtist.get(artistKey) || 0) + 1);
+        picked.push(entry);
+        break;
+      }
+      if (picked.length >= LASTFM_SUGGESTIONS) break;
+    }
+  }
+  return picked;
+}
+
+// A music search for "artist title" usually returns that exact song, but an unknown title can
+// resolve to something unrelated; such results are dropped.
+function matchesSuggestion(track, suggestion) {
+  if (!suggestion.title) return true;
+  return tokenOverlap(cleanTitle(track?.info?.title || ''), suggestion.title) >= 0.5;
+}
+
+function lastfmSource({ node, requester, context, client = getLastfmClient() }) {
+  return {
+    name: 'lastfm',
+    run: async () => {
+      if (!client.isEnabled()) return [];
+      const suggestions = await buildLastfmSuggestions(client, context);
+      if (!suggestions.length) return [];
+      logAutoplay('debug', `Last.fm suggestions: ${suggestions.map((entry) => `${entry.artist} - ${entry.title || '*'} (${entry.match.toFixed(2)})`).join(' | ')}`);
+
+      const results = await Promise.all(suggestions.map(async (suggestion) => {
+        const query = suggestion.title ? `${suggestion.artist} ${suggestion.title}` : suggestion.artist;
+        const tracks = await searchTracks(node, query, { requester, limit: suggestion.title ? 1 : 2 });
+        return tracks
+          .filter((track) => matchesSuggestion(track, suggestion))
+          .map((track, index) => ({
+            track,
+            source: 'lastfm',
+            sourceIndex: index,
+            anchorKey: suggestion.anchorKey,
+            anchorRank: suggestion.anchorRank,
+            lastfmMatch: suggestion.match,
+          }));
+      }));
+      return results.flat();
+    },
+  };
+}
+
 module.exports = {
   RETRIEVAL_BUDGET_MS,
   searchTracks,
@@ -272,4 +384,7 @@ module.exports = {
   radioSource,
   searchSource,
   discoverySource,
+  lastfmSource,
+  buildLastfmSuggestions,
+  lastfmSeedQuery,
 };
