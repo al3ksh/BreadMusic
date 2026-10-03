@@ -1,0 +1,339 @@
+const { hasTerm, normalizeComparable, tokenOverlap } = require('./normalize');
+
+const MIN_SCORE = 35;
+const TOP_PICK_POOL = 7;
+const PICK_SCORE_WINDOW = 20;
+const SELECTION_JITTER = 6;
+const MAX_SAME_ARTIST_IN_ROW = 2;
+const SKIPPED_ARTIST_REJECT_THRESHOLD = 2;
+const SKIPPED_AUTHOR_REJECT_THRESHOLD = 1;
+
+const HARD_REJECT_TERMS = [
+  'karaoke',
+  'reaction',
+  'tutorial',
+  'lesson',
+  'how to',
+  'podcast',
+  'interview',
+  'vlog',
+  'challenge',
+  'compilation',
+  'best of',
+  'top 10',
+  'top 5',
+  'review',
+  'unboxing',
+  'trailer',
+  'teaser',
+  'behind the scenes',
+  'making of',
+  'explained',
+  'breakdown',
+  'full album',
+  'album completo',
+  'hour mix',
+  '1 hour',
+  '10 hours',
+  'blend',
+  'mashup',
+  'megamix',
+  'non stop mix',
+  'radio mix',
+  'dj mix',
+  '8d audio',
+  'nightcore',
+  'bass boosted',
+];
+
+const SOFT_PENALTIES = [
+  ['remix', 24],
+  ['cover', 22],
+  ['live', 18],
+  ['concert', 18],
+  ['lyrics', 14],
+  ['lyric video', 16],
+  ['letra', 14],
+  ['tlumaczenie', 14],
+  ['napisy', 14],
+  ['instrumental', 8],
+  ['acoustic', 10],
+  ['slowed', 28],
+  ['reverb', 24],
+  ['sped up', 28],
+  ['nightcore', 30],
+  ['8d audio', 24],
+  ['bass boosted', 24],
+  ['visualizer', 8],
+  ['clean', 18],
+  ['radio edit', 16],
+  ['reupload', 14],
+];
+
+const POSITIVE_TERMS = [
+  ['official audio', 12],
+  ['audio', 6],
+  ['topic', 8],
+  ['provided to youtube', 8],
+];
+
+const SOURCE_BONUS = {
+  radio: 22,
+  lastfm: 20,
+  search: 6,
+  discovery: 8,
+};
+
+function hasHardRejectTerm(track) {
+  const haystack = `${track.title} ${track.author}`;
+  return HARD_REJECT_TERMS.some((term) => hasTerm(haystack, term));
+}
+
+function getSoftPenalty(track) {
+  const haystack = `${track.title} ${track.author}`;
+  return SOFT_PENALTIES.reduce((total, [term, penalty]) => (
+    hasTerm(haystack, term) ? total + penalty : total
+  ), 0);
+}
+
+function getPositiveTermScore(track) {
+  const haystack = `${track.title} ${track.author}`;
+  return POSITIVE_TERMS.reduce((total, [term, score]) => (
+    hasTerm(haystack, term) ? total + score : total
+  ), 0);
+}
+
+function isTrackRecent(recent, track) {
+  return recent.some((entry) => (
+    entry.key === track.key ||
+    (
+      entry.artist &&
+      track.artist &&
+      entry.artist === track.artist &&
+      normalizeComparable(entry.cleanTitle) === normalizeComparable(track.cleanTitle)
+    )
+  ));
+}
+
+function isArtistOverplayed(recent, artistName) {
+  if (!artistName) return false;
+  const sameArtistCount = recent.slice(-5).filter((track) => track.artist === artistName).length;
+  return sameArtistCount >= MAX_SAME_ARTIST_IN_ROW;
+}
+
+function scoreCandidate(candidate, context) {
+  const track = candidate.normalized;
+  const recent = context.recent ?? [];
+  const skipped = context.skipped ?? [];
+  const manualSeeds = context.manualSeeds ?? [];
+  const reasons = [];
+  let score = 50;
+
+  if (!track.title || track.title === 'Unknown') {
+    return { score: -Infinity, rejected: true, reason: 'missing title' };
+  }
+
+  if (context.last && track.key === context.last.key) {
+    return { score: -Infinity, rejected: true, reason: 'same as last track' };
+  }
+
+  const profileSeeds = manualSeeds.length
+    ? manualSeeds
+    : [context.seed, context.primary].filter(Boolean);
+  if (profileSeeds.some((seed) => seed.key === track.key)) {
+    return { score: -Infinity, rejected: true, reason: 'same as manual seed track' };
+  }
+
+  if (isTrackRecent(recent, track)) {
+    return { score: -Infinity, rejected: true, reason: 'recent duplicate' };
+  }
+
+  if (hasHardRejectTerm(track)) {
+    return { score: -Infinity, rejected: true, reason: 'blocked title pattern' };
+  }
+
+  if (track.duration > 0 && track.duration < 55_000) {
+    return { score: -Infinity, rejected: true, reason: 'too short' };
+  }
+
+  if (track.duration > 13 * 60_000) {
+    return { score: -Infinity, rejected: true, reason: 'too long' };
+  }
+
+  const sourceBonus = SOURCE_BONUS[candidate.source] ?? 0;
+  score += sourceBonus;
+  if (candidate.source === 'radio') {
+    reasons.push('radio');
+  } else if (candidate.source === 'lastfm') {
+    reasons.push('lastfm');
+  } else if (candidate.source === 'discovery') {
+    reasons.push(`ai-discovery:${candidate.discoveryDistance || 'unknown'}`);
+  }
+
+  const anchorMatches = candidate.anchorKeys?.size ?? 0;
+  if (anchorMatches > 1) {
+    const consensusBoost = Math.min(18, (anchorMatches - 1) * 9);
+    score += consensusBoost;
+    reasons.push(`profile-consensus:${anchorMatches}`);
+  }
+  if (Number.isFinite(candidate.anchorRank)) {
+    const anchorBoost = Math.max(0, 6 - (candidate.anchorRank * 2));
+    score += anchorBoost;
+    if (anchorBoost) reasons.push(`anchor:${candidate.anchorRank + 1}`);
+  }
+
+  const positive = getPositiveTermScore(track);
+  if (positive) {
+    score += positive;
+    reasons.push(`positive:${positive}`);
+  }
+
+  const penalty = getSoftPenalty(track);
+  if (penalty) {
+    score -= penalty;
+    reasons.push(`soft-penalty:${penalty}`);
+  }
+
+  const matchesManualArtist = Boolean(track.artist) && manualSeeds.some((seed) => seed.artist === track.artist);
+  if (track.artist) {
+    if (matchesManualArtist) {
+      score += 12;
+      reasons.push('manual-artist');
+    } else if (manualSeeds.length > 0) {
+      score += 5;
+      reasons.push('profile-discovery');
+    } else if (context.seedArtist) {
+      score += track.artist === context.seedArtist ? 8 : 10;
+      reasons.push(track.artist === context.seedArtist ? 'same-artist' : 'artist-variety');
+    }
+  }
+
+  const recentArtistTail = recent.slice(-2).filter((entry) => entry.artist);
+  if (
+    track.artist &&
+    recentArtistTail.length === 2 &&
+    recentArtistTail.every((entry) => entry.artist === track.artist)
+  ) {
+    return { score: -Infinity, rejected: true, reason: 'artist streak limit' };
+  }
+  const recentSameArtist = recent
+    .slice(-8)
+    .filter((entry) => entry.artist && entry.artist === track.artist)
+    .length;
+  if (recentSameArtist > 0) {
+    const perTrackPenalty = matchesManualArtist ? 7 : 8;
+    score -= Math.min(matchesManualArtist ? 21 : 24, recentSameArtist * perTrackPenalty);
+    reasons.push(`recent-artist:${recentSameArtist}`);
+  }
+
+  if (isArtistOverplayed(recent, track.artist)) {
+    score -= 45;
+    reasons.push('loop-guard');
+  }
+
+  const seedDurations = (context.activeSeeds ?? [])
+    .map((seed) => seed.duration)
+    .filter((duration) => duration > 0);
+  if (seedDurations.length > 0 && track.duration > 0) {
+    const ratio = seedDurations
+      .map((duration) => track.duration / duration)
+      .sort((left, right) => Math.abs(Math.log(left)) - Math.abs(Math.log(right)))[0];
+    if (ratio >= 0.65 && ratio <= 1.55) {
+      score += 10;
+      reasons.push('duration-match');
+    } else if (ratio >= 0.45 && ratio <= 2.2) {
+      score += 2;
+    } else {
+      score -= 12;
+      reasons.push('duration-drift');
+    }
+  }
+
+  const titleComparisons = profileSeeds.map((seed) => ({
+    seed,
+    overlap: tokenOverlap(track.cleanTitle || track.title, seed.cleanTitle || seed.title),
+  }));
+  const sameSongVariant = titleComparisons.some(({ seed, overlap }) => (
+    overlap >= 0.82 && track.artist && seed.artist === track.artist
+  ));
+  if (sameSongVariant) {
+    return { score: -Infinity, rejected: true, reason: 'same song variant' };
+  }
+  const overlap = titleComparisons.reduce((maximum, entry) => Math.max(maximum, entry.overlap), 0);
+  if (overlap >= 0.55) {
+    score -= 14;
+    reasons.push('title-overlap');
+  }
+
+  if (skipped.some((entry) => entry.key === track.key)) {
+    return { score: -Infinity, rejected: true, reason: 'recently skipped' };
+  }
+
+  const skippedArtistMatches = skipped.filter((entry) => (
+    entry.artistKey && track.artistKey && entry.artistKey === track.artistKey
+  ));
+  const strongSkippedSameArtist = skippedArtistMatches.filter((entry) => entry.strength !== 'normal').length;
+  if (strongSkippedSameArtist >= SKIPPED_ARTIST_REJECT_THRESHOLD) {
+    return { score: -Infinity, rejected: true, reason: 'recently skipped artist' };
+  }
+  if (skippedArtistMatches.length > 0) {
+    const normalSkippedSameArtist = skippedArtistMatches.length - strongSkippedSameArtist;
+    score -= (strongSkippedSameArtist * 28) + (normalSkippedSameArtist * 14);
+    reasons.push(`skipped-artist:${skippedArtistMatches.length}`);
+  }
+
+  const skippedAuthorMatches = skipped.filter((entry) => (
+    entry.authorKey && track.authorKey && entry.authorKey === track.authorKey
+  ));
+  const strongSkippedSameAuthor = skippedAuthorMatches.filter((entry) => entry.strength !== 'normal').length;
+  if (strongSkippedSameAuthor >= SKIPPED_AUTHOR_REJECT_THRESHOLD) {
+    return { score: -Infinity, rejected: true, reason: 'recently skipped channel' };
+  }
+  if (skippedAuthorMatches.length > 0) {
+    const normalSkippedSameAuthor = skippedAuthorMatches.length - strongSkippedSameAuthor;
+    score -= (strongSkippedSameAuthor * 32) + (normalSkippedSameAuthor * 16);
+    reasons.push(`skipped-channel:${skippedAuthorMatches.length}`);
+  }
+
+  score -= Math.min(10, candidate.sourceIndex || 0);
+
+  return {
+    score,
+    rejected: score < MIN_SCORE,
+    reason: score < MIN_SCORE ? 'low score' : reasons.join(', ') || 'ok',
+  };
+}
+
+function pickCandidateLocally(scoredCandidates, random = Math.random) {
+  const eligible = scoredCandidates
+    .filter((candidate) => !candidate.rejected)
+    .sort((a, b) => b.score - a.score);
+
+  if (!eligible.length) return null;
+
+  const bestScore = eligible[0].score;
+  const pool = eligible
+    .filter((candidate) => candidate.score >= Math.max(MIN_SCORE, bestScore - PICK_SCORE_WINDOW))
+    .map((candidate) => ({
+      ...candidate,
+      selectionScore: candidate.score + (random() * SELECTION_JITTER),
+    }))
+    .sort((a, b) => b.selectionScore - a.selectionScore)
+    .slice(0, TOP_PICK_POOL);
+
+  const totalWeight = pool.reduce((sum, candidate) => sum + Math.max(1, candidate.selectionScore - MIN_SCORE + 1), 0);
+  let roll = random() * totalWeight;
+
+  for (const candidate of pool) {
+    roll -= Math.max(1, candidate.selectionScore - MIN_SCORE + 1);
+    if (roll <= 0) return candidate;
+  }
+
+  return pool[0];
+}
+
+module.exports = {
+  MIN_SCORE,
+  scoreCandidate,
+  pickCandidateLocally,
+};
