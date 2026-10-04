@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
+const { classifyQuery, isOrigin, tagOrigin } = require('../music/trackOrigin');
 const path = require('path');
 const { prepareUploadArtwork, storeUploadArtwork } = require('../music/uploadArtwork');
 const { uploadArtworkUrl } = require('../music/uploadArtworkUrls');
@@ -297,6 +298,7 @@ function createPlayerRouter({
             sourceName: 'localUpload',
             isLocalUpload: true,
           },
+          origin: 'upload',
         };
         queuedTrack.localUpload = {
           guildId,
@@ -486,6 +488,8 @@ function createPlayerRouter({
           return res.status(502).json({ error: failure.description, code: failure.code });
         }
         const loadedTracks = (result?.tracks || []).slice(0, playerPlaylistMaxTracks);
+        // Picks are queued later by encoded track, so the result carries what the search box held.
+        const searchOrigin = classifyQuery(query);
         const tracks = loadedTracks.slice(0, 10).map((track) => ({
           encoded: track.encoded,
           title: track.info.title,
@@ -494,6 +498,7 @@ function createPlayerRouter({
           duration: track.info.duration,
           artwork: extractArtwork(track.info),
           source: normalizeSourceName(track.info),
+          origin: searchOrigin,
           ...getTrackCapabilityMetadata(track),
         }));
         const playlist = result?.playlist
@@ -511,6 +516,7 @@ function createPlayerRouter({
           tracks,
           playlist,
           playlistTracks: result?.playlist ? loadedTracks : null,
+          origin: searchOrigin,
           expiresAt: Date.now() + (playlist ? playerPlaylistCacheTtlMs : playerSearchCacheTtlMs),
         });
         prunePlayerSearchCache();
@@ -660,7 +666,7 @@ function createPlayerRouter({
           }
 
           const requester = getDashboardRequester(req, client);
-          const tracksToAdd = playlistTracks.map((track) => ({ ...track, requester }));
+          const tracksToAdd = playlistTracks.map((track) => ({ ...track, requester, origin: cachedSearch.origin ?? 'link' }));
           tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
           clearAutoplayPrefetch(guildId);
           const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
@@ -684,7 +690,7 @@ function createPlayerRouter({
 
           const requester = getDashboardRequester(req, client);
           const entries = req.body?.shuffle === true ? library.shuffled(playable.tracks) : playable.tracks;
-          const tracksToAdd = entries.map((entry) => library.entryToTrack(entry, requester));
+          const tracksToAdd = tagOrigin(entries.map((entry) => library.entryToTrack(entry, requester)), 'library');
           tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
           clearAutoplayPrefetch(guildId);
           const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
@@ -809,6 +815,8 @@ function createPlayerRouter({
           const { encoded, query, track: metadata } = req.body;
           const playImmediately = action === 'playnow';
           const requester = getDashboardRequester(req, client);
+          // The client names the origin for history replays and search picks.
+          const requestedOrigin = [req.body?.origin, metadata?.origin].find(isOrigin) ?? null;
           if (encoded) {
             const track = {
               encoded,
@@ -823,6 +831,7 @@ function createPlayerRouter({
                 isStream: metadata?.isStream === true,
               },
               requester,
+              origin: requestedOrigin ?? 'search',
             };
             addManualSeed(guildId, track);
             await addRequestedTrackToQueue(player, track, playImmediately);
@@ -850,6 +859,7 @@ function createPlayerRouter({
               const status = failure.code === 'not_found' ? 404 : 502;
               return res.status(status).json({ error: failure.description, code: failure.code });
             }
+            tagOrigin(track, requestedOrigin ?? classifyQuery(query));
             addManualSeed(guildId, track);
             await addRequestedTrackToQueue(player, track, playImmediately);
             if (playImmediately && player.queue.current) await player.skip();

@@ -723,6 +723,7 @@ async function handleAutoplay(player, lastTrack, client) {
     pool.recordPick(guildId, selected.normalized.key);
     const nextTrack = selected.track;
     nextTrack.isAutoplay = true;
+    nextTrack.origin = 'autoplay';
     await player.queue.add(nextTrack);
 
     if (!player.playing && !player.paused) {

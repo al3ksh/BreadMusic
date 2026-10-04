@@ -1,3 +1,4 @@
+const { tagOrigin } = require('../../music/trackOrigin');
 const library = require('../../music/library');
 
 const CREATE_FAILURES = {
@@ -38,7 +39,7 @@ const createLibraryCommands = (context) => {
     if (entries.length === 0) throw new CommandError(`**${name}** is empty.`);
     const { player, voiceChannelId } = await ensureVoice(interaction, { requireSameChannel: true, createPlayer: true });
     const ordered = shuffle ? library.shuffled(entries) : entries;
-    const tracks = ordered.map((entry) => library.entryToTrack(entry, interaction.user));
+    const tracks = tagOrigin(ordered.map((entry) => library.entryToTrack(entry, interaction.user)), 'library');
     tracks.forEach((track) => addManualSeed(player.guildId, track, { invalidatePrefetch: false }));
     const autoplayIndex = player.queue.tracks.findIndex((track) => track.isAutoplay);
     if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, ...tracks);

@@ -14,6 +14,7 @@ function packTrack(track) {
     requester: packRequester(track.requester),
     localUpload: packLocalUpload(track.localUpload),
     isAutoplay: Boolean(track.isAutoplay),
+    origin: typeof track.origin === 'string' ? track.origin : null,
   };
 }
 
@@ -64,6 +65,7 @@ async function decodeTrack(node, entry, fallbackRequester) {
     if (entry?.requester) decoded.requester = entry.requester;
     if (entry?.localUpload) decoded.localUpload = entry.localUpload;
     if (entry?.isAutoplay) decoded.isAutoplay = true;
+    if (entry?.origin) decoded.origin = entry.origin;
     return decoded;
   } catch {
     return null;
@@ -105,6 +107,7 @@ async function refreshLocalUploadTrack(node, entry, fallbackRequester) {
       requester: entry.requester || track.requester,
       localUpload,
       isAutoplay: Boolean(entry.isAutoplay),
+      origin: entry.origin || 'upload',
     };
   } catch {
     return null;

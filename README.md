@@ -379,6 +379,11 @@ game history is available through `/stats arcade`.
 User stats include top tracks and artists, source preference, active days and an
 estimated requested duration. `/stats server detailed:true` adds source ranking,
 requester ranking and retained activity patterns to the server overview.
+`/stats sources` renders an image showing how songs were requested: Spotify,
+YouTube or other links, text search, local uploads, liked songs and playlists,
+history replays or autoplay. It covers the whole server or one `member`, over
+the retained 35 days at most. Plays recorded before this tracking existed are
+counted as untracked.
 When a DJ role is configured, listeners without that role can still use Skip: Bread
 opens one shared vote in the player text channel, lists its voters and synchronizes
 its progress and final result with the dashboard and Discord Activity.

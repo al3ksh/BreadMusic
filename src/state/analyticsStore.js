@@ -1,5 +1,6 @@
 const { FileStore } = require('./fileStore');
 const { normalizeSourceName } = require('../music/sourceNames');
+const { originOf } = require('../music/trackOrigin');
 
 const analyticsStore = new FileStore('analytics.json', {});
 
@@ -419,6 +420,7 @@ function recordTrackPlay(guildId, track, options = {}) {
       ? requester.id
       : null,
     autoplay: Boolean(track.isAutoplay),
+    origin: originOf({ origin: track.origin, autoplay: track.isAutoplay, source: normalizedTrack.source }),
     track: normalizedTrack,
     requester: requester && !requester.isBot && requester.id !== botUserId ? requester : null,
   });
@@ -694,7 +696,46 @@ function getUserInsights(guildId, userId, options = {}) {
   };
 }
 
+// Counts how plays were requested (link, search, upload, library, autoplay...).
+// Only the retained detailed history knows this, so "all" means the last 35 days.
+function getOriginInsights(guildId, options = {}) {
+  const range = normalizeRange(options.range);
+  const userId = typeof options.userId === 'string' && options.userId ? options.userId : null;
+  const now = Date.now();
+  const guild = ensureGuildBucket(guildId);
+  const events = pruneEvents(guild.events, now);
+  if (events.length !== guild.events.length) {
+    guild.events = events;
+    analyticsStore.set(guildId, guild);
+  }
+
+  const startTimestamp = getRangeStartTimestamp(range, now);
+  const counts = {};
+  let total = 0;
+  let untracked = 0;
+  for (const event of events) {
+    if (startTimestamp !== null && event.ts < startTimestamp) continue;
+    if (userId && event.userId !== userId) continue;
+    total += 1;
+    const track = event.track || guild.tracks[event.trackKey] || {};
+    const origin = originOf({ origin: event.origin, autoplay: event.autoplay, source: track.source });
+    if (!origin) {
+      untracked += 1;
+      continue;
+    }
+    counts[origin] = (counts[origin] || 0) + 1;
+  }
+
+  const tracked = total - untracked;
+  const origins = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([origin, count]) => ({ origin, count, share: tracked ? count / tracked : 0 }));
+
+  return { range, userId, total, tracked, untracked, origins, detailedHistoryDays: EVENT_RETENTION_DAYS };
+}
+
 module.exports = {
+  getOriginInsights,
   recordTrackPlay,
   getGuildInsights,
   getUserInsights,

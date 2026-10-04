@@ -34,7 +34,7 @@ export default function GuildPage() {
     try {
       await apiFetch(`/guilds/${guildId}/player/${mode === 'now' ? 'playnow' : 'play'}`, {
         method: 'POST',
-        body: JSON.stringify({ query: uri }),
+        body: JSON.stringify({ query: uri, origin: 'history' }),
       });
       toast.success(mode === 'now' ? 'Playing from history' : 'Added to queue from history');
     } catch (error) {
@@ -171,7 +171,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
   const [status, setStatus] = useState<PlayerStatus | null>(null);
   const [queue, setQueue] = useState<{ current: QueueTrack | null; tracks: QueueTrack[]; total: number; page: number; totalPages: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string; source?: string | null; seekable?: boolean; isStream?: boolean }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ encoded?: string; title: string; author: string; uri: string; duration: number; artwork?: string; source?: string | null; seekable?: boolean; isStream?: boolean; origin?: string }[]>([]);
   const [searchedQuery, setSearchedQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [queuePage, setQueuePage] = useState(0);
@@ -948,6 +948,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                           source: track.source,
                           seekable: track.seekable,
                           isStream: track.isStream,
+                          origin: track.origin,
                         },
                       });
                       setSearchResults([]);

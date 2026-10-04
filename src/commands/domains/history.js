@@ -1,3 +1,4 @@
+const { tagOrigin } = require('../../music/trackOrigin');
 const { getGuildHistory } = require('../../state/analyticsStore');
 
 const COMPONENT_PREFIX = 'history:';
@@ -107,6 +108,7 @@ const createHistoryCommands = (context) => {
       return;
     }
 
+    tagOrigin(track, 'history');
     addManualSeed(player.guildId, track);
     const autoplayIndex = player.queue.tracks.findIndex((queued) => queued.isAutoplay);
     if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, track);

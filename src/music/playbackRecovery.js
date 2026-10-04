@@ -37,6 +37,8 @@ function createPlaybackRecovery({
         }
 
         if (replacement && !isPlayerStopping(player)) {
+          // A stand-in keeps the original request's origin for the stats.
+          if (track?.origin && !replacement.origin) replacement.origin = track.origin;
           const upcomingBeforeAdd = player.queue?.tracks?.length ?? 0;
           await player.queue.add(replacement, upcomingBeforeAdd > 0 ? 0 : undefined);
 

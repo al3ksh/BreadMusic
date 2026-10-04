@@ -1,3 +1,8 @@
+const { AttachmentBuilder } = require('discord.js');
+const { getOriginInsights } = require('../../state/analyticsStore');
+const { renderOriginImage } = require('../../music/originRenderer');
+const { originLabel } = require('../../music/trackOrigin');
+
 const createStatsCommands = (context) => {
   const {
     SlashCommandBuilder,
@@ -128,6 +133,22 @@ const createStatsCommands = (context) => {
       )
       .addSubcommand((subcommand) =>
         subcommand
+          .setName('sources')
+          .setDescription('Image of how songs were requested: links, search, uploads, autoplay...')
+          .addUserOption((option) => option.setName('member').setDescription('Only this member (defaults to the whole server)'))
+          .addStringOption((option) =>
+            option
+              .setName('range')
+              .setDescription('Time range')
+              .addChoices(
+                { name: 'Last 24 hours', value: '24h' },
+                { name: 'Last 7 days', value: '7d' },
+                { name: 'Last 35 days', value: 'all' },
+              ),
+          ),
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
           .setName('arcade')
           .setDescription('Show Arcade statistics for a member.')
           .addUserOption((option) => option.setName('member').setDescription('Member (defaults to you)')),
@@ -137,6 +158,28 @@ const createStatsCommands = (context) => {
       const subcommand = interaction.options.getSubcommand();
       const range = interaction.options.getString('range') || 'all';
       const rangeLabel = range === '24h' ? 'Last 24 hours' : range === '7d' ? 'Last 7 days' : 'All time';
+
+      if (subcommand === 'sources') {
+        const user = interaction.options.getUser('member');
+        const insights = getOriginInsights(interaction.guildId, { range, userId: user?.id });
+        const sourcesRange = range === 'all' ? `Last ${insights.detailedHistoryDays} days` : rangeLabel;
+        const title = user ? 'How they request music' : 'Where the music came from';
+        const subject = user ? (user.globalName || user.username) : interaction.guild.name;
+        try {
+          const image = await renderOriginImage({ title, subject, rangeLabel: sourcesRange, insights });
+          await interaction.editReply({ files: [new AttachmentBuilder(image, { name: 'bread-sources.png' })] });
+        } catch (error) {
+          // Without the image renderer the same numbers still fit in a short embed.
+          console.warn('[Stats] Sources image failed, sending text instead:', error.message);
+          const lines = insights.origins.map((entry) => `**${originLabel(entry.origin)}**: ${entry.count} (${Math.round(entry.share * 100)}%)`);
+          const embed = new EmbedBuilder()
+            .setTitle(`${title} - ${subject}`)
+            .setDescription(`\u{1F4C5} ${sourcesRange}\n\n${lines.join('\n') || 'Nothing recorded yet.'}`)
+            .setColor(BRAND_COLORS.primary);
+          await interaction.editReply({ embeds: [embed] });
+        }
+        return;
+      }
 
       if (subcommand === 'arcade') {
         const user = interaction.options.getUser('member') || interaction.user;

@@ -85,7 +85,7 @@ type QueueSnapshot = {
   totalPages: number;
   revision: string;
 };
-type SearchTrack = QueueTrack & { encoded?: string };
+type SearchTrack = QueueTrack & { encoded?: string; origin?: string };
 type SearchPlaylist = {
   key: string;
   name: string;
@@ -959,7 +959,7 @@ export default function ActivityPage() {
   const bumpLibrary = useCallback(() => setLibraryRefreshKey((key) => key + 1), []);
 
   const requeueHistoryTrack = useCallback((uri: string) => {
-    const queued = playerAction('play', { query: uri });
+    const queued = playerAction('play', { query: uri, origin: 'history' });
     if (queued instanceof Promise) {
       return queued.then((ok) => {
         if (ok) notify('Added to queue from history', 'success');
@@ -970,7 +970,7 @@ export default function ActivityPage() {
   }, [notify, playerAction]);
 
   const playHistoryTrackNow = useCallback((uri: string) => {
-    const started = playerAction('playnow', { query: uri });
+    const started = playerAction('playnow', { query: uri, origin: 'history' });
     if (started instanceof Promise) {
       return started.then((ok) => {
         if (ok) notify('Playing from history', 'success');
@@ -1229,6 +1229,7 @@ export default function ActivityPage() {
         source: track.source,
         seekable: track.seekable,
         isStream: track.isStream,
+        origin: track.origin,
       },
       channelId,
     });

@@ -1,3 +1,4 @@
+const { classifyQuery, tagOrigin } = require('../../music/trackOrigin');
 const createMusicCommands = (context) => {
   const {
     SlashCommandBuilder,
@@ -167,6 +168,8 @@ const createMusicCommands = (context) => {
         tracksToAdd = isPlaylist ? searchResult.tracks : [searchResult.tracks[0]];
       }
 
+      // Autocomplete picks come from a text search; otherwise the query tells link from search.
+      tagOrigin(tracksToAdd, resolvedTrack ? 'search' : classifyQuery(rawQuery));
       tracksToAdd.forEach((track) => addManualSeed(player.guildId, track));
 
       const autoplayIndex = player.queue.tracks.findIndex(t => t.isAutoplay);

@@ -3,7 +3,7 @@ import type { CSSProperties, ChangeEvent } from 'react';
 import type { QueueTrack } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 
-type SearchTrack = QueueTrack & { encoded?: string };
+type SearchTrack = QueueTrack & { encoded?: string; origin?: string };
 type SearchPlaylist = { key: string; name: string; trackCount: number; totalDuration: number; artwork?: string | null; truncated?: boolean };
 
 type ActivitySearchPanelProps = {
