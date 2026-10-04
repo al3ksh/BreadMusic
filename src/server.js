@@ -71,6 +71,9 @@ const ACTIVITY_ARTWORK_HOSTS = [
   'i.ytimg.com',
   'img.youtube.com',
   'yt3.ggpht.com',
+  // YouTube Music album art, used by most autoplay picks.
+  'yt3.googleusercontent.com',
+  'lh3.googleusercontent.com',
   'i.scdn.co',
   'scdn.co',
   'sndcdn.com',
