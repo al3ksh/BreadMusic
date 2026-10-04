@@ -1945,7 +1945,7 @@ export default function ActivityPage() {
                 )}
 
                 {activePanel === 'sound' && (
-                  <ActivitySoundPanel sound={status.sound} canEdit={canDj} onChange={sendSound} />
+                  <ActivitySoundPanel sound={status.sound} canEdit={canDj} onChange={sendSound} libraryRequest={libraryRequest} notify={notify} />
                 )}
 
                 {activePanel === 'library' && (

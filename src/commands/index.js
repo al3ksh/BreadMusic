@@ -7,6 +7,9 @@ const {
   ButtonBuilder,
   ButtonStyle,
   StringSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require('discord.js');
 const { ensureVoice, ensurePlayer, CommandError } = require('../music/utils');
 const { buildTrackEmbed, buildNowPlayingEmbed } = require('../music/embeds');
@@ -293,6 +296,9 @@ const { createSoundCommands } = require('./domains/sound');
 const { createHistoryCommands } = require('./domains/history');
 
 const commandContext = {
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   SlashCommandBuilder,
   EmbedBuilder,
   PermissionFlagsBits,

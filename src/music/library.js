@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { SqliteStore } = require('../state/sqliteStore');
 const { normalizeTrack, isLocalUploadTrack, isStreamTrack } = require('./autoplay/normalize');
 const userTaste = require('./autoplay/userTaste');
+const { normalizeSoundState } = require('./sound');
 
 // Per-user library: a "Liked" list and named playlists. Stored as encoded Lavalink tracks
 // so playing them back needs no search.
@@ -11,6 +12,8 @@ const LIBRARY_LIMITS = {
   tracks: 500,
   name: 60,
   stations: 25,
+  sounds: 15,
+  soundName: 40,
 };
 
 const LIKED_ID = 'liked';
@@ -28,13 +31,14 @@ function getUserLibrary(userId, create = false) {
   const data = getStore().data;
   let library = data[userId];
   if (!library && create) {
-    library = { liked: [], playlists: [], stations: [] };
+    library = { liked: [], playlists: [], stations: [], sounds: [] };
     data[userId] = library;
   }
   if (library) {
     if (!Array.isArray(library.liked)) library.liked = [];
     if (!Array.isArray(library.playlists)) library.playlists = [];
     if (!Array.isArray(library.stations)) library.stations = [];
+    if (!Array.isArray(library.sounds)) library.sounds = [];
   }
   return library ?? null;
 }
@@ -365,8 +369,48 @@ function removeStation(userId, stationId) {
   return true;
 }
 
+// Saved sound presets: a named copy of the full /sound state (preset, EQ, speed, pitch).
+function listSounds(userId) {
+  return [...(getUserLibrary(userId)?.sounds ?? [])].reverse();
+}
+
+function findSound(userId, idOrName) {
+  const sounds = getUserLibrary(userId)?.sounds ?? [];
+  const lowered = String(idOrName ?? '').trim().toLowerCase();
+  return sounds.find((entry) => entry.id === idOrName) ?? sounds.find((entry) => entry.name.toLowerCase() === lowered) ?? null;
+}
+
+// Saving under an existing name overwrites that preset.
+// Returns { ok, entry, replaced } or { ok: false, reason: 'name' | 'limit' }.
+function saveSound(userId, rawName, sound, now = Date.now()) {
+  const name = typeof rawName === 'string' ? rawName.replace(/\s+/g, ' ').trim().slice(0, LIBRARY_LIMITS.soundName) : '';
+  if (!userId || !name) return { ok: false, reason: 'name' };
+  const library = getUserLibrary(userId, true);
+  const existing = library.sounds.find((entry) => entry.name.toLowerCase() === name.toLowerCase());
+  if (!existing && library.sounds.length >= LIBRARY_LIMITS.sounds) return { ok: false, reason: 'limit' };
+  const entry = { id: existing?.id ?? crypto.randomUUID().slice(0, 8), name, sound: normalizeSoundState(sound), createdAt: now };
+  library.sounds = [...library.sounds.filter((item) => item !== existing), entry];
+  getStore().save();
+  return { ok: true, entry, replaced: Boolean(existing) };
+}
+
+function removeSound(userId, idOrName) {
+  const library = getUserLibrary(userId);
+  const entry = findSound(userId, idOrName);
+  if (!library || !entry) return null;
+  library.sounds = library.sounds.filter((item) => item !== entry);
+  getStore().save();
+  return entry;
+}
+
 function getLibrarySnapshot(userId) {
-  return { liked: listLiked(userId), playlists: listPlaylists(userId), stations: listStations(userId), limits: LIBRARY_LIMITS };
+  return {
+    liked: listLiked(userId),
+    playlists: listPlaylists(userId),
+    stations: listStations(userId),
+    sounds: listSounds(userId),
+    limits: LIBRARY_LIMITS,
+  };
 }
 
 function flush() {
@@ -406,6 +450,10 @@ module.exports = {
   isStationSaved,
   saveStation,
   removeStation,
+  listSounds,
+  findSound,
+  saveSound,
+  removeSound,
   getLibrarySnapshot,
   flush,
   __testing: { resetForTesting },

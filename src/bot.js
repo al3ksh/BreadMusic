@@ -455,8 +455,8 @@ client.on(Events.InteractionCreate, safeEventHandler('InteractionCreate', async 
       return;
     }
 
-    // Commands that own their buttons and select menus claim them by customId prefix.
-    if (interaction.isMessageComponent()) {
+    // Commands that own their buttons, select menus and modals claim them by customId prefix.
+    if (interaction.isMessageComponent() || interaction.isModalSubmit()) {
       const owner = client.commands.find(
         (command) => command.componentPrefix && interaction.customId.startsWith(command.componentPrefix),
       );

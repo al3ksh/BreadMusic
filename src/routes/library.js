@@ -255,6 +255,25 @@ function createLibraryRouter({
     return res.json({ success: true, stations: library.listStations(userIdOf(req)).map(publicStation) });
   });
 
+  router.post(`${base}/sounds/save`, ...mutate, (req, res) => {
+    const sound = req.body?.sound;
+    if (!sound || typeof sound !== 'object' || Array.isArray(sound)) return res.status(400).json({ error: 'Nothing to save.' });
+    const result = library.saveSound(userIdOf(req), req.body?.name, sound);
+    if (!result.ok) {
+      return res.status(result.reason === 'limit' ? 409 : 400).json({
+        error: result.reason === 'limit' ? `You can keep up to ${library.LIBRARY_LIMITS.sounds} saved sounds.` : 'Give the sound a name.',
+        reason: result.reason,
+      });
+    }
+    return res.json({ success: true, replaced: result.replaced, sound: result.entry, sounds: library.listSounds(userIdOf(req)) });
+  });
+
+  router.post(`${base}/sounds/remove`, ...mutate, (req, res) => {
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!library.removeSound(userIdOf(req), id)) return res.status(404).json({ error: 'That sound is not saved.' });
+    return res.json({ success: true, sounds: library.listSounds(userIdOf(req)) });
+  });
+
   return router;
 }
 

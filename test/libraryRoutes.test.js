@@ -330,3 +330,18 @@ test('radio stations are searched, saved and played from the Activity', async ()
     assert.equal((await post('/library/stations/remove', { id: 'garden:abc' })).status, 404);
   });
 });
+
+test('sound presets are saved, listed and removed through the library routes', async () => {
+  await withApp({}, async ({ get, post }) => {
+    assert.equal((await post('/library/sounds/save', { name: 'Gym' })).status, 400);
+    assert.equal((await post('/library/sounds/save', { name: ' ', sound: {} })).status, 400);
+
+    const saved = await post('/library/sounds/save', { name: 'Gym', sound: { preset: 'bassboost', eq: [2, 4], speed: 1.1 } });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.sound.sound.preset, 'bassboost');
+    assert.equal((await get('/library')).body.sounds[0].name, 'Gym');
+
+    assert.equal((await post('/library/sounds/remove', { id: saved.body.sound.id })).body.sounds.length, 0);
+    assert.equal((await post('/library/sounds/remove', { id: saved.body.sound.id })).status, 404);
+  });
+});

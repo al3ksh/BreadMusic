@@ -178,3 +178,29 @@ test('saved radio stations: newest first, toggled off, capped', () => {
   assert.equal(library.saveStation('station-user', station('one-too-many')).reason, 'limit');
   assert.equal(library.saveStation('station-user', station('garden:b', 'Beta again')).ok, true, 'saving again only refreshes it');
 });
+
+test('saved sound presets: normalized, overwritten by name, capped', () => {
+  const user = 'sound-user';
+  assert.equal(library.saveSound(user, '   ', {}).reason, 'name');
+  const first = library.saveSound(user, '  Night   drive ', { preset: 'nightcore', eq: [3, 99], speed: 7 }, 1);
+  assert.equal(first.ok, true);
+  assert.equal(first.entry.name, 'Night drive');
+  assert.equal(first.entry.sound.preset, 'nightcore');
+  assert.equal(first.entry.sound.eq[1], 6, 'EQ is clamped to the slider range');
+  assert.equal(first.entry.sound.speed <= 2, true);
+
+  const again = library.saveSound(user, 'night DRIVE', { eq: [1] }, 2);
+  assert.equal(again.replaced, true);
+  assert.equal(again.entry.id, first.entry.id);
+  assert.equal(library.listSounds(user).length, 1);
+  assert.equal(library.findSound(user, 'Night Drive').sound.eq[0], 1);
+  assert.equal(library.getLibrarySnapshot(user).sounds.length, 1);
+
+  for (let i = 1; i < library.LIBRARY_LIMITS.sounds; i += 1) library.saveSound(user, `p${i}`, {});
+  assert.equal(library.saveSound(user, 'one more', {}).reason, 'limit');
+  assert.equal(library.saveSound(user, 'p1', { speed: 1.5 }).ok, true, 'overwriting still works at the cap');
+  assert.equal(library.listSounds(user)[0].name, 'p1', 'newest first');
+
+  assert.equal(library.removeSound(user, first.entry.id).name, 'night DRIVE');
+  assert.equal(library.removeSound(user, first.entry.id), null);
+});

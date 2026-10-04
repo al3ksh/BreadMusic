@@ -18,7 +18,11 @@ function json(route: Route, body: unknown, statusCode = 200) {
 }
 
 async function mockSoundApi(page: Page, { dj }: { dj: boolean }) {
-  const state = { sound: { preset: null, eq: [0, 0, 0, 0, 0, 0], speed: 1, pitch: 1 } as Sound, sent: [] as Sound[] };
+  const state = {
+    sound: { preset: null, eq: [0, 0, 0, 0, 0, 0], speed: 1, pitch: 1 } as Sound,
+    sent: [] as Sound[],
+    saved: [] as { id: string; name: string; sound: Sound; createdAt: number }[],
+  };
   const status = () => ({
     connected: true,
     playing: true,
@@ -50,6 +54,17 @@ async function mockSoundApi(page: Page, { dj }: { dj: boolean }) {
       state.sound = body.sound;
       return json(route, { success: true, filter: body.sound.preset, sound: body.sound });
     }
+    if (request.method() === 'POST' && path.endsWith('/library/sounds/save')) {
+      const body = request.postDataJSON() as { name: string; sound: Sound };
+      state.saved = [{ id: `s${state.saved.length + 1}`, name: body.name, sound: body.sound, createdAt: 1 }, ...state.saved];
+      return json(route, { success: true, replaced: false, sounds: state.saved });
+    }
+    if (request.method() === 'POST' && path.endsWith('/library/sounds/remove')) {
+      const body = request.postDataJSON() as { id: string };
+      state.saved = state.saved.filter((entry) => entry.id !== body.id);
+      return json(route, { success: true, sounds: state.saved });
+    }
+    if (path.endsWith('/library')) return json(route, { liked: [], playlists: [], stations: [], sounds: state.saved });
     if (path === '/api/me') return json(route, { id: 'user-1', username: 'tester', discriminator: '0001', avatar: '', global_name: 'Tester' });
     if (path === '/api/activity/config') return json(route, { enabled: true, clientId: 'test-client-id' });
     if (path === '/api/activity/token') return json(route, { access_token: 'test-activity-token' });
@@ -121,4 +136,29 @@ test('listeners without DJ see the sound settings read-only', async ({ page }) =
   await expect(panel.getByRole('button', { name: 'Bass boost' })).toBeDisabled();
   await expect(panel.getByRole('slider', { name: /^Sub \+2 dB/ })).toBeDisabled();
   expect(state.sent).toEqual([]);
+});
+
+test('a sound is saved under a name and loaded again from Your sounds', async ({ page }) => {
+  const state = await mockSoundApi(page, { dj: true });
+  const activity = await openActivity(page);
+
+  await activity.getByRole('button', { name: /^Volume \d+%/ }).first().click();
+  await activity.getByRole('button', { name: 'Sound', exact: true }).click();
+  const panel = activity.getByRole('complementary', { name: 'sound panel' });
+
+  await panel.getByRole('slider', { name: /^Bass / }).fill('3');
+  await expect.poll(() => state.sent.at(-1)?.eq[1]).toBe(3);
+  await panel.getByRole('textbox', { name: 'Name for the saved sound' }).fill('Late night');
+  await panel.getByRole('button', { name: 'Save sound' }).click();
+  await expect(panel.getByRole('button', { name: 'Late night', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(state.saved[0].sound.eq[1]).toBe(3);
+
+  await panel.getByRole('button', { name: 'Reset sound' }).click();
+  await expect(panel.getByRole('button', { name: 'Late night', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await panel.getByRole('button', { name: 'Late night', exact: true }).click();
+  await expect.poll(() => state.sent.at(-1)?.eq[1]).toBe(3);
+  await page.screenshot({ path: '../.shots/sound-saved.png' });
+
+  await panel.getByRole('button', { name: 'Remove Late night' }).click();
+  await expect(panel.getByRole('button', { name: 'Late night', exact: true })).toHaveCount(0);
 });

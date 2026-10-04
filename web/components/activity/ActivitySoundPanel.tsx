@@ -1,8 +1,9 @@
-import { AudioWaveform, Gauge, Mic2, Orbit, Radio, RotateCcw, Rabbit, Snail, Sparkles, Speaker, Waves } from 'lucide-react';
+import { AudioWaveform, Gauge, Mic2, Orbit, Radio, RotateCcw, Rabbit, Save, Snail, Sparkles, Speaker, Star, Waves, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { SoundState } from '@/lib/api';
+import { ActivitySpinner } from '@/components/activity/ActivityArtwork';
 
 const SOUND_PRESETS: { value: string; label: string; icon: LucideIcon }[] = [
   { value: 'bassboost', label: 'Bass boost', icon: Speaker },
@@ -31,21 +32,74 @@ function formatDb(value: number) {
   return `${value > 0 ? '+' : ''}${value}`;
 }
 
+export type SavedSound = { id: string; name: string; sound: SoundState; createdAt: number };
+
 type ActivitySoundPanelProps = {
   sound: SoundState | undefined;
   canEdit: boolean;
   onChange: (sound: SoundState) => Promise<boolean>;
+  libraryRequest: <T>(path: string, body?: Record<string, unknown>) => Promise<T>;
+  notify: (message: string, tone: 'success' | 'error' | 'info') => void;
 };
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 // Edits stay local while the user drags and are sent at most every SEND_DELAY_MS, so the
 // SSE status echo can't yank a slider back mid-gesture.
-export function ActivitySoundPanel({ sound, canEdit, onChange }: ActivitySoundPanelProps) {
+export function ActivitySoundPanel({ sound, canEdit, onChange, libraryRequest, notify }: ActivitySoundPanelProps) {
   const remote = sound ?? DEFAULT_SOUND;
   const [draft, setDraft] = useState<SoundState | null>(null);
   const timerRef = useRef<number | null>(null);
   const pendingRef = useRef<SoundState | null>(null);
   const inFlightRef = useRef(false);
   const value = draft ?? remote;
+  const [saved, setSaved] = useState<SavedSound[]>([]);
+  const [saveName, setSaveName] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    libraryRequest<{ sounds?: SavedSound[] }>('')
+      .then((snapshot) => {
+        if (!cancelled) setSaved(snapshot.sounds ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryRequest]);
+
+  // Saving only copies the current sound into your own library, so listeners can do it too.
+  const saveCurrent = async () => {
+    const name = saveName.trim();
+    if (!name) return;
+    setBusy('save');
+    try {
+      const result = await libraryRequest<{ sounds: SavedSound[]; replaced: boolean }>('/sounds/save', { name, sound: value });
+      setSaved(result.sounds);
+      setSaveName('');
+      notify(`${result.replaced ? 'Updated' : 'Saved'} ${name}`, 'success');
+    } catch (error) {
+      notify(errorMessage(error, 'Could not save this sound'), 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const removeSaved = async (entry: SavedSound) => {
+    setBusy(`remove:${entry.id}`);
+    try {
+      const result = await libraryRequest<{ sounds: SavedSound[] }>('/sounds/remove', { id: entry.id });
+      setSaved(result.sounds);
+      notify(`Removed ${entry.name}`, 'success');
+    } catch (error) {
+      notify(errorMessage(error, 'Could not remove this sound'), 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const flush = useCallback(async () => {
     if (timerRef.current) window.clearTimeout(timerRef.current);
@@ -107,6 +161,60 @@ export function ActivitySoundPanel({ sound, canEdit, onChange }: ActivitySoundPa
               </button>
             );
           })}
+        </div>
+      </section>
+
+      <section aria-label="Your sounds">
+        <div className="activity-sound-heading"><span>Your sounds</span><small>{saved.length}/15</small></div>
+        {saved.length > 0 && (
+          <div className="activity-sound-presets activity-sound-saved">
+            {saved.map((entry, index) => {
+              const active = sameSound(value, entry.sound);
+              return (
+                <div key={entry.id} className="activity-sound-saved-item" style={{ '--stagger-index': index } as CSSProperties}>
+                  <button
+                    type="button"
+                    className={`activity-sound-preset${active ? ' is-active' : ''}`}
+                    aria-pressed={active}
+                    disabled={!canEdit}
+                    onClick={() => update(entry.sound, true)}
+                    title={canEdit ? `Load ${entry.name}` : 'Only DJs can load a sound'}
+                  >
+                    <Star size={16} />
+                    <span>{entry.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="activity-sound-saved-remove"
+                    disabled={Boolean(busy)}
+                    onClick={() => removeSaved(entry)}
+                    aria-label={`Remove ${entry.name}`}
+                    title="Remove"
+                  >
+                    {busy === `remove:${entry.id}` ? <ActivitySpinner /> : <X size={12} />}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="activity-search-box activity-sound-save">
+          <Save size={16} />
+          <input
+            value={saveName}
+            maxLength={40}
+            onChange={(event) => setSaveName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              void saveCurrent();
+            }}
+            placeholder="Name this sound to save it"
+            aria-label="Name for the saved sound"
+          />
+          <button type="button" onClick={saveCurrent} disabled={!saveName.trim() || Boolean(busy)} aria-label="Save sound">
+            {busy === 'save' ? <ActivitySpinner /> : <Star size={16} />}
+          </button>
         </div>
       </section>
 

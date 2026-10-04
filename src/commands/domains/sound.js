@@ -10,6 +10,7 @@ const {
   isDefaultSound,
   normalizeSoundState,
 } = require('../../music/sound');
+const defaultLibrary = require('../../music/library');
 
 const COMPONENT_PREFIX = 'sound:';
 const EQ_STEP_DB = 1;
@@ -21,6 +22,8 @@ const KNOBS = [
   { id: 'pitch', label: 'Pitch', kind: 'tempo' },
 ];
 const DEFAULT_KNOB = 'bass';
+const SAVED_PREFIX = 'mine:';
+const SAVE_NAME_INPUT = 'name';
 
 function findKnob(id) {
   return KNOBS.find((knob) => knob.id === id) ?? KNOBS.find((knob) => knob.id === DEFAULT_KNOB);
@@ -64,7 +67,7 @@ function describeSound(state, selectedKnob) {
   return `\`\`\`\n${rows.join('\n')}\n\`\`\``;
 }
 
-function buildSoundPanel(context, { guildId, state, knob = DEFAULT_KNOB }) {
+function buildSoundPanel(context, { guildId, state, knob = DEFAULT_KNOB, saved = [] }) {
   const {
     EmbedBuilder,
     ActionRowBuilder,
@@ -92,6 +95,12 @@ function buildSoundPanel(context, { guildId, state, knob = DEFAULT_KNOB }) {
         value,
         description: preset.description.slice(0, 100),
         default: state.preset === value,
+      })),
+      // 1 + 9 built-in presets + up to 15 saved ones fits the 25-option limit.
+      ...saved.slice(0, 15).map((entry) => ({
+        label: `⭐ ${entry.name}`.slice(0, 100),
+        value: `${SAVED_PREFIX}${entry.id}`,
+        description: 'Your saved sound: preset, EQ, speed and pitch.',
       })),
     );
 
@@ -121,13 +130,26 @@ function buildSoundPanel(context, { guildId, state, knob = DEFAULT_KNOB }) {
         button('up', `${selected.label} +${step}`, ButtonStyle.Primary),
         button('zero', `Center ${selected.label}`),
         button('reset', 'Reset all', ButtonStyle.Danger),
+        button('saveas', 'Save as…', ButtonStyle.Success),
       ),
     ],
   };
 }
 
 const createSoundCommands = (context) => {
-  const { SlashCommandBuilder, MessageFlags, ensurePlayer, assertDJ, CommandError, queuePersist } = context;
+  const {
+    SlashCommandBuilder,
+    MessageFlags,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ActionRowBuilder,
+    ensurePlayer,
+    assertDJ,
+    CommandError,
+    queuePersist,
+    library = defaultLibrary,
+  } = context;
 
   async function commit(interaction, player, state) {
     const applied = await applySound(player, state);
@@ -138,6 +160,16 @@ const createSoundCommands = (context) => {
       // The now-playing message is cosmetic; the sound change already went through.
     }
     return applied;
+  }
+
+  const savedFor = (interaction) => library.listSounds(interaction.user?.id);
+  const panel = (interaction, guildId, state, knob) =>
+    buildSoundPanel(context, { guildId, state, knob, saved: savedFor(interaction) });
+
+  function savedSound(interaction, idOrName) {
+    const entry = library.findSound(interaction.user?.id, idOrName);
+    if (!entry) throw new CommandError('You have no saved sound with that name. Save one with **Save as…** in `/sound`.');
+    return entry;
   }
 
   return [
@@ -153,51 +185,110 @@ const createSoundCommands = (context) => {
             { name: 'No preset', value: 'off' },
             ...Object.entries(SOUND_PRESETS).map(([value, preset]) => ({ name: preset.label, value })),
           ))
+        .addStringOption((option) => option
+          .setName('saved')
+          .setDescription('Load one of your saved sounds.')
+          .setAutocomplete(true))
+        .addStringOption((option) => option
+          .setName('forget')
+          .setDescription('Delete one of your saved sounds.')
+          .setAutocomplete(true))
         .addBooleanOption((option) => option
           .setName('reset')
           .setDescription('Reset everything to flat before opening the panel.')),
+      async autocomplete(interaction) {
+        const term = String(interaction.options.getFocused() ?? '').toLowerCase();
+        const choices = savedFor(interaction)
+          .filter((entry) => entry.name.toLowerCase().includes(term))
+          .slice(0, 25)
+          .map((entry) => ({ name: entry.name, value: entry.id }));
+        await interaction.respond(choices);
+      },
       async execute(interaction) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const forget = interaction.options.getString('forget');
+        if (forget) {
+          const removed = library.removeSound(interaction.user?.id, forget);
+          if (!removed) throw new CommandError('You have no saved sound with that name.');
+          await interaction.editReply(`Deleted your saved sound **${removed.name}**.`);
+          return;
+        }
+
         const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
         assertDJ(interaction, config);
 
         let state = getSoundState(player);
         const preset = interaction.options.getString('preset');
+        const saved = interaction.options.getString('saved');
         const reset = interaction.options.getBoolean('reset') === true;
-        if (reset || preset) {
+        if (reset || preset || saved) {
           state = reset ? defaultSoundState() : state;
+          if (saved) state = normalizeSoundState(savedSound(interaction, saved).sound);
           if (preset) state = { ...state, preset: preset === 'off' ? null : preset };
           state = await commit(interaction, player, state);
         }
-        await interaction.editReply(buildSoundPanel(context, { guildId: interaction.guildId, state }));
+        await interaction.editReply(panel(interaction, interaction.guildId, state));
       },
       async handleComponent(interaction) {
         const [guildId, action, knobId] = interaction.customId.slice(COMPONENT_PREFIX.length).split(':');
         if (guildId !== interaction.guildId) throw new CommandError('This panel belongs to another server.');
-        const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
-        assertDJ(interaction, config);
 
+        // Opening the name prompt must be the first reply, so it skips the player lookup.
+        if (action === 'saveas') {
+          await interaction.showModal(new ModalBuilder()
+            .setCustomId(`${COMPONENT_PREFIX}${guildId}:save:${findKnob(knobId).id}`)
+            .setTitle('Save this sound')
+            .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder()
+              .setCustomId(SAVE_NAME_INPUT)
+              .setLabel('Name')
+              .setPlaceholder('Late night bass')
+              .setStyle(TextInputStyle.Short)
+              .setMaxLength(library.LIBRARY_LIMITS.soundName)
+              .setRequired(true))));
+          return;
+        }
+
+        const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
         const current = getSoundState(player);
+
+        // Saving only copies the current sound into your own library, so it needs no DJ rights.
+        if (action === 'save') {
+          const result = library.saveSound(interaction.user?.id, interaction.fields.getTextInputValue(SAVE_NAME_INPUT), current);
+          if (!result.ok) {
+            throw new CommandError(result.reason === 'limit'
+              ? `You can keep up to ${library.LIBRARY_LIMITS.sounds} saved sounds. Delete one with \`/sound forget\`.`
+              : 'Give the sound a name.');
+          }
+          await interaction.update(panel(interaction, guildId, current, knobId));
+          await interaction.followUp({
+            content: `⭐ ${result.replaced ? 'Updated' : 'Saved'} **${result.entry.name}**. Load it from the preset menu or with \`/sound saved\`.`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        assertDJ(interaction, config);
         if (action === 'knob') {
-          await interaction.update(buildSoundPanel(context, { guildId, state: current, knob: interaction.values?.[0] }));
+          await interaction.update(panel(interaction, guildId, current, interaction.values?.[0]));
           return;
         }
 
         let next;
         if (action === 'preset') {
-          const value = interaction.values?.[0];
-          next = { ...current, preset: value === 'off' ? null : value };
+          const value = interaction.values?.[0] ?? '';
+          if (value.startsWith(SAVED_PREFIX)) next = savedSound(interaction, value.slice(SAVED_PREFIX.length)).sound;
+          else next = { ...current, preset: value === 'off' ? null : value };
         } else if (action === 'up') next = adjustSound(current, knobId, 1);
         else if (action === 'down') next = adjustSound(current, knobId, -1);
         else if (action === 'zero') next = adjustSound(current, knobId, null);
         else if (action === 'reset') next = defaultSoundState();
         else return;
 
-        const state = await commit(interaction, player, next);
-        await interaction.update(buildSoundPanel(context, { guildId, state, knob: knobId }));
+        const state = await commit(interaction, player, normalizeSoundState(next));
+        await interaction.update(panel(interaction, guildId, state, knobId));
       },
     },
   ];
 };
 
-module.exports = { createSoundCommands, buildSoundPanel, adjustSound, eqBar, KNOBS, COMPONENT_PREFIX };
+module.exports = { createSoundCommands, buildSoundPanel, SAVED_PREFIX, adjustSound, eqBar, KNOBS, COMPONENT_PREFIX };
