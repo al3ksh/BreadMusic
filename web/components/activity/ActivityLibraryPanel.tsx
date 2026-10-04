@@ -1,4 +1,4 @@
-import { ArrowLeft, Download, Heart, ListMusic, ListPlus, Play, Plus, Shuffle, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Copy, Download, Heart, ListMusic, ListPlus, Play, Plus, Share2, Shuffle, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
@@ -21,6 +21,7 @@ export type LibraryPlaylistSummary = {
   duration: number;
   artwork?: string | null;
   updatedAt?: number;
+  shareCode?: string | null;
 };
 
 export type LibrarySnapshot = {
@@ -29,7 +30,7 @@ export type LibrarySnapshot = {
   limits?: { liked: number; playlists: number; tracks: number; name: number };
 };
 
-type LibraryPlaylist = { id: string; name: string; tracks: LibraryEntry[] };
+type LibraryPlaylist = { id: string; name: string; tracks: LibraryEntry[]; shareCode?: string | null };
 
 type LibraryRequest = <T>(path: string, body?: Record<string, unknown>) => Promise<T>;
 
@@ -54,6 +55,11 @@ function formatDuration(duration: number) {
 
 function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
+}
+
+// Mirrors parseShareCode in src/music/library.js.
+function isShareCode(value: string) {
+  return /^[A-HJ-KM-NP-Z2-9]{8}$/.test(value.toUpperCase().replace(/[\s-]/g, ''));
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -140,7 +146,7 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
     if (!url) return;
     void run('import', async () => {
       const result = await request<{ playlist: LibraryPlaylistSummary; added: number }>('/import', { url });
-      notify(`Imported ${plural(result.added, 'track')} as ${result.playlist.name}`, 'success');
+      notify(`${isShareCode(url) ? 'Copied' : 'Imported'} ${plural(result.added, 'track')} as ${result.playlist.name}`, 'success');
       setImportUrl('');
       await load();
     });
@@ -156,6 +162,24 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
     setDetail(result.playlist);
     await load();
   });
+
+  const setShared = (enabled: boolean) => run('share', async () => {
+    if (!detail) return;
+    const result = await request<{ code: string | null }>(`/playlists/${encodeURIComponent(detail.id)}/share`, { enabled });
+    setDetail({ ...detail, shareCode: result.code });
+    if (!enabled) notify(`${detail.name} is no longer shared`, 'info');
+    await load();
+  });
+
+  // Discord can block the clipboard inside an Activity; the code stays selectable then.
+  const copyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      notify('Share code copied', 'success');
+    } catch {
+      notify('Select the code to copy it', 'info');
+    }
+  };
 
   const deleteOpen = () => run('delete', async () => {
     if (!detail) return;
@@ -196,6 +220,18 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
             {!isLiked && (
               <button
                 type="button"
+                className={detail?.shareCode ? 'is-active' : ''}
+                disabled={loading || Boolean(busy)}
+                onClick={() => (detail?.shareCode ? copyCode(detail.shareCode) : setShared(true))}
+                aria-label={detail?.shareCode ? `Copy share code for ${name}` : `Share ${name}`}
+                title={detail?.shareCode ? 'Copy share code' : 'Share'}
+              >
+                <Share2 size={15} />
+              </button>
+            )}
+            {!isLiked && (
+              <button
+                type="button"
                 className={confirmDelete ? 'is-danger' : ''}
                 disabled={loading || Boolean(busy)}
                 onClick={() => (confirmDelete ? deleteOpen() : setConfirmDelete(true))}
@@ -207,6 +243,19 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
             )}
           </div>
         </div>
+        {detail?.shareCode && (
+          <div className="activity-library-share" role="group" aria-label="Share code">
+            <div>
+              <span>Share code</span>
+              <code>{detail.shareCode}</code>
+              <small>Others paste it into Import or use /playlist import. They get their own copy.</small>
+            </div>
+            <button type="button" onClick={() => copyCode(detail.shareCode as string)} aria-label="Copy share code" title="Copy">
+              <Copy size={15} />
+            </button>
+            <button type="button" disabled={Boolean(busy)} onClick={() => setShared(false)}>Stop sharing</button>
+          </div>
+        )}
         {loading ? (
           <div className="activity-empty"><ActivitySpinner /> Loading playlist</div>
         ) : tracks.length === 0 ? (
@@ -245,8 +294,8 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
         <input
           value={importUrl}
           onChange={(event) => setImportUrl(event.target.value)}
-          placeholder="Import a Spotify, YouTube or SoundCloud link"
-          aria-label="Playlist link to import"
+          placeholder="Import a playlist link or share code"
+          aria-label="Playlist link or share code to import"
           maxLength={500}
         />
         <button type="submit" disabled={!importUrl.trim() || Boolean(busy)}>

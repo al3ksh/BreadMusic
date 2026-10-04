@@ -12,7 +12,7 @@ const current = {
 };
 
 type Entry = { key: string; title: string; author: string; duration: number; artwork: null };
-type Playlist = { id: string; name: string; tracks: Entry[] };
+type Playlist = { id: string; name: string; tracks: Entry[]; shareCode?: string | null };
 
 const entry = (key: string, title: string): Entry => ({ key, title, author: 'Bread Band', duration: 200_000, artwork: null });
 
@@ -34,6 +34,7 @@ async function mockLibraryApi(page: Page) {
     duration: playlist.tracks.reduce((total, track) => total + track.duration, 0),
     artwork: null,
     updatedAt: 1,
+    shareCode: playlist.shareCode ?? null,
   });
   const snapshot = () => ({ liked: state.liked, playlists: state.playlists.map(summary), limits: { liked: 500, playlists: 50, tracks: 500, name: 60 } });
   const status = {
@@ -64,12 +65,16 @@ async function mockLibraryApi(page: Page) {
         state.playlists.unshift(playlist);
         return json(route, { success: true, playlist: summary(playlist), added: 1, skipped: 0 });
       }
-      const match = rest.match(/^\/playlists\/([^/]+)(?:\/(remove|delete))?$/);
+      const match = rest.match(/^\/playlists\/([^/]+)(?:\/(remove|delete|share))?$/);
       const playlist = match && state.playlists.find((item) => item.id === match[1]);
       if (match && playlist) {
         if (match[2] === 'remove') {
           playlist.tracks.splice(body.index, 1);
           return json(route, { success: true, playlist });
+        }
+        if (match[2] === 'share') {
+          playlist.shareCode = body.enabled === false ? null : 'BRD2345K';
+          return json(route, { success: true, playlist: summary(playlist), code: playlist.shareCode });
         }
         if (match[2] === 'delete') {
           state.playlists = state.playlists.filter((item) => item !== playlist);
@@ -128,7 +133,7 @@ test('listeners play, import and curate their own library', async ({ page }) => 
   await panel.getByRole('button', { name: 'Shuffle Road trip' }).click();
   await expect.poll(() => state.played.at(-1)).toEqual({ playlistId: 'pl-1', shuffle: true });
 
-  await panel.getByRole('textbox', { name: 'Playlist link to import' }).fill('https://open.spotify.com/playlist/abc');
+  await panel.getByRole('textbox', { name: 'Playlist link or share code to import' }).fill('https://open.spotify.com/playlist/abc');
   await panel.getByRole('button', { name: 'Import' }).click();
   await expect(panel.getByRole('button', { name: 'Open Imported mix' })).toBeVisible();
   expect(state.imported).toEqual(['https://open.spotify.com/playlist/abc']);
@@ -142,6 +147,14 @@ test('listeners play, import and curate their own library', async ({ page }) => 
   await panel.getByRole('button', { name: 'Remove Highway' }).click();
   await expect(panel.getByText('Highway')).toHaveCount(0);
   await expect(panel.getByText('1 track', { exact: true })).toBeVisible();
+
+  await panel.getByRole('button', { name: 'Share Road trip' }).click();
+  const share = panel.getByRole('group', { name: 'Share code' });
+  await expect(share.locator('code')).toHaveText('BRD2345K');
+  await expect(panel.getByRole('button', { name: 'Copy share code for Road trip' })).toBeVisible();
+  await share.getByRole('button', { name: 'Stop sharing' }).click();
+  await expect(share).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Share Road trip' })).toBeVisible();
 
   await panel.getByRole('button', { name: 'Delete Road trip' }).click();
   await panel.getByRole('button', { name: 'Confirm deleting Road trip' }).click();

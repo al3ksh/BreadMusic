@@ -97,3 +97,21 @@ test('/playlist play and /liked queue saved tracks', async () => {
   await run('liked', undefined, { shuffle: true });
   assert.equal(player.queue.tracks.at(-1).encoded, 'enc-fav');
 });
+
+test('/playlist share gives a code that /playlist import copies', async () => {
+  const owner = setup('cmd-share-owner');
+  const friend = setup('cmd-share-friend');
+  library.createPlaylist('cmd-share-owner', 'Mix', [track('M1', 'm1'), track('M2', 'm2')]);
+  await assert.rejects(owner.run('playlist', 'share', { name: 'nope' }), /no playlist called/);
+
+  const shared = await owner.run('playlist', 'share', { name: 'mix' });
+  const code = shared.content.match(/`([A-Z0-9]{8})`/)[1];
+  assert.match((await owner.run('playlist', 'list')).embeds[0].data.description, new RegExp(`shared as \`${code}\``));
+
+  assert.match((await friend.run('playlist', 'import', { url: code.toLowerCase() })).content, /Copied \*\*2\*\* tracks to \*\*Mix\*\*/);
+  await assert.rejects(owner.run('playlist', 'import', { url: code }), /your own playlist/);
+
+  assert.match((await owner.run('playlist', 'share', { name: 'Mix', stop: true })).content, /no longer shared/);
+  await assert.rejects(friend.run('playlist', 'import', { url: code }), /No shared playlist/);
+  await assert.rejects(friend.run('playlist', 'import', { url: 'not a link' }), /share code/);
+});

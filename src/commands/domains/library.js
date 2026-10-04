@@ -6,6 +6,11 @@ const CREATE_FAILURES = {
   limit: `You can keep up to ${library.LIBRARY_LIMITS.playlists} playlists.`,
 };
 
+const SHARE_FAILURES = {
+  unknown: 'No shared playlist has that code.',
+  own: 'That is your own playlist.',
+};
+
 function findUsableNode(client) {
   const nodes = client.lavalink?.nodeManager?.nodes;
   if (!nodes) return null;
@@ -110,7 +115,7 @@ const createLibraryCommands = (context) => {
     const playlists = library.listPlaylists(userId);
     const likedCount = library.listLiked(userId).length;
     const lines = playlists.map((playlist) =>
-      `**${playlist.name}** - ${playlist.trackCount} track${playlist.trackCount === 1 ? '' : 's'}, ${formatDuration(playlist.duration)}`);
+      `**${playlist.name}** - ${playlist.trackCount} track${playlist.trackCount === 1 ? '' : 's'}, ${formatDuration(playlist.duration)}${playlist.shareCode ? ` - shared as \`${playlist.shareCode}\`` : ''}`);
     const embed = new EmbedBuilder()
       .setTitle('Your library')
       .setDescription([
@@ -130,10 +135,29 @@ const createLibraryCommands = (context) => {
     await interaction.reply({ content: `Deleted **${playlist.name}**.`, flags: MessageFlags.Ephemeral });
   }
 
+  async function share(interaction) {
+    const name = interaction.options.getString('name', true);
+    const stop = interaction.options.getBoolean('stop') ?? false;
+    const result = library.setPlaylistShared(interaction.user.id, name, !stop);
+    if (!result.ok) throw new CommandError(`You have no playlist called **${name}**.`);
+    const content = stop
+      ? `**${result.playlist.name}** is no longer shared. Copies others already made stay theirs.`
+      : `Share code for **${result.playlist.name}**: \`${result.code}\`
+Others can copy it with \`/playlist import url:${result.code}\` or the Library tab in Activity.`;
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+  }
+
   async function importLink(interaction) {
     const url = interaction.options.getString('url', true).trim();
     const name = interaction.options.getString('name');
-    if (!/^https?:\/\//i.test(url)) throw new CommandError('Paste a Spotify, YouTube or SoundCloud playlist link.');
+    const shareCode = library.parseShareCode(url);
+    if (shareCode) {
+      const copied = library.importShared(interaction.user.id, shareCode, name);
+      if (!copied.ok) throw new CommandError(SHARE_FAILURES[copied.reason] ?? CREATE_FAILURES[copied.reason]);
+      await interaction.reply({ content: `${describeSave(copied, 'Copied')} Play it with \`/playlist play\`.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) throw new CommandError('Paste a Spotify, YouTube or SoundCloud playlist link, or a share code.');
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const node = findUsableNode(interaction.client);
     if (!node) throw new CommandError('No available Lavalink connection.');
@@ -145,15 +169,12 @@ const createLibraryCommands = (context) => {
     }
     const tracks = result?.tracks ?? [];
     if (tracks.length === 0) throw new CommandError('No tracks found at that link.');
-    let created = library.createPlaylist(interaction.user.id, name || result?.playlist?.name || 'Imported', tracks);
-    for (let suffix = 2; !created.ok && created.reason === 'exists' && suffix < 100; suffix += 1) {
-      created = library.createPlaylist(interaction.user.id, `${(name || result?.playlist?.name || 'Imported').slice(0, 54)} (${suffix})`, tracks);
-    }
+    const created = library.createPlaylistWithFreeName(interaction.user.id, name || result?.playlist?.name || 'Imported', tracks);
     if (!created.ok) throw new CommandError(CREATE_FAILURES[created.reason]);
     await interaction.editReply(`${describeSave(created, 'Imported')} Play it with \`/playlist play\`.`);
   }
 
-  const handlers = { play, save, add, list, delete: remove, import: importLink };
+  const handlers = { play, save, add, list, delete: remove, import: importLink, share };
   const nameOption = (description, autocomplete = true) => (option) =>
     option.setName('name').setDescription(description).setRequired(true).setMaxLength(library.LIBRARY_LIMITS.name).setAutocomplete(autocomplete);
 
@@ -172,8 +193,11 @@ const createLibraryCommands = (context) => {
         .addSubcommand((sub) => sub.setName('list').setDescription('Show your playlists.'))
         .addSubcommand((sub) => sub.setName('delete').setDescription('Delete one of your playlists.')
           .addStringOption(nameOption('Playlist name.')))
-        .addSubcommand((sub) => sub.setName('import').setDescription('Import a Spotify, YouTube or SoundCloud playlist link.')
-          .addStringOption((option) => option.setName('url').setDescription('Playlist link.').setRequired(true).setMaxLength(500))
+        .addSubcommand((sub) => sub.setName('share').setDescription('Get a code others can use to copy one of your playlists.')
+          .addStringOption(nameOption('Playlist name.'))
+          .addBooleanOption((option) => option.setName('stop').setDescription('Stop sharing it instead.')))
+        .addSubcommand((sub) => sub.setName('import').setDescription('Import a playlist link, or copy a playlist from a share code.')
+          .addStringOption((option) => option.setName('url').setDescription('Spotify, YouTube or SoundCloud link, or a share code.').setRequired(true).setMaxLength(500))
           .addStringOption((option) => option.setName('name').setDescription('Name for the playlist (defaults to the original).').setMaxLength(library.LIBRARY_LIMITS.name))),
       async execute(interaction) {
         await handlers[interaction.options.getSubcommand()](interaction);

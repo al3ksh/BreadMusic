@@ -175,6 +175,26 @@ test('imports load the link through Lavalink and pick a free name', async () => 
   });
 });
 
+test('history links are liked and added to playlists through Lavalink', async () => {
+  const searchResult = { loadType: 'track', tracks: [track('Old song', 'old00000001')] };
+  await withApp({ searchResult }, async ({ post, get, userId, calls }) => {
+    const liked = await post('/library/liked/add', { uri: 'https://www.youtube.com/watch?v=old00000001' });
+    assert.equal(liked.status, 200);
+    assert.equal(liked.body.title, 'Old song');
+    assert.deepEqual(calls[0], ['search', 'https://www.youtube.com/watch?v=old00000001']);
+    assert.deepEqual((await get('/library')).body.liked.map((entry) => entry.title), ['Old song']);
+
+    library.createPlaylist(userId, 'Later', []);
+    const added = await post('/library/playlists/later/add', { from: 'uri', uri: 'https://www.youtube.com/watch?v=old00000001' });
+    assert.equal(added.status, 200);
+    assert.equal(added.body.added, 1);
+    assert.equal((await post('/library/liked/add', { uri: 'local upload' })).status, 400);
+  });
+  await withApp({}, async ({ post }) => {
+    assert.equal((await post('/library/liked/add', { uri: 'https://www.youtube.com/watch?v=gone' })).status, 404);
+  });
+});
+
 test('the library player action queues a playlist for listeners with queue rights', async () => {
   await withApp({}, async ({ post, userId, player, calls }) => {
     library.createPlaylist(userId, 'Set', [track('S1', 's1'), track('S2', 's2')]);
@@ -216,4 +236,27 @@ test('playlist links must be http(s)', () => {
   assert.equal(isPlaylistUrl('https://soundcloud.com/a/sets/b'), true);
   assert.equal(isPlaylistUrl('javascript:alert(1)'), false);
   assert.equal(isPlaylistUrl(42), false);
+});
+
+test('a shared playlist is copied by another listener through the import box', async () => {
+  let code;
+  await withApp({ queue: [track('Next', 'next0000001')] }, async ({ post }) => {
+    const created = await post('/library/playlists', { name: 'Shared mix', from: 'queue' });
+    const shared = await post(`/library/playlists/${created.body.playlist.id}/share`);
+    assert.equal(shared.status, 200);
+    code = shared.body.code;
+    assert.equal(shared.body.playlist.shareCode, code);
+    assert.equal((await post('/library/import', { url: code })).body.reason, 'own');
+    assert.equal((await post('/library/playlists/missing/share')).status, 404);
+  });
+  await withApp({}, async ({ get, post, calls }) => {
+    const copied = await post('/library/import', { url: ` ${code.toLowerCase()} ` });
+    assert.equal(copied.status, 200);
+    assert.equal(copied.body.added, 2);
+    assert.equal(copied.body.playlist.name, 'Shared mix');
+    assert.equal(calls.some((call) => call[0] === 'search'), false);
+    assert.equal((await get('/library')).body.playlists[0].shareCode, null);
+    assert.equal((await post('/library/import', { url: 'ZZZZZZZZ' })).status, 404);
+    assert.equal((await post('/library/import', { url: 'nope' })).body.error, 'Paste a playlist link or a share code.');
+  });
 });

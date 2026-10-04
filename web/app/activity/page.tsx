@@ -933,6 +933,8 @@ export default function ActivityPage() {
     }
   }, [channelId, guildId, notify, summoning]);
 
+  const bumpLibrary = useCallback(() => setLibraryRefreshKey((key) => key + 1), []);
+
   const requeueHistoryTrack = useCallback((uri: string) => {
     const queued = playerAction('play', { query: uri });
     if (queued instanceof Promise) {
@@ -1799,10 +1801,14 @@ export default function ActivityPage() {
                     {queueView === 'history' ? (
                       <ActivityHistoryPanel
                         canDj={canDj}
+                        canQueue={canQueue}
                         actionBusy={actionBusy}
                         fetchHistoryPage={fetchHistoryPage}
                         onRequeue={requeueHistoryTrack}
                         onPlayNow={playHistoryTrackNow}
+                        libraryRequest={libraryRequest}
+                        onLibraryChange={bumpLibrary}
+                        notify={notify}
                       />
                     ) : (
                       <ActivityQueuePanel

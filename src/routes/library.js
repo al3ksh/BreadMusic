@@ -16,6 +16,11 @@ const CREATE_FAILURES = {
   limit: 'You have reached the playlist limit.',
 };
 
+const SHARE_FAILURES = {
+  unknown: 'No shared playlist has that code.',
+  own: 'That is your own playlist.',
+};
+
 const ADD_FAILURES = {
   missing: 'Playlist not found.',
   full: 'This playlist is full.',
@@ -66,6 +71,36 @@ function createLibraryRouter({
     return res.json({ ...playlist, tracks: playlist.tracks.map(publicEntry) });
   });
 
+  // History rows only keep a link, so a single track is loaded back through Lavalink.
+  async function resolveSingle(req, res) {
+    const uri = typeof req.body?.uri === 'string' ? req.body.uri.trim() : '';
+    if (!isPlaylistUrl(uri)) {
+      res.status(400).json({ error: 'This track has no link to save.' });
+      return null;
+    }
+    const node = getUsableNode(client);
+    if (!node) {
+      res.status(503).json({ error: 'No Lavalink node available' });
+      return null;
+    }
+    try {
+      const result = await node.search({ query: uri }, getDashboardRequester(req, client));
+      const track = result?.tracks?.[0];
+      if (track && library.canSaveTrack(track)) return track;
+    } catch (error) {
+      console.warn('[Library] Track lookup failed:', error.message);
+    }
+    res.status(404).json({ error: 'This track cannot be saved.' });
+    return null;
+  }
+
+  router.post(`${base}/liked/add`, ...mutate, async (req, res) => {
+    const track = await resolveSingle(req, res);
+    if (!track) return undefined;
+    library.setLiked(userIdOf(req), track, true);
+    return res.json({ success: true, liked: true, title: track.info.title });
+  });
+
   router.post(`${base}/liked/remove`, ...mutate, (req, res) => {
     const key = typeof req.body?.key === 'string' ? req.body.key : '';
     if (!library.removeLiked(userIdOf(req), key)) return res.status(404).json({ error: 'Track is not in your Liked list.' });
@@ -83,9 +118,16 @@ function createLibraryRouter({
     return res.json({ success: true, playlist: result.playlist, added: result.added, skipped: result.skipped });
   });
 
-  router.post(`${base}/playlists/:playlistId/add`, ...mutate, (req, res) => {
-    const tracks = sourceTracks(req.params.guildId, req.body?.from === 'queue' ? 'queue' : 'current');
-    if (tracks.length === 0) return res.status(409).json({ error: 'Nothing is playing right now.' });
+  router.post(`${base}/playlists/:playlistId/add`, ...mutate, async (req, res) => {
+    let tracks;
+    if (req.body?.from === 'uri') {
+      const track = await resolveSingle(req, res);
+      if (!track) return undefined;
+      tracks = [track];
+    } else {
+      tracks = sourceTracks(req.params.guildId, req.body?.from === 'queue' ? 'queue' : 'current');
+      if (tracks.length === 0) return res.status(409).json({ error: 'Nothing is playing right now.' });
+    }
     const result = library.addToPlaylist(userIdOf(req), req.params.playlistId, tracks);
     if (!result.ok) return res.status(result.reason === 'missing' ? 404 : 409).json({ error: ADD_FAILURES[result.reason], reason: result.reason });
     return res.json({ success: true, playlist: result.playlist, added: result.added, skipped: result.skipped });
@@ -105,10 +147,26 @@ function createLibraryRouter({
     return res.json({ success: true });
   });
 
-  // Loads a Spotify / YouTube / SoundCloud playlist link through Lavalink and saves it.
+  router.post(`${base}/playlists/:playlistId/share`, ...mutate, (req, res) => {
+    const result = library.setPlaylistShared(userIdOf(req), req.params.playlistId, req.body?.enabled !== false);
+    if (!result.ok) return res.status(404).json({ error: ADD_FAILURES.missing });
+    return res.json({ success: true, playlist: result.playlist, code: result.code });
+  });
+
+  // Loads a Spotify / YouTube / SoundCloud playlist link through Lavalink and saves it,
+  // or copies another user's playlist from its share code.
   router.post(`${base}/import`, ...mutate, async (req, res) => {
     const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
-    if (!isPlaylistUrl(url)) return res.status(400).json({ error: 'Paste a playlist link.' });
+    const shareCode = library.parseShareCode(url);
+    if (shareCode) {
+      const copied = library.importShared(userIdOf(req), shareCode, req.body?.name);
+      if (!copied.ok) {
+        const status = copied.reason === 'unknown' ? 404 : 409;
+        return res.status(status).json({ error: SHARE_FAILURES[copied.reason] ?? CREATE_FAILURES[copied.reason], reason: copied.reason });
+      }
+      return res.json({ success: true, playlist: copied.playlist, added: copied.added, skipped: copied.skipped });
+    }
+    if (!isPlaylistUrl(url)) return res.status(400).json({ error: 'Paste a playlist link or a share code.' });
     const node = getUsableNode(client);
     if (!node) return res.status(503).json({ error: 'No Lavalink node available' });
 
@@ -122,19 +180,10 @@ function createLibraryRouter({
     const tracks = result?.tracks ?? [];
     if (tracks.length === 0) return res.status(404).json({ error: 'No tracks found at that link.' });
 
-    const created = createWithFreeName(userIdOf(req), req.body?.name || result?.playlist?.name || 'Imported', tracks);
+    const created = library.createPlaylistWithFreeName(userIdOf(req), req.body?.name || result?.playlist?.name || 'Imported', tracks);
     if (!created.ok) return res.status(created.reason === 'limit' ? 409 : 400).json({ error: CREATE_FAILURES[created.reason], reason: created.reason });
     return res.json({ success: true, playlist: created.playlist, added: created.added, skipped: created.skipped });
   });
-
-  // Imports never fail on a taken name; they get "Name (2)", "Name (3)", ...
-  function createWithFreeName(userId, name, tracks) {
-    let result = library.createPlaylist(userId, name, tracks);
-    for (let suffix = 2; !result.ok && result.reason === 'exists' && suffix < 100; suffix += 1) {
-      result = library.createPlaylist(userId, `${String(name).slice(0, library.LIBRARY_LIMITS.name - 6)} (${suffix})`, tracks);
-    }
-    return result;
-  }
 
   return router;
 }

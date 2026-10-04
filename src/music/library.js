@@ -133,6 +133,7 @@ function summarize(playlist) {
     duration: playlist.tracks.reduce((total, entry) => total + (Number(entry.duration) || 0), 0),
     artwork: playlist.tracks.find((entry) => entry.artwork)?.artwork ?? null,
     updatedAt: playlist.updatedAt,
+    shareCode: playlist.shareCode ?? null,
   };
 }
 
@@ -233,6 +234,67 @@ function deletePlaylist(userId, idOrName) {
   return true;
 }
 
+// Imports never fail on a taken name; they get "Name (2)", "Name (3)", ...
+function createPlaylistWithFreeName(userId, rawName, tracks = [], now = Date.now()) {
+  const name = normalizeName(rawName) || 'Imported';
+  let result = createPlaylist(userId, name, tracks, now);
+  for (let suffix = 2; !result.ok && result.reason === 'exists' && suffix < 100; suffix += 1) {
+    result = createPlaylist(userId, `${name.slice(0, LIBRARY_LIMITS.name - 6)} (${suffix})`, tracks, now);
+  }
+  return result;
+}
+
+// Share codes skip look-alike characters (0/O, 1/I/L) so they survive being read out loud.
+const SHARE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const SHARE_CODE_LENGTH = 8;
+
+function newShareCode() {
+  const bytes = crypto.randomBytes(SHARE_CODE_LENGTH);
+  return Array.from(bytes, (byte) => SHARE_ALPHABET[byte % SHARE_ALPHABET.length]).join('');
+}
+
+// Accepts "ABCD2345" or "abcd-2345"; returns null otherwise.
+function parseShareCode(value) {
+  if (typeof value !== 'string') return null;
+  const compact = value.toUpperCase().replace(/[\s-]/g, '');
+  if (compact.length !== SHARE_CODE_LENGTH) return null;
+  return [...compact].every((char) => SHARE_ALPHABET.includes(char)) ? compact : null;
+}
+
+function findShared(code) {
+  const wanted = parseShareCode(code);
+  if (!wanted) return null;
+  for (const [ownerId, library] of Object.entries(getStore().data)) {
+    const playlist = library?.playlists?.find?.((candidate) => candidate.shareCode === wanted);
+    if (playlist) return { ownerId, playlist };
+  }
+  return null;
+}
+
+// Gives a playlist a share code (keeping an existing one) or, with enabled=false, revokes it.
+function setPlaylistShared(userId, idOrName, enabled = true) {
+  const playlist = findPlaylist(userId, idOrName);
+  if (!playlist) return { ok: false, reason: 'missing' };
+  if (!enabled) {
+    delete playlist.shareCode;
+  } else if (!playlist.shareCode) {
+    let code = newShareCode();
+    while (findShared(code)) code = newShareCode();
+    playlist.shareCode = code;
+  }
+  getStore().save();
+  return { ok: true, playlist: summarize(playlist), code: playlist.shareCode ?? null };
+}
+
+// Copies a shared playlist into the user's library. The copy does not follow later edits.
+function importShared(userId, code, rawName, now = Date.now()) {
+  const shared = findShared(code);
+  if (!shared) return { ok: false, reason: 'unknown' };
+  if (shared.ownerId === userId) return { ok: false, reason: 'own' };
+  const tracks = shared.playlist.tracks.map((entry) => entryToTrack(entry, null));
+  return createPlaylistWithFreeName(userId, rawName || shared.playlist.name, tracks, now);
+}
+
 // The entries to play for the Liked list (LIKED_ID) or a playlist, or null if it is missing.
 function resolvePlayable(userId, idOrName) {
   if (idOrName === LIKED_ID) return { name: 'Liked', tracks: listLiked(userId) };
@@ -277,6 +339,10 @@ module.exports = {
   listPlaylists,
   getPlaylist,
   createPlaylist,
+  createPlaylistWithFreeName,
+  parseShareCode,
+  setPlaylistShared,
+  importShared,
   addToPlaylist,
   removeFromPlaylist,
   deletePlaylist,

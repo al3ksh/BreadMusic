@@ -128,3 +128,31 @@ test('shuffled keeps every item', () => {
   assert.deepEqual([...result].sort(), items);
   assert.deepEqual(items, [1, 2, 3, 4, 5]);
 });
+
+test('share codes copy a playlist to another user and can be revoked', () => {
+  const owner = nextUser();
+  const friend = nextUser();
+  library.createPlaylist(owner, 'Party', [track('P1', 'pppppppppp1'), track('P2', 'pppppppppp2')]);
+  assert.deepEqual(library.setPlaylistShared(owner, 'missing'), { ok: false, reason: 'missing' });
+
+  const shared = library.setPlaylistShared(owner, 'party');
+  assert.match(shared.code, /^[A-HJ-KM-NP-Z2-9]{8}$/);
+  assert.equal(library.setPlaylistShared(owner, 'Party').code, shared.code);
+  assert.equal(library.listPlaylists(owner)[0].shareCode, shared.code);
+  assert.equal(library.parseShareCode(`${shared.code.slice(0, 4).toLowerCase()}-${shared.code.slice(4)}`), shared.code);
+  assert.equal(library.parseShareCode('https://example.com'), null);
+
+  assert.deepEqual(library.importShared(owner, shared.code), { ok: false, reason: 'own' });
+  const copied = library.importShared(friend, shared.code);
+  assert.equal(copied.ok, true);
+  assert.equal(copied.added, 2);
+  assert.equal(copied.playlist.shareCode, null);
+  assert.deepEqual(library.getPlaylist(friend, 'Party').tracks.map((entry) => entry.encoded), ['enc-pppppppppp1', 'enc-pppppppppp2']);
+  assert.equal(library.importShared(friend, shared.code).playlist.name, 'Party (2)');
+
+  // The copy is independent of later edits, and a revoked code stops working.
+  library.removeFromPlaylist(owner, 'Party', 0);
+  assert.equal(library.getPlaylist(friend, 'Party').trackCount, 2);
+  assert.equal(library.setPlaylistShared(owner, 'Party', false).code, null);
+  assert.deepEqual(library.importShared(friend, shared.code), { ok: false, reason: 'unknown' });
+});
