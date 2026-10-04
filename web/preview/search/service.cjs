@@ -21,12 +21,12 @@ function validateQuery(value) {
 // Only presentation code runs here: no bot startup, database or Discord client.
 const root = path.resolve(__dirname, '../../..');
 function loadPresenter(relative) {
-  if (!['src/music/embeds.js', 'src/music/sourceNames.js', 'src/utils/time.js', 'src/theme.js'].includes(relative)) throw new Error('Unexpected presenter dependency');
+  if (!['src/music/embeds.js', 'src/music/sourceNames.js', 'src/utils/time.js', 'src/theme.js', 'src/music/autoplay/normalize.js', 'src/utils/trackTitles.js'].includes(relative)) throw new Error('Unexpected presenter dependency');
   const filename = path.join(root, relative);
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module, exports: module.exports, process: { env: {} }, require(name) {
     if (name === 'discord.js') return require('discord.js');
-    if (name === './autoplay') return { isAutoplayEnabled: () => false };
+    if (name === './autoplay') return { isAutoplayEnabled: () => false, getAutoplayNext: () => null };
     if (name === './uploadArtworkUrls') return { uploadArtworkUrl: () => null };
     return loadPresenter(path.relative(root, path.resolve(path.dirname(filename), `${name}.js`)).replaceAll('\\', '/'));
   } }, { filename });

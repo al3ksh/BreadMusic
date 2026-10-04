@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const discord = require('../../node_modules/discord.js');
 const root = path.resolve(__dirname, '../..');
 const cache = new Map();
-const allowed = new Set(['src/music/embeds.js', 'src/music/ui.js', 'src/music/queueFormatter.js', 'src/music/sourceNames.js', 'src/utils/time.js', 'src/theme.js']);
+const allowed = new Set(['src/music/embeds.js', 'src/music/ui.js', 'src/music/queueFormatter.js', 'src/music/sourceNames.js', 'src/utils/time.js', 'src/theme.js', 'src/music/autoplay/normalize.js', 'src/utils/trackTitles.js']);
 function load(relative) {
   if (cache.has(relative)) return cache.get(relative);
   if (!allowed.has(relative)) throw new Error(`Unexpected presenter dependency: ${relative}`);
@@ -13,7 +13,7 @@ function load(relative) {
   const module = { exports: {} };
   const requirePresenter = (name) => {
     if (name === 'discord.js') return discord;
-    if (name === './autoplay') return { isAutoplayEnabled: () => false };
+    if (name === './autoplay') return { isAutoplayEnabled: () => false, getAutoplayNext: () => null };
     if (name === './playbackErrors') return {};
     if (name === './uploadArtworkUrls') return { uploadArtworkUrl: () => null };
     const resolved = path.relative(root, path.resolve(path.dirname(filename), `${name}.js`)).replaceAll('\\', '/');
