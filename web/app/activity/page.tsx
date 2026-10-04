@@ -1273,6 +1273,23 @@ export default function ActivityPage() {
     container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
   }, [activeLyricIndex, activePanel, lyricsSyncEnabled]);
 
+  // Artwork, title and controls morph between the player and karaoke where View Transitions exist.
+  const switchKaraoke = useCallback((enabled: boolean, extra?: () => void) => {
+    const apply = () => {
+      setKaraokeEnabled(enabled);
+      extra?.();
+    };
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion || typeof document.startViewTransition !== 'function') {
+      apply();
+      return;
+    }
+    const root = document.documentElement;
+    root.classList.add('activity-vt-karaoke');
+    const transition = document.startViewTransition(() => flushSync(apply));
+    transition.finished.finally(() => root.classList.remove('activity-vt-karaoke'));
+  }, []);
+
   useEffect(() => {
     if (!karaokeEnabled || lyricsLoading) return;
     if (lyricsTrackUri !== currentTrackUri || syncedLyrics.length > 0) return;
@@ -1568,7 +1585,7 @@ export default function ActivityPage() {
                 <strong>{status.currentTrack?.title || 'Nothing is playing'}</strong>
                 <span className="activity-karaoke-author">{status.currentTrack?.author || 'Bread'}</span>
               </div>
-              <button type="button" onClick={() => setKaraokeEnabled(false)} title="Exit karaoke" aria-label="Exit karaoke"><X size={16} /></button>
+              <button type="button" onClick={() => switchKaraoke(false)} title="Exit karaoke" aria-label="Exit karaoke"><X size={16} /></button>
             </div>
             <div className="activity-karaoke-lines" aria-live="polite" aria-atomic="true">
               {lyricsLoading ? (
@@ -1833,9 +1850,10 @@ export default function ActivityPage() {
                     onToggleSync={() => setLyricsSyncEnabled((enabled) => !enabled)}
                     onToggleKaraoke={() => {
                       const nextEnabled = !karaokeEnabled;
-                      setLyricsSyncEnabled(nextEnabled);
-                      setKaraokeEnabled(nextEnabled);
-                      closePanel();
+                      switchKaraoke(nextEnabled, () => {
+                        setLyricsSyncEnabled(nextEnabled);
+                        closePanel();
+                      });
                     }}
                     loadLyrics={loadLyrics}
                   />

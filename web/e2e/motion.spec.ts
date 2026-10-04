@@ -59,6 +59,13 @@ async function mockQueueApi(page: Page) {
       state.tracks.splice(start, 1);
       return json(route, { success: true });
     }
+    if (path.endsWith('/lyrics')) {
+      return json(route, {
+        id: 1, title: current.title, artist: current.author, album: null, duration: 301, instrumental: false, provider: 'test',
+        plainLyrics: ['Too late', 'Digital love'].join('\n'),
+        syncedLyrics: ['[00:30.00] Too late', '[00:40.00] Digital love', '[00:50.00] Why do I feel so'].join('\n'),
+      });
+    }
     if (path === '/api/me') return json(route, { id: 'user-1', username: 'tester', discriminator: '0001', avatar: '', global_name: 'Tester' });
     if (path === '/api/activity/config') return json(route, { enabled: true, clientId: 'test-client-id' });
     if (path === '/api/activity/token') return json(route, { access_token: 'test-activity-token' });
@@ -119,4 +126,21 @@ test('reduced motion turns the card and panel animations off', async ({ page }) 
   await expect(card).toBeVisible();
   expect(await card.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
   expect(await panel.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
+});
+
+test('karaoke morphs in and out of the player', async ({ page }) => {
+  await mockQueueApi(page);
+  const activity = await openActivity(page);
+
+  await activity.getByRole('button', { name: /^Lyrics/ }).first().click();
+  await activity.getByRole('button', { name: 'Karaoke', exact: true }).click();
+  const stage = activity.locator('.activity-karaoke-stage');
+  await expect(stage).toBeVisible();
+  await expect(stage.locator('.is-current')).toHaveText('Digital love');
+  const root = activity.locator('html');
+  await expect(root).not.toHaveClass(/activity-vt-karaoke/);
+
+  await activity.getByRole('button', { name: 'Exit karaoke' }).click();
+  await expect(stage).toHaveCount(0);
+  await expect(root).not.toHaveClass(/activity-vt-karaoke/);
 });

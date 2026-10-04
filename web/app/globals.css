@@ -3873,3 +3873,36 @@ html.activity-vt .activity-compact-art {
   background: #7a2338;
   border-color: rgba(255, 120, 150, 0.6);
 }
+
+/* Karaoke on/off: artwork, title and controls morph between the two layouts. */
+html.activity-vt-karaoke .activity-track-art,
+html.activity-vt-karaoke .activity-karaoke-track > :first-child {
+  view-transition-name: activity-art;
+}
+html.activity-vt-karaoke .activity-player-stage .activity-track-copy h1,
+html.activity-vt-karaoke .activity-karaoke-track strong {
+  view-transition-name: activity-title;
+}
+html.activity-vt-karaoke .activity-player-main > .activity-controls-panel,
+html.activity-vt-karaoke .activity-karaoke-player .activity-controls-panel {
+  view-transition-name: activity-controls;
+}
+html.activity-vt-karaoke .activity-karaoke-stage,
+html.activity-vt-karaoke .activity-player-stage {
+  animation: none;
+}
+
+::view-transition-group(activity-title),
+::view-transition-group(activity-controls) {
+  animation-duration: 560ms;
+  animation-timing-function: var(--activity-spring-soft);
+}
+
+::view-transition-old(activity-title),
+::view-transition-new(activity-title) {
+  height: 100%;
+  width: auto;
+  object-fit: none;
+  object-position: left center;
+  animation-duration: 300ms;
+}
