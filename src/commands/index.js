@@ -6,6 +6,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
 } = require('discord.js');
 const { ensureVoice, ensurePlayer, CommandError } = require('../music/utils');
 const { buildTrackEmbed, buildNowPlayingEmbed } = require('../music/embeds');
@@ -147,7 +148,7 @@ async function queuePersist(player) {
 const HELP_CATEGORIES = [
   {
     name: 'Music',
-    description: 'Control playback, queue, and audio filters.',
+    description: 'Control playback, queue, and sound.',
     commands: [
       { name: '/play', value: 'Play or queue a track/playlist.' },
       { name: '/radio', value: 'Play a live radio station (name, genre, country or link).' },
@@ -161,7 +162,8 @@ const HELP_CATEGORIES = [
       { name: '/shuffle', value: 'Shuffle the queue.' },
       { name: '/volume', value: 'Set volume.' },
       { name: '/seek', value: 'Seek to a specific time.' },
-      { name: '/filter', value: 'Apply audio filters.' },
+      { name: '/sound', value: 'Equalizer, presets, speed and pitch in one panel.' },
+      { name: '/history', value: 'Recently played tracks; queue any of them again.' },
       { name: '/leave', value: 'Disconnect the bot.' },
       { name: '/clearqueue', value: 'Clear upcoming tracks.' },
       { name: '/remove', value: 'Remove specific tracks.' },
@@ -169,7 +171,7 @@ const HELP_CATEGORIES = [
       { name: '/skipto', value: 'Skip to a specific track.' },
       { name: '/back', value: 'Play previous track.' },
       { name: '/replay', value: 'Replay current track.' },
-      { name: '/autoplay', value: 'Toggle autoplay, or like, dislike or reroll its picks.' },
+      { name: '/autoplay', value: 'Toggle autoplay, like, dislike or reroll its picks, or review your dislikes.' },
       { name: '/lyrics', value: 'Show lyrics for the current track or a search.' },
     ],
   },
@@ -290,6 +292,9 @@ const { createBlackjackCommands } = require('./domains/games');
 const { createEconomyCommands } = require('./domains/economy');
 const { createArcadeCommands } = require('./domains/arcade');
 
+const { createSoundCommands } = require('./domains/sound');
+const { createHistoryCommands } = require('./domains/history');
+
 const commandContext = {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -298,6 +303,7 @@ const commandContext = {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   ensureVoice,
   ensurePlayer,
   CommandError,
@@ -394,6 +400,8 @@ const commands = [
   ...createRadioCommands(commandContext),
   ...createStatsCommands(commandContext),
   ...createMusicControlCommands(commandContext),
+  ...createSoundCommands(commandContext),
+  ...createHistoryCommands(commandContext),
   ...createLibraryCommands(commandContext),
   ...createConfigCommands(commandContext),
   ...createSystemCommands(commandContext),

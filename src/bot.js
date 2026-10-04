@@ -455,6 +455,18 @@ client.on(Events.InteractionCreate, safeEventHandler('InteractionCreate', async 
       return;
     }
 
+    // Commands that own their buttons and select menus claim them by customId prefix.
+    if (interaction.isMessageComponent()) {
+      const owner = client.commands.find(
+        (command) => command.componentPrefix && interaction.customId.startsWith(command.componentPrefix),
+      );
+      if (owner) {
+        await owner.handleComponent(interaction);
+        if (interaction.guildId) broadcastPlayerUpdate(interaction.guildId);
+        return;
+      }
+    }
+
     if (interaction.isButton()) {
       if (interaction.customId.startsWith(`${VOTE_SKIP_BUTTON_PREFIX}:`)) {
         await handleVoteSkipButton(interaction);

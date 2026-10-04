@@ -8,12 +8,12 @@ process.env.BREAD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bread-autopl
 
 const discord = require('discord.js');
 const { createMusicControlCommands } = require('../src/commands/domains/musicControls');
-const { getTrackFeedback, isAutoplayEnabled, setAutoplay } = require('../src/music/autoplay');
+const { dislikeTrack, getTrackFeedback, isAutoplayEnabled, setAutoplay } = require('../src/music/autoplay');
 const { closeDatabases } = require('../src/state/sqliteStore');
 const library = require('../src/music/library');
 const userTaste = require('../src/music/autoplay/userTaste');
 
-const baseContext = { ...discord, FILTER_PRESET_CHOICES: [] };
+const baseContext = { ...discord, FILTER_PRESET_CHOICES: [], BRAND_COLORS: { secondary: '#213d7c' }, CommandError: class extends Error {} };
 
 test.after(() => {
   closeDatabases();
@@ -65,9 +65,9 @@ function setup(guildId, { skipResult } = {}) {
   return { run, calls, current };
 }
 
-test('/autoplay offers toggle, like, dislike and next', () => {
+test('/autoplay offers toggle, like, dislike, next and disliked', () => {
   const { data } = createMusicControlCommands(baseContext).find((entry) => entry.data.name === 'autoplay');
-  assert.deepEqual(data.toJSON().options.map((option) => option.name), ['toggle', 'like', 'dislike', 'next']);
+  assert.deepEqual(data.toJSON().options.map((option) => option.name), ['toggle', 'like', 'dislike', 'next', 'disliked']);
 });
 
 test('/autoplay like toggles the like on the current track for any listener', async () => {
@@ -114,4 +114,47 @@ test('/autoplay toggle stays DJ-only', async () => {
   const reply = await run('toggle');
   assert.equal(reply.embeds[0].data.title, 'Autoplay Enabled');
   assert.deepEqual(calls, ['assertDJ']);
+});
+
+test('/autoplay disliked lists blocks and dislikes and undoes them from the menu', async () => {
+  const userId = 'listener-disliked';
+  const tracks = ['One', 'Two'].map((title) => ({
+    encoded: `enc-${title}`,
+    info: { title, author: 'Mogwai', identifier: `id-${title}`, uri: `https://youtu.be/${title}`, duration: 1000, sourceName: 'youtube' },
+  }));
+  dislikeTrack('command-disliked', userId, tracks[0]);
+  dislikeTrack('command-disliked', 'someone-else', tracks[1]);
+
+  const command = createMusicControlCommands(baseContext).find((entry) => entry.data.name === 'autoplay');
+  let reply;
+  await command.execute({
+    guildId: 'command-disliked',
+    user: { id: userId },
+    options: { getSubcommand: () => 'disliked' },
+    deferReply: async () => {},
+    editReply: async (value) => { reply = value; },
+  });
+  assert.match(reply.embeds[0].data.description, /One/);
+  assert.doesNotMatch(reply.embeds[0].data.description, /Two/);
+  const menu = reply.components[0].components[0].toJSON();
+  assert.equal(menu.custom_id, `autoplay:dislikes:${userId}`);
+  const [option] = menu.options;
+  assert.match(option.value, /^t:/);
+
+  await assert.rejects(command.handleComponent({
+    customId: menu.custom_id,
+    user: { id: 'intruder' },
+    values: [option.value],
+    update: async () => {},
+  }), /belongs to someone else/);
+
+  await command.handleComponent({
+    customId: menu.custom_id,
+    user: { id: userId },
+    values: [option.value],
+    update: async (value) => { reply = value; },
+  });
+  assert.match(reply.embeds[0].data.description, /Undid your dislike of \*\*One\*\*/);
+  assert.equal(reply.components.length, 0);
+  assert.equal(userTaste.getDislikes(userId).tracks.length, 0);
 });

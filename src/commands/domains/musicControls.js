@@ -1,5 +1,5 @@
 const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES, handleAutoplay } = require('../../music/autoplay');
-const { applySound, getSoundState, normalizePreset, resetSound } = require('../../music/sound');
+const { buildDislikedPanel, handleDislikedComponent } = require('./autoplayDisliked');
 
 const createMusicControlCommands = (context) => {
   const {
@@ -101,9 +101,18 @@ const createMusicControlCommands = (context) => {
         .addBooleanOption((option) => option
           .setName('artist')
           .setDescription('Block the whole artist for your autoplay, not just this track.')))
-      .addSubcommand((sub) => sub.setName('next').setDescription('Pick a different autoplay track to play next.')),
+      .addSubcommand((sub) => sub.setName('next').setDescription('Pick a different autoplay track to play next.'))
+      .addSubcommand((sub) => sub.setName('disliked').setDescription('See and undo what you disliked or blocked for autoplay.')),
+    componentPrefix: 'autoplay:',
+    async handleComponent(interaction) {
+      await handleDislikedComponent(context, interaction);
+    },
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      if (interaction.options.getSubcommand(false) === 'disliked') {
+        await interaction.editReply(buildDislikedPanel(context, interaction.user.id));
+        return;
+      }
       const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
       const subcommand = interaction.options.getSubcommand(false) ?? 'toggle';
 
@@ -144,7 +153,7 @@ const createMusicControlCommands = (context) => {
           : `Disliked **${track.info.title}**`;
         await interaction.editReply(
           result.skipped
-            ? `\uD83D\uDC4E ${what} and skipped the track. You can undo it in Activity \u2192 Library \u2192 Disliked.`
+            ? `\uD83D\uDC4E ${what} and skipped the track. Undo it with \`/autoplay disliked\`.`
             : `\uD83D\uDC4E ${what}. ${result.message}`,
         );
         return;
@@ -223,66 +232,6 @@ const createMusicControlCommands = (context) => {
       await queuePersist(player);
       await interaction.editReply(`Volume set to ${clamped}% (limit: ${config.maxVolume}%).`);
       await interaction.client.musicUI.refresh(player);
-    },
-  },
-  {
-    data: new SlashCommandBuilder()
-      .setName('filter')
-      .setDescription('Manage audio filters.')
-      .addSubcommand((sub) =>
-        sub
-          .setName('preset')
-          .setDescription('Enable preset.')
-          .addStringOption((option) =>
-            option
-              .setName('name')
-              .setDescription('Preset name')
-              .setRequired(true)
-              .addChoices(
-                ...FILTER_PRESET_CHOICES.map(({ label, value }) => ({
-                  name: label,
-                  value,
-                })),
-              ),
-          ),
-      )
-      .addSubcommand((sub) => sub.setName('clear').setDescription('Reset filters.'))
-      .addSubcommand((sub) => sub.setName('list').setDescription('Show active filters.')),
-    async execute(interaction) {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
-      assertDJ(interaction, config);
-      const sub = interaction.options.getSubcommand();
-
-      if (sub === 'list') {
-        const activePreset = player.filterManager.activePreset || null;
-        const description = FILTER_PRESET_CHOICES.map(({ label, value, description }) => {
-          const status = activePreset === value ? 'ON' : 'OFF';
-          const details = description ? ` - ${description}` : '';
-          return `- [${status}] ${label}${details}`;
-        }).join('\n');
-
-        const embed = new EmbedBuilder()
-          .setTitle('Filter presets')
-          .setColor(BRAND_COLORS.secondary)
-          .setDescription(description);
-
-        await interaction.editReply({ embeds: [embed] });
-        return;
-      }
-
-      if (sub === 'clear') {
-        await resetSound(player);
-        await queuePersist(player);
-        await interaction.editReply('Filters cleared.');
-        return;
-      }
-
-      const preset = normalizePreset(interaction.options.getString('name', true));
-      if (!preset) throw new CommandError('Unknown preset.');
-      await applySound(player, { ...getSoundState(player), preset });
-      await queuePersist(player);
-      await interaction.editReply(`Applied preset **${preset}**.`);
     },
   },
   ];

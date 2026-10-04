@@ -344,7 +344,7 @@ Change access from Dashboard Settings or Discord:
 | `/seek <time>` | Seek within the current track |
 | `/volume` | Change player volume |
 | `/loop` / `/shuffle` | Change queue behavior |
-| `/autoplay` | Toggle automatic recommendations |
+| `/autoplay` | Toggle recommendations; like, dislike, reroll, `disliked` list |
 
 ### Queue and audio
 
@@ -354,7 +354,8 @@ Change access from Dashboard Settings or Discord:
 | `/remove` / `/move` | Modify queue positions |
 | `/skipto` | Jump to a queue position |
 | `/clearqueue` | Remove upcoming tracks |
-| `/filter` | Apply or reset audio filters |
+| `/sound` | Panel with presets, 6-band EQ, speed and pitch |
+| `/history` | Recently played tracks, queue any of them again |
 
 ### System
 

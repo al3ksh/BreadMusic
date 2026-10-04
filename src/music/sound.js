@@ -1,6 +1,6 @@
 // One source of truth for what the player sounds like: a preset, six EQ bands, speed and pitch.
 // Every change rebuilds the whole Lavalink filter payload from this state, so presets never
-// stack on top of each other and the dashboard, Activity and /filter always agree.
+// stack on top of each other and the dashboard, Activity and /sound always agree.
 
 const BAND_COUNT = 15;
 const EQ_RANGE_DB = 6;
