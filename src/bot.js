@@ -28,6 +28,7 @@ const { isPlayerStopping, markPlayerStopping } = require('./music/playerLifecycl
 const { buildTrackEmbed } = require('./music/embeds');
 const { savePlayerState, hydratePlayer, flushQueueStore } = require('./state/queueStore');
 const { recordTrackPlay } = require('./state/analyticsStore');
+const { isStreamTrack } = require('./music/autoplay/normalize');
 const { withGuildMutex } = require('./music/guildMutex');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
 const { getConfig, listConfigs, assertDJ, hasDJPermissions } = require('./state/guildConfig');
@@ -553,7 +554,8 @@ client.lavalink.on('trackStart', safeEventHandler('trackStart', async (player, t
   addToRecentTracks(player.guildId, track);
   recordTrackPlayed(player.guildId, track);
   scheduleAutoplayPrefetch(player, track, client);
-  recordTrackPlay(player.guildId, track, { botUserId: client.user?.id });
+  // Live radio never finishes, so it would only skew listening stats.
+  if (!isStreamTrack(track)) recordTrackPlay(player.guildId, track, { botUserId: client.user?.id });
   await savePlayerState(player).catch((error) =>
     console.error('Failed to save queue:', error),
   );

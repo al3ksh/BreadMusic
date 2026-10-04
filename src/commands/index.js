@@ -150,6 +150,7 @@ const HELP_CATEGORIES = [
     description: 'Control playback, queue, and audio filters.',
     commands: [
       { name: '/play', value: 'Play or queue a track/playlist.' },
+      { name: '/radio', value: 'Play a live radio station (name, genre, country or link).' },
       { name: '/pause', value: 'Pause playback.' },
       { name: '/resume', value: 'Resume playback.' },
       { name: '/skip', value: 'Skip the track or start/join a listener vote.' },
@@ -279,6 +280,7 @@ function buildHelpComponents(pageIndex, userId, dashboardUrl) {
 }
 const { createUtilityCommands } = require('./domains/utility');
 const { createMusicCommands } = require('./domains/music');
+const { createRadioCommands } = require('./domains/radio');
 const { createStatsCommands } = require('./domains/stats');
 const { createMusicControlCommands } = require('./domains/musicControls');
 const { createLibraryCommands } = require('./domains/library');
@@ -389,6 +391,7 @@ const commandContext = {
 const commands = [
   ...createUtilityCommands(commandContext),
   ...createMusicCommands(commandContext),
+  ...createRadioCommands(commandContext),
   ...createStatsCommands(commandContext),
   ...createMusicControlCommands(commandContext),
   ...createLibraryCommands(commandContext),

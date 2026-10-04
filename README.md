@@ -337,6 +337,7 @@ Change access from Dashboard Settings or Discord:
 | Command | Action |
 | --- | --- |
 | `/play <query>` | Play or queue a track or playlist |
+| `/radio <station>` | Play a live radio station - search by name, genre or country, or paste a stream / Radio Garden link |
 | `/pause` / `/resume` | Pause or resume playback |
 | `/skip` / `/stop` | Skip or terminate playback |
 | `/back` / `/replay` | Return to or replay a track |

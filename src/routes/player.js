@@ -6,6 +6,7 @@ const { prepareUploadArtwork, storeUploadArtwork } = require('../music/uploadArt
 const { uploadArtworkUrl } = require('../music/uploadArtworkUrls');
 const { REROLL_FAILURES } = require('../music/autoplay');
 const { applySound, getSoundState, normalizePreset, resetSound } = require('../music/sound');
+const { isStreamTrack } = require('../music/autoplay/normalize');
 
 // Anyone listening in the bot's voice channel may vote to skip and give autoplay feedback.
 const listenerActions = new Set(['skip', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
@@ -411,6 +412,9 @@ function createPlayerRouter({
       const player = client.lavalink?.players?.get(req.params.guildId);
       const requestedTitle = typeof req.query.title === 'string' ? req.query.title.trim() : '';
       const requestedArtist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+      if (!(requestedTitle && requestedArtist) && isStreamTrack(player?.queue?.current)) {
+        return res.status(404).json({ error: 'Lyrics are not available for live radio' });
+      }
       const query = requestedTitle && requestedArtist
         ? { title: requestedTitle, artist: requestedArtist, duration: Number(req.query.duration) || 0 }
         : trackToLyricsQuery(player?.queue?.current);
