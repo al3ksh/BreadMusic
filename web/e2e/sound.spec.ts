@@ -88,7 +88,8 @@ test('DJs shape the sound from the Activity panel', async ({ page }) => {
   const state = await mockSoundApi(page, { dj: true });
   const activity = await openActivity(page);
 
-  await activity.getByRole('button', { name: 'Sound', exact: true }).first().click();
+  await activity.getByRole('button', { name: /^Volume \d+%/ }).first().click();
+  await activity.getByRole('button', { name: 'Sound', exact: true }).click();
   const panel = activity.getByRole('complementary', { name: 'sound panel' });
   await expect(panel.getByText('Presets, EQ, speed and pitch')).toBeVisible();
 
@@ -99,7 +100,7 @@ test('DJs shape the sound from the Activity panel', async ({ page }) => {
   await panel.getByRole('slider', { name: /^Bass / }).fill('4');
   await panel.getByRole('slider', { name: /^Speed / }).fill('1.2');
   await expect.poll(() => state.sent.at(-1)).toEqual({ preset: 'nightcore', eq: [0, 4, 0, 0, 0, 0], speed: 1.2, pitch: 1 });
-  await expect(activity.getByRole('button', { name: 'Sound (custom)' }).first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(activity.getByRole('button', { name: /^Volume \d+%, custom sound$/ }).first()).toBeVisible();
 
   await panel.getByRole('button', { name: 'Reset sound' }).click();
   await expect.poll(() => state.sent.at(-1)).toEqual({ preset: null, eq: [0, 0, 0, 0, 0, 0], speed: 1, pitch: 1 });
@@ -111,7 +112,9 @@ test('listeners without DJ see the sound settings read-only', async ({ page }) =
   state.sound = { preset: 'bassboost', eq: [2, 0, 0, 0, 0, -1], speed: 1, pitch: 1 };
   const activity = await openActivity(page);
 
-  await activity.getByRole('button', { name: 'Sound (custom)' }).first().click();
+  await activity.getByRole('button', { name: /^Volume \d+%/ }).first().click();
+  await expect(activity.getByRole('slider', { name: 'Volume' })).toBeDisabled();
+  await activity.getByRole('button', { name: 'Sound (custom)' }).click();
   const panel = activity.getByRole('complementary', { name: 'sound panel' });
   await expect(panel.getByText(/Only DJs can change the sound/)).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Bass boost' })).toHaveAttribute('aria-pressed', 'true');

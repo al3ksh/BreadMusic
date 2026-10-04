@@ -144,3 +144,14 @@ test('karaoke morphs in and out of the player', async ({ page }) => {
   await expect(stage).toHaveCount(0);
   await expect(root).not.toHaveClass(/activity-vt-karaoke/);
 });
+
+test('clicking the cover opens karaoke', async ({ page }) => {
+  await mockQueueApi(page);
+  const activity = await openActivity(page);
+
+  await activity.getByRole('button', { name: 'Open karaoke' }).click();
+  const stage = activity.locator('.activity-karaoke-stage');
+  await expect(stage.locator('.is-current')).toHaveText('Digital love');
+  await activity.getByRole('button', { name: 'Exit karaoke' }).click();
+  await expect(stage).toHaveCount(0);
+});

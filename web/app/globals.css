@@ -2715,6 +2715,123 @@ a { color: inherit; text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 
+.activity-volume-sound {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  color: #d9dbe5;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease, transform 100ms ease;
+}
+
+.activity-volume-sound span { flex: 1; }
+
+.activity-volume-sound em {
+  padding: 2px 6px;
+  color: #d8d5ff;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  background: rgba(162, 156, 229, 0.2);
+  border-radius: 999px;
+}
+
+.activity-volume-sound.is-open,
+.activity-volume-sound:focus-visible {
+  color: #ffffff;
+  background: #292944;
+  border-color: rgba(162, 156, 229, 0.55);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .activity-volume-sound:hover {
+    color: #ffffff;
+    background: #292944;
+    border-color: rgba(162, 156, 229, 0.55);
+  }
+}
+
+.activity-volume-sound:active { transform: scale(0.97); }
+
+/* The cover opens karaoke. */
+button.activity-track-art {
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 220ms var(--activity-spring-soft), border-color 160ms ease;
+}
+
+button.activity-track-art:disabled { cursor: default; }
+
+.activity-track-art-hint {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: rgba(16, 16, 20, 0.78);
+  border: 1px solid rgba(170, 164, 237, 0.35);
+  border-radius: 999px;
+  opacity: 0;
+  transform: translate(-50%, 6px);
+  backdrop-filter: blur(10px);
+  transition: opacity 160ms ease, transform 220ms var(--activity-spring-soft);
+  pointer-events: none;
+}
+
+button.activity-track-art:focus-visible {
+  outline: 2px solid #aaa4ed;
+  outline-offset: 3px;
+}
+
+button.activity-track-art:focus-visible .activity-track-art-hint {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  button.activity-track-art:hover:not(:disabled) {
+    border-color: rgba(170, 164, 237, 0.45);
+    transform: scale(1.015);
+  }
+
+  button.activity-track-art:hover:not(:disabled) .activity-track-art-hint {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+button.activity-track-art:active:not(:disabled) { transform: scale(0.98); }
+
+/* A dot on the volume trigger shows the sound is shaped. */
+.activity-volume-control.has-sound .activity-volume-trigger::after {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  content: '';
+  background: #aaa4ed;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #1b1b1e;
+}
+
 @keyframes activity-volume-open {
   from { opacity: 0; transform: translateY(8px) scale(0.82); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -3377,6 +3494,7 @@ a { color: inherit; text-decoration: none; }
   .activity-context span:not(.activity-live-dot) { display: none; }
   .activity-player-stage { grid-template-columns: 52px minmax(0, 1fr); gap: 9px; }
   .activity-track-art { width: 52px; }
+  .activity-track-art-hint { display: none; }
   .activity-track-copy h1 { font-size: 13px; }
   .activity-playback-state span { min-height: 21px; font-size: 9px; }
   .activity-player-main { gap: 13px; }

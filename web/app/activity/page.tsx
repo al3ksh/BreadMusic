@@ -11,6 +11,7 @@ import {
   GripVertical,
   Info,
   KeyRound,
+  Mic2,
   PlugZap,
   RefreshCw,
   ShieldAlert,
@@ -1650,10 +1651,21 @@ export default function ActivityPage() {
         </section>
 
         <section className={`activity-player-stage ${status.paused ? 'is-paused' : 'is-playing'}`}>
-          <div className="activity-track-art">
+          <button
+            type="button"
+            className="activity-track-art"
+            disabled={!hasTrack}
+            onClick={() => switchKaraoke(true, () => {
+              setLyricsSyncEnabled(true);
+              closePanel();
+            })}
+            aria-label="Open karaoke"
+            title="Open karaoke"
+          >
             <ActivityArtwork key={trackKey} src={status.currentTrack?.artwork} large />
             {hasTrack && <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />}
-          </div>
+            {hasTrack && <span className="activity-track-art-hint" aria-hidden="true"><Mic2 size={15} /> Karaoke</span>}
+          </button>
 
           <div className="activity-player-main">
             <div className="activity-track-copy">

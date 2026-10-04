@@ -72,25 +72,15 @@ export function ActivityPlayerControls({
         <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queueTotal || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
         <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
         {iconOnly && <ControlButton label={`Autoplay ${status.autoplay ? 'on' : 'off'}`} active={status.autoplay} feedback={controlFeedback === 'autoplay'} disabled={autoplayDisabled || !canDj || Boolean(actionBusy)} onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}><Radio size={16} /></ControlButton>}
-        {onToggleSound && (
-          <ControlButton
-            label={soundActive ? 'Sound (custom)' : 'Sound'}
-            active={soundOpen || soundActive}
-            disabled={!status.connected}
-            onClick={onToggleSound}
-          >
-            <SlidersHorizontal size={16} />
-          </ControlButton>
-        )}
-        <div className={`activity-volume-control ${volumeOpen ? 'is-open' : ''}`} ref={volumeControlRef}>
+        <div className={`activity-volume-control ${volumeOpen ? 'is-open' : ''} ${soundActive ? 'has-sound' : ''}`} ref={volumeControlRef}>
           <button
             type="button"
             className="activity-volume-trigger"
-            disabled={!canDj || !status.connected}
+            disabled={(!canDj && !onToggleSound) || !status.connected}
             onClick={() => setVolumeOpen((open) => !open)}
-            aria-label={`Volume ${displayedVolume}%`}
+            aria-label={`Volume ${displayedVolume}%${soundActive ? ', custom sound' : ''}`}
             aria-expanded={volumeOpen}
-            title={`Volume ${displayedVolume}%`}
+            title={`Volume ${displayedVolume}%${soundActive ? ', custom sound' : ''}`}
           >
             <Volume2 size={17} />
             <i style={{ transform: `scaleX(${displayedVolume / volumeLimit})` }} />
@@ -135,6 +125,22 @@ export function ActivityPlayerControls({
                 aria-valuetext={`${displayedVolume}%`}
               />
               <div className="activity-volume-scale" aria-hidden="true"><span>0</span><span>{volumeLimit}</span></div>
+              {onToggleSound && (
+                <button
+                  type="button"
+                  className={`activity-volume-sound ${soundOpen ? 'is-open' : ''}`}
+                  aria-label={soundActive ? 'Sound (custom)' : 'Sound'}
+                  aria-pressed={Boolean(soundOpen || soundActive)}
+                  onClick={() => {
+                    setVolumeOpen(false);
+                    onToggleSound();
+                  }}
+                >
+                  <SlidersHorizontal size={15} />
+                  <span>Sound &amp; EQ</span>
+                  {soundActive && <em>Custom</em>}
+                </button>
+              )}
             </div>
           )}
         </div>
