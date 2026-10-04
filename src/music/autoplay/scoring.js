@@ -387,6 +387,7 @@ function pickCandidateLocally(scoredCandidates, random = Math.random) {
 }
 
 module.exports = {
+  DISLIKED_ARTIST_REJECT_THRESHOLD,
   MIN_SCORE,
   scoreCandidate,
   pickCandidateLocally,

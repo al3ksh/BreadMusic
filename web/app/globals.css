@@ -4039,6 +4039,75 @@ html.activity-vt .activity-compact-art {
   border-color: rgba(232, 120, 165, 0.32);
 }
 
+.activity-library-heart.is-blocked {
+  color: #d9dbe5;
+  background: linear-gradient(135deg, #3b3b48, #5a3442);
+}
+
+.activity-library-section {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-library-section h3 {
+  margin: 6px 2px 0;
+  color: #a9a5d8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.activity-library-group {
+  display: grid;
+  gap: 6px;
+}
+
+.activity-library-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 2px;
+}
+
+.activity-library-group-head strong {
+  overflow: hidden;
+  color: #e4e3f5;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-library-group-head button,
+.activity-history-actions button.is-text {
+  display: inline-flex;
+  width: auto;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  color: #d9dbe5;
+  background: #1b1b1e;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.activity-library-group-head button:disabled { opacity: 0.5; cursor: default; }
+
+@media (hover: hover) and (pointer: fine) {
+  .activity-library-group-head button:hover:not(:disabled) {
+    color: #fff;
+    background: #3a2430;
+    border-color: rgba(255, 120, 150, 0.45);
+  }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .activity-library-row.activity-card:hover {
     transform: translateY(-1px);

@@ -308,7 +308,7 @@ test('like toggles and dislike drops the seed and the prepared track', async () 
 
   await __testing.prepareNext(player, seed, client);
   assert.ok(getAutoplayNext(guildId));
-  assert.deepEqual(dislikeTrack(guildId, 'user-1', seed), { disliked: true });
+  assert.deepEqual(dislikeTrack(guildId, 'user-1', seed), { disliked: true, blockedArtist: false });
   assert.equal(getTrackFeedback('user-1', seed), 'dislike', 'a dislike replaces the like');
   assert.equal(getAutoplayNext(guildId), null);
   assert.deepEqual(__testing.getManualSeedPool(guildId), []);

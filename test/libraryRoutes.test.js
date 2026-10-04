@@ -8,6 +8,7 @@ const express = require('express');
 process.env.BREAD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bread-library-routes-'));
 
 const library = require('../src/music/library');
+const userTaste = require('../src/music/autoplay/userTaste');
 const { createLibraryRouter, isPlaylistUrl } = require('../src/routes/library');
 const { createPlayerRouter } = require('../src/routes/player');
 const { closeDatabases } = require('../src/state/sqliteStore');
@@ -258,5 +259,28 @@ test('a shared playlist is copied by another listener through the import box', a
     assert.equal((await get('/library')).body.playlists[0].shareCode, null);
     assert.equal((await post('/library/import', { url: 'ZZZZZZZZ' })).status, 404);
     assert.equal((await post('/library/import', { url: 'nope' })).body.error, 'Paste a playlist link or a share code.');
+  });
+});
+
+test('the Disliked list can undo a dislike, block and unblock an artist', async () => {
+  await withApp({}, async ({ get, post, userId }) => {
+    userTaste.recordDislike(userId, { key: 'id:d1', artistKey: 'bread band', author: 'Bread Band', title: 'Crust' });
+
+    const listed = await get('/library/dislikes');
+    assert.deepEqual(listed.body.tracks.map((item) => item.title), ['Crust']);
+    assert.deepEqual(listed.body.artists, []);
+
+    const blocked = await post('/library/dislikes/block', { artistKey: 'bread band', author: 'Bread Band' });
+    assert.deepEqual(blocked.body.artists, [{ artistKey: 'bread band', author: 'Bread Band', tracks: 1 }]);
+    assert.equal((await post('/library/dislikes/block', {})).status, 400);
+
+    const unblocked = await post('/library/dislikes/unblock', { artistKey: 'bread band' });
+    assert.deepEqual(unblocked.body.artists, []);
+    assert.deepEqual(unblocked.body.tracks, [], 'unblocking forgets the artist\'s disliked tracks');
+    assert.equal((await post('/library/dislikes/unblock', { artistKey: 'bread band' })).status, 404);
+
+    userTaste.recordDislike(userId, { key: 'id:d2', artistKey: 'x', author: 'X', title: 'Y' });
+    assert.deepEqual((await post('/library/dislikes/remove', { key: 'id:d2' })).body.tracks, []);
+    assert.equal((await post('/library/dislikes/remove', { key: 'id:d2' })).status, 404);
   });
 });

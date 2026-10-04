@@ -95,7 +95,12 @@ const createMusicControlCommands = (context) => {
       .setDescription('Autoplay - automatically plays similar tracks.')
       .addSubcommand((sub) => sub.setName('toggle').setDescription('Turn autoplay on or off.'))
       .addSubcommand((sub) => sub.setName('like').setDescription('Like the current track so autoplay picks more like it.'))
-      .addSubcommand((sub) => sub.setName('dislike').setDescription('Dislike and skip the current track; autoplay will avoid it.'))
+      .addSubcommand((sub) => sub
+        .setName('dislike')
+        .setDescription('Dislike and skip the current track; autoplay will avoid it.')
+        .addBooleanOption((option) => option
+          .setName('artist')
+          .setDescription('Block the whole artist for your autoplay, not just this track.')))
       .addSubcommand((sub) => sub.setName('next').setDescription('Pick a different autoplay track to play next.')),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -121,7 +126,9 @@ const createMusicControlCommands = (context) => {
       // A dislike is remembered for autoplay and then goes through the normal skip rules.
       if (subcommand === 'dislike') {
         const track = player.queue.current;
-        if (!dislikeTrack(interaction.guildId, interaction.user.id, track)) {
+        const blockArtist = interaction.options.getBoolean('artist') === true;
+        const disliked = dislikeTrack(interaction.guildId, interaction.user.id, track, { artist: blockArtist });
+        if (!disliked) {
           await interaction.editReply('This track cannot be disliked.');
           return;
         }
@@ -132,10 +139,13 @@ const createMusicControlCommands = (context) => {
           await handleAutoplay(player, result.lastTrack, interaction.client);
         }
         if (result.skipped) await queuePersist(player);
+        const what = disliked.blockedArtist
+          ? `Blocked **${track.info.author || 'this artist'}** for your autoplay`
+          : `Disliked **${track.info.title}**`;
         await interaction.editReply(
           result.skipped
-            ? `\uD83D\uDC4E Disliked and skipped **${track.info.title}**. Autoplay will avoid it.`
-            : `\uD83D\uDC4E Disliked **${track.info.title}**. ${result.message}`,
+            ? `\uD83D\uDC4E ${what} and skipped the track. You can undo it in Activity \u2192 Library \u2192 Disliked.`
+            : `\uD83D\uDC4E ${what}. ${result.message}`,
         );
         return;
       }

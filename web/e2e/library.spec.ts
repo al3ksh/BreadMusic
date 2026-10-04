@@ -26,6 +26,13 @@ async function mockLibraryApi(page: Page) {
     playlists: [{ id: 'pl-1', name: 'Road trip', tracks: [entry('id:r1', 'Highway'), entry('id:r2', 'Night drive')] }] as Playlist[],
     played: [] as { playlistId: string; shuffle: boolean }[],
     imported: [] as string[],
+    dislikes: {
+      artists: [{ artistKey: 'nickelback', author: 'Nickelback', tracks: 0 }],
+      tracks: [
+        { key: 'id:d1', title: 'Barbie Girl', author: 'Aqua', artistKey: 'aqua', duration: 197_000, artwork: null, at: 2 },
+        { key: 'id:d2', title: 'Crazy Frog', author: 'Crazy Frog', artistKey: 'crazy frog', duration: 170_000, artwork: null, at: 1 },
+      ],
+    },
   };
   const summary = (playlist: Playlist) => ({
     id: playlist.id,
@@ -54,6 +61,20 @@ async function mockLibraryApi(page: Page) {
     if (library) {
       const rest = library[1] ?? '';
       if (rest === '') return json(route, snapshot());
+      if (rest === '/dislikes') return json(route, state.dislikes);
+      if (rest === '/dislikes/remove') {
+        state.dislikes.tracks = state.dislikes.tracks.filter((track) => track.key !== body.key);
+        return json(route, state.dislikes);
+      }
+      if (rest === '/dislikes/block') {
+        state.dislikes.artists.push({ artistKey: body.artistKey, author: body.author, tracks: 1 });
+        return json(route, state.dislikes);
+      }
+      if (rest === '/dislikes/unblock') {
+        state.dislikes.artists = state.dislikes.artists.filter((artist) => artist.artistKey !== body.artistKey);
+        state.dislikes.tracks = state.dislikes.tracks.filter((track) => track.artistKey !== body.artistKey);
+        return json(route, state.dislikes);
+      }
       if (rest === '/import') {
         state.imported.push(body.url);
         const playlist = { id: 'pl-2', name: 'Imported mix', tracks: [entry('id:i1', 'Imported one')] };
@@ -160,4 +181,28 @@ test('listeners play, import and curate their own library', async ({ page }) => 
   await panel.getByRole('button', { name: 'Confirm deleting Road trip' }).click();
   await expect(panel.getByRole('button', { name: 'Open Liked' })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Open Road trip' })).toHaveCount(0);
+});
+
+test('the Disliked list blocks, unblocks and undoes dislikes', async ({ page }) => {
+  const state = await mockLibraryApi(page);
+  const activity = await openActivity(page);
+
+  await activity.getByRole('button', { name: 'Library', exact: true }).click();
+  const panel = activity.getByRole('complementary', { name: 'library panel' });
+  await expect(panel.getByRole('button', { name: 'Open Disliked' })).toContainText('2 tracks - 1 blocked artist');
+  await panel.getByRole('button', { name: 'Open Disliked' }).click();
+
+  const blocked = panel.getByRole('region', { name: 'Blocked artists' });
+  await expect(blocked.getByText('Nickelback')).toBeVisible();
+
+  await panel.getByRole('button', { name: 'Block Aqua', exact: true }).click();
+  await expect(blocked.getByText('Aqua')).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Block Aqua', exact: true })).toHaveCount(0);
+
+  await panel.getByRole('button', { name: 'Unblock Aqua' }).click();
+  await expect(panel.getByText('Barbie Girl')).toHaveCount(0);
+  expect(state.dislikes.artists.map((artist) => artist.author)).toEqual(['Nickelback']);
+
+  await panel.getByRole('button', { name: 'Undo dislike of Crazy Frog' }).click();
+  await expect(panel.getByRole('region', { name: 'Disliked tracks' })).toHaveCount(0);
 });

@@ -11,6 +11,7 @@ const { createMusicControlCommands } = require('../src/commands/domains/musicCon
 const { getTrackFeedback, isAutoplayEnabled, setAutoplay } = require('../src/music/autoplay');
 const { closeDatabases } = require('../src/state/sqliteStore');
 const library = require('../src/music/library');
+const userTaste = require('../src/music/autoplay/userTaste');
 
 const baseContext = { ...discord, FILTER_PRESET_CHOICES: [] };
 
@@ -49,13 +50,13 @@ function setup(guildId, { skipResult } = {}) {
     },
   }).find((entry) => entry.data.name === 'autoplay');
 
-  const run = async (subcommand) => {
+  const run = async (subcommand, flags = {}) => {
     const replies = [];
     await command.execute({
       guildId,
       user: { id: 'listener-1' },
       client: { musicUI: { refresh: async () => calls.push('refresh') } },
-      options: { getSubcommand: () => subcommand },
+      options: { getSubcommand: () => subcommand, getBoolean: (name) => flags[name] ?? null },
       deferReply: async () => {},
       editReply: async (reply) => replies.push(reply),
     });
@@ -90,7 +91,13 @@ test('/autoplay dislike records the dislike and goes through the skip rules', as
   assert.deepEqual(voted.calls, ['skip']);
 
   const skipped = setup('command-dislike-skip');
-  assert.match(await skipped.run('dislike'), /Disliked and skipped/);
+  assert.match(await skipped.run('dislike'), /Disliked \*\*Midnight City\*\* and skipped/);
+});
+
+test('/autoplay dislike artist:true blocks the artist for that person', async () => {
+  const { run } = setup('command-dislike-artist');
+  assert.match(await run('dislike', { artist: true }), /Blocked \*\*M83\*\* for your autoplay and skipped/);
+  assert.deepEqual(userTaste.listBlockedArtists('listener-1').map((artist) => artist.author), ['M83']);
 });
 
 test('/autoplay next explains why it cannot reroll', async () => {

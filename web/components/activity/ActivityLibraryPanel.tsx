@@ -1,7 +1,9 @@
-import { ArrowLeft, Copy, Download, Heart, ListMusic, ListPlus, Play, Plus, Share2, Shuffle, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Copy, Download, Heart, ListMusic, ListPlus, Play, Plus, Share2, Shuffle, ThumbsDown, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
+import { ActivityDislikedView } from '@/components/activity/ActivityDislikedView';
+import type { BlockedArtist, DislikedTrack, DislikeSummary } from '@/components/activity/ActivityDislikedView';
 
 export type LibraryEntry = {
   key: string;
@@ -44,6 +46,7 @@ type ActivityLibraryPanelProps = {
 };
 
 const LIKED_ID = 'liked';
+const DISLIKED_ID = 'disliked';
 
 function formatDuration(duration: number) {
   const totalSeconds = Math.max(0, Math.floor(duration / 1000));
@@ -70,6 +73,7 @@ function errorMessage(error: unknown, fallback: string) {
 // so it works on any server where they can queue music.
 export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, onPlay, notify }: ActivityLibraryPanelProps) {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
+  const [dislikes, setDislikes] = useState<DislikeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<LibraryPlaylist | null>(null);
@@ -80,7 +84,12 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
 
   const load = useCallback(async () => {
     try {
-      setSnapshot(await request<LibrarySnapshot>(''));
+      const [library, disliked] = await Promise.all([
+        request<LibrarySnapshot>(''),
+        request<DislikeSummary>('/dislikes').catch(() => null),
+      ]);
+      setSnapshot(library);
+      setDislikes(disliked);
       setError(null);
     } catch (cause) {
       setError(errorMessage(cause, 'Your library is unavailable.'));
@@ -91,7 +100,7 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
 
   useEffect(() => {
     setConfirmDelete(false);
-    if (!openId || openId === LIKED_ID) {
+    if (!openId || openId === LIKED_ID || openId === DISLIKED_ID) {
       setDetail(null);
       return;
     }
@@ -193,6 +202,28 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
     return error
       ? <div className="activity-empty"><ListMusic size={20} /><span>{error}</span></div>
       : <div className="activity-empty"><ActivitySpinner /> Loading your library</div>;
+  }
+
+  if (openId === DISLIKED_ID) {
+    if (!dislikes) return <div className="activity-empty"><ActivitySpinner /> Loading</div>;
+    return (
+      <ActivityDislikedView
+        dislikes={dislikes}
+        busy={busy}
+        onBack={() => setOpenId(null)}
+        onRemove={(track: DislikedTrack) => run(`undislike:${track.key}`, async () => {
+          setDislikes(await request<DislikeSummary>('/dislikes/remove', { key: track.key }));
+        })}
+        onBlock={(artistKey: string, author: string) => run(`block:${artistKey}`, async () => {
+          setDislikes(await request<DislikeSummary>('/dislikes/block', { artistKey, author }));
+          notify(`Blocked ${author} for your autoplay`, 'success');
+        })}
+        onUnblock={(artist: BlockedArtist) => run(`unblock:${artist.artistKey}`, async () => {
+          setDislikes(await request<DislikeSummary>('/dislikes/unblock', { artistKey: artist.artistKey }));
+          notify(`Unblocked ${artist.author}`, 'success');
+        })}
+      />
+    );
   }
 
   if (openId) {
@@ -336,8 +367,20 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
           </div>
         </div>
 
+        {dislikes && (
+          <div className="activity-library-row activity-library-disliked activity-card" style={{ '--stagger-index': 1 } as CSSProperties}>
+            <button type="button" className="activity-library-open" onClick={() => setOpenId(DISLIKED_ID)} aria-label="Open Disliked">
+              <span className="activity-library-heart is-blocked"><ThumbsDown size={18} /></span>
+              <span className="activity-queue-copy">
+                <strong>Disliked</strong>
+                <span>{plural(dislikes.tracks.length, 'track')} - {plural(dislikes.artists.length, 'blocked artist')}</span>
+              </span>
+            </button>
+          </div>
+        )}
+
         {snapshot.playlists.map((playlist, index) => (
-          <div className="activity-library-row activity-card" key={playlist.id} style={{ '--stagger-index': Math.min(index + 1, 12) } as CSSProperties}>
+          <div className="activity-library-row activity-card" key={playlist.id} style={{ '--stagger-index': Math.min(index + 2, 12) } as CSSProperties}>
             <button type="button" className="activity-library-open" onClick={() => setOpenId(playlist.id)} aria-label={`Open ${playlist.name}`}>
               <ActivityArtwork src={playlist.artwork} />
               <span className="activity-queue-copy">

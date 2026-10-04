@@ -8,7 +8,7 @@ const {
   isLocalUploadTrack,
   isStreamTrack,
 } = require('./autoplay/normalize');
-const { scoreCandidate, pickCandidateLocally } = require('./autoplay/scoring');
+const { DISLIKED_ARTIST_REJECT_THRESHOLD, scoreCandidate, pickCandidateLocally } = require('./autoplay/scoring');
 const {
   buildSearchQueries,
   buildDiscoveryQueries,
@@ -278,6 +278,10 @@ function buildTasteContext(taste, now, listenerIds = []) {
     for (const entry of userTaste.listDislikes(userId, now)) {
       dislikedKeys.add(entry.key);
       if (entry.artistKey) perArtist.set(entry.artistKey, (perArtist.get(entry.artistKey) || 0) + 1);
+    }
+    // A blocked artist counts as disliked often enough to be rejected outright.
+    for (const { artistKey } of userTaste.listBlockedArtists(userId)) {
+      perArtist.set(artistKey, Math.max(perArtist.get(artistKey) || 0, DISLIKED_ARTIST_REJECT_THRESHOLD));
     }
     for (const [artistKey, count] of perArtist) {
       dislikedArtistCounts.set(artistKey, Math.max(count, dislikedArtistCounts.get(artistKey) || 0));
@@ -855,27 +859,35 @@ function likeTrack(userId, track) {
   return { liked };
 }
 
-// Records the person's dislike and drops the track from the server's seeds. The caller skips
+// Records the person's dislike and drops the track from the server's seeds. With
+// { artist: true } the whole artist is blocked and their seeds go as well. The caller skips
 // the track; the next pick re-scores the pool, so the prepared track is redone as well.
-function dislikeTrack(guildId, userId, track) {
+function dislikeTrack(guildId, userId, track, { artist = false } = {}) {
   const entry = feedbackEntry(track);
   if (!guildId || !userId || !entry) return null;
-  userTaste.recordDislike(userId, entry);
+  userTaste.recordDislike(userId, { ...entry, artwork: track.info?.artworkUrl || null });
   library.removeLiked(userId, entry.key);
+  const blocked = artist && userTaste.blockArtist(userId, entry);
 
+  const dropped = (info) => {
+    const normalized = info ? normalizeTrack({ info }) : null;
+    return Boolean(normalized) && (normalized.key === entry.key || (blocked && normalized.artistKey === entry.artistKey));
+  };
   const session = getSession(guildId);
-  const seeds = session.manualSeeds.filter((seed) => seed.key !== entry.key);
-  const currentSeedKey = session.currentSeed ? normalizeTrack({ info: session.currentSeed })?.key : null;
-  if (seeds.length !== session.manualSeeds.length || currentSeedKey === entry.key) {
+  const seeds = session.manualSeeds.filter((seed) => !dropped(seed));
+  const dropCurrent = dropped(session.currentSeed);
+  if (seeds.length !== session.manualSeeds.length || dropCurrent) {
     session.manualSeeds = seeds;
     session.seedCursor = 0;
-    if (currentSeedKey === entry.key) session.currentSeed = null;
+    if (dropCurrent) session.currentSeed = null;
     persistSession(guildId);
   }
 
   clearAutoplayPrefetch(guildId);
-  logAutoplay('info', `Disliked: "${entry.title}" by ${entry.author || 'unknown'}`);
-  return { disliked: true };
+  logAutoplay('info', blocked
+    ? `Blocked artist: ${entry.author || entry.artistKey}`
+    : `Disliked: "${entry.title}" by ${entry.author || 'unknown'}`);
+  return { disliked: true, blockedArtist: Boolean(blocked) };
 }
 
 // Replaces the prepared track. The rejected pick is remembered as a 'reroll' skip, which only

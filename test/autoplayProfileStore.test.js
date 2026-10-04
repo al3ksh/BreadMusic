@@ -13,6 +13,7 @@ const { scoreCandidate } = require('../src/music/autoplay/scoring');
 const {
   addManualSeed,
   clearAutoplayState,
+  dislikeTrack,
   getListenerIds,
   recordAutoplaySkip,
   rebuildProfileFromHistory,
@@ -276,4 +277,47 @@ test('rebuild seeds the session from manual history and the listeners\' likes', 
   const titles = __testing.getManualSeedPool(guildId).map((seed) => seed.title);
   assert.equal(result.seeds, 3);
   assert.deepEqual(titles, ['Liked', 'Old Manual', 'New Manual']);
+});
+
+test('a blocked artist is rejected and unblocking forgets their dislikes', () => {
+  const now = Date.now();
+  const played = { played: [] };
+  userTaste.blockArtist('blocker', { artistKey: 'nickelback', author: 'Nickelback' }, now);
+  userTaste.recordDislike('blocker', { key: 'id:nb1', artistKey: 'nickelback', author: 'Nickelback', title: 'Photograph' }, now);
+  userTaste.recordDislike('blocker', { key: 'id:other', artistKey: 'other', author: 'Other', title: 'Song' }, now + 1);
+
+  const blocked = __testing.buildTasteContext(played, now, ['blocker']);
+  assert.equal(blocked.dislikedArtistCounts.get('nickelback'), 2);
+  assert.equal(
+    scoreCandidate(candidate('k9', 'Nickelback'), context({ dislikedArtistCounts: blocked.dislikedArtistCounts })).reason,
+    'disliked artist',
+  );
+
+  const summary = userTaste.getDislikes('blocker', now + 2);
+  assert.deepEqual(summary.artists, [{ artistKey: 'nickelback', author: 'Nickelback', tracks: 1 }]);
+  assert.deepEqual(summary.tracks.map((item) => item.key), ['id:other', 'id:nb1'], 'newest first');
+
+  assert.equal(userTaste.unblockArtist('blocker', 'nickelback'), true);
+  assert.equal(__testing.buildTasteContext(played, now, ['blocker']).dislikedArtistCounts.has('nickelback'), false);
+  assert.deepEqual(userTaste.getDislikes('blocker', now + 2).tracks.map((item) => item.key), ['id:other']);
+  assert.equal(userTaste.unblockArtist('blocker', 'nickelback'), false);
+});
+
+test('two disliked tracks list the artist as blocked', () => {
+  userTaste.recordDislike('two-strikes', { key: 'id:a', artistKey: 'band', author: 'Band' });
+  userTaste.recordDislike('two-strikes', { key: 'id:b', artistKey: 'band', author: 'Band' });
+  assert.deepEqual(userTaste.getDislikes('two-strikes').artists, [{ artistKey: 'band', author: 'Band', tracks: 2 }]);
+});
+
+test('disliking with artist blocks them and drops their seeds', () => {
+  const guildId = 'profile-block-artist';
+  clearAutoplayState(guildId);
+  const first = track('First', 'Blocked Band', 'blockedban1');
+  addManualSeed(guildId, first);
+  addManualSeed(guildId, track('Second', 'Blocked Band', 'blockedban2'));
+  addManualSeed(guildId, track('Keep', 'Fine Band', 'finebandkp1'));
+
+  assert.deepEqual(dislikeTrack(guildId, 'block-user', first, { artist: true }), { disliked: true, blockedArtist: true });
+  assert.deepEqual(__testing.getManualSeedPool(guildId).map((seed) => seed.title), ['Keep']);
+  assert.deepEqual(userTaste.listBlockedArtists('block-user').map((artist) => artist.author), ['Blocked Band']);
 });

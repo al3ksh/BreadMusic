@@ -1,4 +1,5 @@
 const express = require('express');
+const defaultUserTaste = require('../music/autoplay/userTaste');
 
 // The client never needs the encoded Lavalink blob, only what it shows.
 function publicEntry(entry) {
@@ -46,6 +47,7 @@ function createLibraryRouter({
   getRequestUser,
   getDashboardRequester,
   getUsableNode,
+  userTaste = defaultUserTaste,
 }) {
   const router = express.Router();
   const base = '/api/guilds/:guildId/library';
@@ -105,6 +107,34 @@ function createLibraryRouter({
     const key = typeof req.body?.key === 'string' ? req.body.key : '';
     if (!library.removeLiked(userIdOf(req), key)) return res.status(404).json({ error: 'Track is not in your Liked list.' });
     return res.json({ success: true, ...publicSnapshot(library.getLibrarySnapshot(userIdOf(req))) });
+  });
+
+  router.get(`${base}/dislikes`, requireAuth, requirePlayerAccess, (req, res) => {
+    res.json(userTaste.getDislikes(userIdOf(req)));
+  });
+
+  const stringField = (req, name) => (typeof req.body?.[name] === 'string' ? req.body[name].trim().slice(0, 300) : '');
+
+  router.post(`${base}/dislikes/remove`, ...mutate, (req, res) => {
+    if (!userTaste.removeDislike(userIdOf(req), stringField(req, 'key'))) {
+      return res.status(404).json({ error: 'That track is not disliked.' });
+    }
+    return res.json({ success: true, ...userTaste.getDislikes(userIdOf(req)) });
+  });
+
+  router.post(`${base}/dislikes/block`, ...mutate, (req, res) => {
+    const artistKey = stringField(req, 'artistKey');
+    if (!artistKey) return res.status(400).json({ error: 'Pick an artist to block.' });
+    userTaste.blockArtist(userIdOf(req), { artistKey, author: stringField(req, 'author') || artistKey });
+    return res.json({ success: true, ...userTaste.getDislikes(userIdOf(req)) });
+  });
+
+  // Unblocking also forgets the artist's disliked tracks, otherwise two of them would block it again.
+  router.post(`${base}/dislikes/unblock`, ...mutate, (req, res) => {
+    if (!userTaste.unblockArtist(userIdOf(req), stringField(req, 'artistKey'))) {
+      return res.status(404).json({ error: 'That artist is not blocked.' });
+    }
+    return res.json({ success: true, ...userTaste.getDislikes(userIdOf(req)) });
   });
 
   router.post(`${base}/playlists`, ...mutate, (req, res) => {
