@@ -1,3 +1,5 @@
+const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES, handleAutoplay } = require('../../music/autoplay');
+
 const createMusicControlCommands = (context) => {
   const {
     SlashCommandBuilder,
@@ -90,12 +92,72 @@ const createMusicControlCommands = (context) => {
   } = context;
   return [
   {
-    data: new SlashCommandBuilder().setName('autoplay').setDescription('Toggle autoplay - automatically plays similar tracks.'),
+    data: new SlashCommandBuilder()
+      .setName('autoplay')
+      .setDescription('Autoplay - automatically plays similar tracks.')
+      .addSubcommand((sub) => sub.setName('toggle').setDescription('Turn autoplay on or off.'))
+      .addSubcommand((sub) => sub.setName('like').setDescription('Like the current track so autoplay picks more like it.'))
+      .addSubcommand((sub) => sub.setName('dislike').setDescription('Dislike and skip the current track; autoplay will avoid it.'))
+      .addSubcommand((sub) => sub.setName('next').setDescription('Pick a different autoplay track to play next.')),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const { config } = await ensurePlayer(interaction, { requireSameChannel: true });
-      assertDJ(interaction, config);
+      const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
+      const subcommand = interaction.options.getSubcommand(false) ?? 'toggle';
 
+      if (subcommand === 'like') {
+        const track = player.queue.current;
+        const result = likeTrack(interaction.guildId, track);
+        if (!result) {
+          await interaction.editReply('This track cannot be liked.');
+          return;
+        }
+        await interaction.client.musicUI.refresh(player);
+        await interaction.editReply(
+          result.liked
+            ? `\uD83D\uDC4D Liked **${track.info.title}**. Autoplay will pick more like it.`
+            : `Removed your like from **${track.info.title}**.`,
+        );
+        return;
+      }
+
+      // A dislike is remembered for autoplay and then goes through the normal skip rules.
+      if (subcommand === 'dislike') {
+        const track = player.queue.current;
+        if (!dislikeTrack(interaction.guildId, track)) {
+          await interaction.editReply('This track cannot be disliked.');
+          return;
+        }
+        const result = await withGuildMutex(interaction.guildId, () =>
+          handleSkipRequest(interaction, player, config, interaction.client),
+        );
+        if (result.skipped && result.needsAutoplay && result.lastTrack) {
+          await handleAutoplay(player, result.lastTrack, interaction.client);
+        }
+        if (result.skipped) await queuePersist(player);
+        await interaction.editReply(
+          result.skipped
+            ? `\uD83D\uDC4E Disliked and skipped **${track.info.title}**. Autoplay will avoid it.`
+            : `\uD83D\uDC4E Disliked **${track.info.title}**. ${result.message}`,
+        );
+        return;
+      }
+
+      if (subcommand === 'next') {
+        const result = await rerollNext(player, interaction.client);
+        if (!result.ok) {
+          await interaction.editReply(REROLL_FAILURES[result.reason] ?? 'Could not reroll.');
+          return;
+        }
+        await interaction.client.musicUI.refresh(player);
+        await interaction.editReply(
+          result.next
+            ? `\uD83C\uDFB2 Up next: **${result.next.title}** by ${result.next.author || 'Unknown'}.`
+            : '\uD83C\uDFB2 Picked a different next track.',
+        );
+        return;
+      }
+
+      assertDJ(interaction, config);
       const enabled = toggleAutoplay(interaction.guildId);
 
       const embed = new EmbedBuilder()

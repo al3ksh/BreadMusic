@@ -213,7 +213,7 @@ const createMusicCommands = (context) => {
       );
       if (result.skipped) {
         if (result.needsAutoplay && result.lastTrack) {
-          const { handleAutoplay } = require('../music/autoplay');
+          const { handleAutoplay } = require('../../music/autoplay');
           await handleAutoplay(player, result.lastTrack, interaction.client);
         }
         await queuePersist(player);

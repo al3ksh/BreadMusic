@@ -4,16 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const { prepareUploadArtwork, storeUploadArtwork } = require('../music/uploadArtwork');
 const { uploadArtworkUrl } = require('../music/uploadArtworkUrls');
+const { REROLL_FAILURES } = require('../music/autoplay');
 
 // Anyone listening in the bot's voice channel may vote to skip and give autoplay feedback.
 const listenerActions = new Set(['skip', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
-
-const REROLL_FAILURES = {
-  disabled: 'Autoplay is off.',
-  unavailable: 'Autoplay only picks the next track once the queue is empty.',
-  cooldown: 'Give it a second before rerolling again.',
-  exhausted: "Autoplay couldn't find another fitting track right now.",
-};
 
 function createPlayerRouter({
   client,

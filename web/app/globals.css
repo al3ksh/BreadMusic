@@ -912,6 +912,12 @@ a { color: inherit; text-decoration: none; }
   gap: 9px;
 }
 
+/* Damped springs: --activity-spring overshoots ~20%, --activity-spring-soft ~9%. */
+:root {
+  --activity-spring: linear(0, 0.106, 0.35, 0.634, 0.887, 1.07, 1.174, 1.205, 1.185, 1.136, 1.077, 1.025, 0.987, 0.965, 0.958, 0.962, 0.972, 0.984, 0.995, 1.003, 1.007, 1.009, 1.008, 1.006, 1.003, 1.001, 1);
+  --activity-spring-soft: linear(0, 0.089, 0.287, 0.517, 0.727, 0.891, 1.003, 1.067, 1.092, 1.092, 1.077, 1.056, 1.035, 1.017, 1.004, 0.996, 0.992, 0.991, 0.992, 0.994, 0.996, 0.998, 0.999, 1);
+}
+
 .activity-control-button {
   display: inline-flex;
   min-height: 42px;
@@ -926,7 +932,7 @@ a { color: inherit; text-decoration: none; }
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  transition: background 160ms ease, border-color 160ms ease, transform 560ms var(--activity-spring);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -960,18 +966,30 @@ a { color: inherit; text-decoration: none; }
 }
 
 .activity-control-button.is-feedback {
-  animation: activity-control-feedback 680ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: activity-control-feedback 680ms ease-out both;
 }
 
 .activity-control-button:active:not(:disabled) {
-  transform: translateY(0) scale(0.97);
-  transition-duration: 80ms;
+  transform: translateY(0) scale(0.9);
+  transition: transform 90ms ease-out;
 }
 
 @keyframes activity-control-feedback {
-  0%, 100% { filter: brightness(1); transform: scale(1); }
-  24% { filter: brightness(1.48); transform: scale(1.035); }
-  58% { filter: brightness(1.18); transform: scale(1); }
+  0% { filter: brightness(1); transform: scale(0.92); }
+  22% { filter: brightness(1.45); transform: scale(1.1); }
+  42% { filter: brightness(1.25); transform: scale(0.96); }
+  62% { filter: brightness(1.1); transform: scale(1.03); }
+  80% { transform: scale(0.995); }
+  100% { filter: brightness(1); transform: scale(1); }
+}
+
+.activity-icon-swap {
+  animation: activity-icon-swap 520ms var(--activity-spring) both;
+}
+
+@keyframes activity-icon-swap {
+  from { opacity: 0; transform: scale(0.4) rotate(-30deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
 }
 
 .activity-control-button:disabled {
@@ -1667,6 +1685,88 @@ a { color: inherit; text-decoration: none; }
   border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
+  animation: activity-badge-in 480ms var(--activity-spring) both;
+}
+
+@keyframes activity-badge-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.activity-autoplay-badge.is-rateable {
+  gap: 1px;
+  padding-right: 3px;
+}
+
+.activity-autoplay-thumb {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  opacity: 0.62;
+  cursor: pointer;
+  transition: opacity 140ms ease, background 140ms ease, color 140ms ease, transform 520ms var(--activity-spring);
+}
+
+.activity-autoplay-thumb:first-of-type {
+  margin-left: 5px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .activity-autoplay-thumb:hover:not(:disabled) {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.08);
+    transform: scale(1.12);
+  }
+  .activity-autoplay-thumb.is-dislike:hover:not(:disabled) {
+    color: #f3a4a4;
+  }
+}
+
+.activity-autoplay-thumb:active:not(:disabled) {
+  transform: scale(0.8);
+  transition: transform 80ms ease-out;
+}
+
+.activity-autoplay-thumb.is-liked {
+  color: #e4e1ff;
+  opacity: 1;
+}
+
+.activity-autoplay-thumb.is-popping {
+  animation: activity-thumb-pop 640ms ease-out both;
+}
+
+.activity-autoplay-thumb.is-dislike.is-popping {
+  animation-name: activity-thumb-shake;
+}
+
+@keyframes activity-thumb-pop {
+  0% { transform: scale(0.7) rotate(0); }
+  25% { transform: scale(1.5) rotate(-14deg); }
+  48% { transform: scale(0.88) rotate(6deg); }
+  68% { transform: scale(1.12) rotate(-2deg); }
+  85% { transform: scale(0.97) rotate(0); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes activity-thumb-shake {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  20% { transform: translateY(2px) rotate(12deg); }
+  40% { transform: translateY(-1px) rotate(-9deg); }
+  60% { transform: translateY(1px) rotate(5deg); }
+  80% { transform: rotate(-2deg); }
+}
+
+.activity-autoplay-thumb:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .activity-playback-state span.paused {
@@ -2313,7 +2413,7 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.46);
   transform-origin: left bottom;
   backdrop-filter: blur(18px) saturate(130%);
-  animation: activity-volume-open 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: activity-volume-open 460ms var(--activity-spring-soft) both;
 }
 
 .activity-volume-popover::after {
@@ -2367,8 +2467,8 @@ a { color: inherit; text-decoration: none; }
 }
 
 @keyframes activity-volume-open {
-  from { opacity: 0; transform: scale(0.94); filter: blur(4px); }
-  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  from { opacity: 0; transform: translateY(8px) scale(0.82); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes activity-karaoke-arrive {
@@ -3110,10 +3210,18 @@ a { color: inherit; text-decoration: none; }
   .activity-player-stage,
   .activity-volume-popover,
   .activity-control-button.is-feedback,
+  .activity-icon-swap,
+  .activity-playback-state span,
+  .activity-autoplay-thumb.is-popping,
   .activity-karaoke-lines p,
   .activity-karaoke-lines strong,
   .activity-track-art img { animation: none; }
   .activity-control-button.is-feedback { filter: brightness(1.3); }
+  .activity-control-button,
+  .activity-autoplay-thumb { transition-timing-function: ease; transition-duration: 120ms; }
+  .activity-control-button:active:not(:disabled),
+  .activity-autoplay-thumb:active:not(:disabled),
+  .activity-autoplay-thumb:hover:not(:disabled) { transform: none; }
   .activity-drawer.is-closing,
   .activity-drawer-backdrop.is-closing { opacity: 0; }
   .activity-lyrics-list { scroll-behavior: auto; }

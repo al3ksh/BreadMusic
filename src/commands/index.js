@@ -228,7 +228,7 @@ const HELP_CATEGORIES = [
       { name: '/skipto', value: 'Skip to a specific track.' },
       { name: '/back', value: 'Play previous track.' },
       { name: '/replay', value: 'Replay current track.' },
-      { name: '/autoplay', value: 'Toggle autoplay mode.' },
+      { name: '/autoplay', value: 'Toggle autoplay, or like, dislike or reroll its picks.' },
       { name: '/lyrics', value: 'Show lyrics for the current track or a search.' },
     ],
   },

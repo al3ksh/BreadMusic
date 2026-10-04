@@ -848,6 +848,13 @@ function dislikeTrack(guildId, track) {
 
 // Replaces the prepared track. The rejected pick is remembered as a 'reroll' skip, which only
 // excludes that exact track (not its artist), and the next one comes from the existing pool.
+const REROLL_FAILURES = {
+  disabled: 'Autoplay is off.',
+  unavailable: 'Autoplay only picks the next track once the queue is empty.',
+  cooldown: 'Give it a second before rerolling again.',
+  exhausted: "Autoplay couldn't find another fitting track right now.",
+};
+
 async function rerollNext(player, client) {
   const guildId = player?.guildId;
   if (!guildId || !isAutoplayEnabled(guildId)) return { ok: false, reason: 'disabled' };
@@ -898,6 +905,7 @@ module.exports = {
   likeTrack,
   dislikeTrack,
   rerollNext,
+  REROLL_FAILURES,
   __testing: {
     buildContext,
     buildDiscoveryQueries,

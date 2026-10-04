@@ -1,7 +1,5 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { buildNowPlayingEmbed } = require('./embeds');
-const { getAutoplayNext, getTrackFeedback, isAutoplayEnabled } = require('./autoplay');
-const { isLocalUploadTrack, isStreamTrack } = require('./autoplay/normalize');
 const { buildPlaybackErrorEmbed, buildReplacementEmbed } = require('./playbackErrors');
 
 const BUTTON_PREFIX = 'music';
@@ -17,9 +15,6 @@ const BUTTONS = {
   BACK: 'back',
   LYRICS: 'lyrics',
   ACTIVITY: 'activity',
-  LIKE: 'like',
-  DISLIKE: 'dislike',
-  REROLL: 'reroll',
 };
 
 const applicationEmojiIds = new Map(
@@ -44,9 +39,6 @@ const EMOJI = {
   SHUFFLE: playerEmoji('shuffle', '\uD83D\uDD00'),
   LYRICS: playerEmoji('lyrics', '\uD83D\uDCD6'),
   ACTIVITY: playerEmoji('dashboard', '\uD83C\uDFB5'),
-  LIKE: playerEmoji('like', '\uD83D\uDC4D'),
-  DISLIKE: playerEmoji('dislike', '\uD83D\uDC4E'),
-  REROLL: playerEmoji('reroll', '\uD83C\uDFB2'),
 };
 
 class MusicUI {
@@ -118,34 +110,7 @@ class MusicUI {
         .setStyle(ButtonStyle.Secondary),
     );
 
-    const autoplayRow = this.buildAutoplayRow(player);
-    return autoplayRow ? [rowOne, rowTwo, autoplayRow] : [rowOne, rowTwo];
-  }
-
-  // Taste feedback for the current track and a reroll for the prepared autoplay pick.
-  buildAutoplayRow(player) {
-    const track = player.queue.current;
-    if (!track || !isAutoplayEnabled(player.guildId)) return null;
-    if (isStreamTrack(track) || isLocalUploadTrack(track)) return null;
-
-    const feedback = getTrackFeedback(player.guildId, track);
-    const canReroll = player.queue.tracks.length === 0 && Boolean(getAutoplayNext(player.guildId));
-    return new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(this.buildCustomId(BUTTONS.LIKE, player.guildId))
-        .setEmoji(EMOJI.LIKE)
-        .setStyle(feedback === 'like' ? ButtonStyle.Success : ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(this.buildCustomId(BUTTONS.DISLIKE, player.guildId))
-        .setEmoji(EMOJI.DISLIKE)
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(this.buildCustomId(BUTTONS.REROLL, player.guildId))
-        .setEmoji(EMOJI.REROLL)
-        .setLabel('Different next')
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!canReroll),
-    );
+    return [rowOne, rowTwo];
   }
 
   buildCustomId(action, guildId) {

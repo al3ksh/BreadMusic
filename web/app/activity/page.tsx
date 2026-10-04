@@ -20,6 +20,7 @@ import {
 import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, QueueTrack } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 import { ActivityPlayerControls } from '@/components/activity/ActivityPlayerControls';
+import { ActivityAutoplayBadge } from '@/components/activity/ActivityAutoplayBadge';
 import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
 import { ActivityHistoryPanel } from '@/components/activity/ActivityHistoryPanel';
 import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
@@ -1530,7 +1531,15 @@ export default function ActivityPage() {
 
           <div className="activity-compact-badges" aria-label="Playback status">
             <span className={hasTrack && status.paused ? 'paused' : ''}>{hasTrack ? (status.paused ? 'Paused' : 'Now playing') : status.connected ? 'Player idle' : 'Player offline'}</span>
-            <span className={status.autoplay ? 'active' : ''}>Autoplay {status.autoplay ? 'on' : 'off'}</span>
+            <ActivityAutoplayBadge
+              label={`Autoplay ${status.autoplay ? 'on' : 'off'}`}
+              className={status.autoplay ? 'active' : ''}
+              status={status}
+              hasTrack={hasTrack}
+              actionBusy={actionBusy}
+              controlFeedback={controlFeedback}
+              runControlAction={runControlAction}
+            />
             <span className={loopActive ? 'active' : ''}>{loopActive ? loopLabel : 'Loop off'}</span>
             {status.voteSkip && <span className="vote">Skip {status.voteSkip.votes}/{status.voteSkip.requiredVotes}</span>}
           </div>
@@ -1547,7 +1556,16 @@ export default function ActivityPage() {
               <div className="activity-mini-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{status.paused ? 'Paused' : 'Playing'}</span></div>
               <div className="activity-playback-state">
                 <span className={hasTrack && status.paused ? 'paused' : ''}>{hasTrack ? (status.paused ? 'Paused' : 'Now playing') : status.connected ? 'Player idle' : 'Player offline'}</span>
-                {status.autoplay && <span>Autoplay</span>}
+                {status.autoplay && (
+                  <ActivityAutoplayBadge
+                    label="Autoplay"
+                    status={status}
+                    hasTrack={hasTrack}
+                    actionBusy={actionBusy}
+                    controlFeedback={controlFeedback}
+                    runControlAction={runControlAction}
+                  />
+                )}
                 {loopActive && <span className="loop">{loopLabel}</span>}
                 {status.voteSkip && (
                   <span
