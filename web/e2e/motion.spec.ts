@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
 const current = {
   title: 'Digital Love',
@@ -139,11 +139,20 @@ test('karaoke morphs in and out of the player', async ({ page }) => {
   await expect(stage.locator('.is-current')).toHaveText('Digital love');
   const root = activity.locator('html');
   await expect(root).not.toHaveClass(/activity-vt-karaoke/);
+  // Ending the morph must not replay the entrance animations (a visible flash).
+  expect(await runningAnimations(stage)).toEqual([]);
 
   await activity.getByRole('button', { name: 'Exit karaoke' }).click();
   await expect(stage).toHaveCount(0);
   await expect(root).not.toHaveClass(/activity-vt-karaoke/);
+  expect(await runningAnimations(activity.locator('.activity-player-stage'))).toEqual([]);
 });
+
+function runningAnimations(locator: Locator) {
+  return locator.evaluate((element) => element.getAnimations({ subtree: true })
+    .filter((animation) => animation.playState === 'running')
+    .map((animation) => (animation as CSSAnimation).animationName));
+}
 
 test('clicking the cover opens karaoke', async ({ page }) => {
   await mockQueueApi(page);

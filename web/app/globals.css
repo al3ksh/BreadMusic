@@ -4182,9 +4182,16 @@ html.activity-vt-karaoke .activity-player-main > .activity-controls-panel,
 html.activity-vt-karaoke .activity-karaoke-player .activity-controls-panel {
   view-transition-name: activity-controls;
 }
+/* The morph replaces the entrance animations. A zero duration (not animation: none) lets them
+   finish at once, so removing the class afterwards does not restart them and flash the stage. */
 html.activity-vt-karaoke .activity-karaoke-stage,
-html.activity-vt-karaoke .activity-player-stage {
-  animation: none;
+html.activity-vt-karaoke .activity-player-stage,
+html.activity-vt-karaoke .activity-karaoke-lines,
+html.activity-vt-karaoke .activity-karaoke-player,
+html.activity-vt-karaoke .activity-track-art > :first-child,
+html.activity-vt-karaoke .activity-track-swap {
+  animation-duration: 0s;
+  animation-delay: 0s;
 }
 
 ::view-transition-group(activity-title),

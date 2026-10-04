@@ -100,6 +100,15 @@ type PlayerClock = {
   paused: boolean;
 };
 
+// Entrance animations the karaoke morph replaces (see .activity-vt-karaoke in globals.css).
+const KARAOKE_ENTRANCES = new Set([
+  'activity-player-arrive',
+  'activity-karaoke-arrive',
+  'activity-karaoke-content-in',
+  'activity-art-swap',
+  'activity-title-swap',
+]);
+
 const EMPTY_STATUS: PlayerStatus = {
   connected: false,
   playing: false,
@@ -1290,7 +1299,16 @@ export default function ActivityPage() {
     const root = document.documentElement;
     root.classList.add('activity-vt-karaoke');
     const transition = document.startViewTransition(() => flushSync(apply));
-    transition.finished.finally(() => root.classList.remove('activity-vt-karaoke'));
+    transition.finished.finally(() => {
+      root.classList.remove('activity-vt-karaoke');
+      // The morph already showed the new layout; jump its entrance animations to the end in the
+      // same frame so they do not replay as a flash.
+      document.querySelectorAll('.activity-player-stage, .activity-karaoke-stage').forEach((stage) => {
+        stage.getAnimations({ subtree: true }).forEach((animation) => {
+          if (animation instanceof CSSAnimation && KARAOKE_ENTRANCES.has(animation.animationName)) animation.finish();
+        });
+      });
+    });
   }, []);
 
   useEffect(() => {
