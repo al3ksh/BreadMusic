@@ -1,13 +1,13 @@
 import { BookOpenText, ListMusic, Search } from 'lucide-react';
 
-type ActivityPanel = 'queue' | 'search' | 'lyrics' | null;
+type ActivityPanel = 'queue' | 'search' | 'lyrics' | 'sound' | null;
 
 type ActivityPanelNavProps = {
   activePanel: ActivityPanel;
   queueTotal: number;
   canQueue: boolean;
   hasTrack: boolean;
-  togglePanel: (panel: Exclude<ActivityPanel, null>) => void;
+  togglePanel: (panel: Exclude<ActivityPanel, null | 'sound'>) => void;
 };
 
 export function ActivityPanelNav({ activePanel, queueTotal, canQueue, hasTrack, togglePanel }: ActivityPanelNavProps) {

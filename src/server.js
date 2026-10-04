@@ -25,6 +25,7 @@ const {
   rebuildProfileFromHistory,
   scheduleAutoplayPrefetch,
 } = require('./music/autoplay');
+const { SOUND_PRESET_CHOICES, getSoundState } = require('./music/sound');
 const { getLastfmClient } = require('./music/autoplay/lastfm');
 const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
@@ -75,68 +76,7 @@ const ACTIVITY_ARTWORK_HOSTS = [
   'media.discordapp.net',
 ];
 
-const FILTER_PRESET_CHOICES = [
-  { value: 'bassboost', label: 'Bassboost', description: 'Deep, punchy bass boost.' },
-  { value: 'nightcore', label: 'Nightcore', description: 'Faster tempo (1.25x) + higher pitch.' },
-  { value: 'vaporwave', label: 'Vaporwave', description: 'Slower tempo (0.85x) + lower pitch.' },
-  { value: 'soft', label: 'Soft', description: 'Warm EQ with enhanced mids for vocals.' },
-  { value: 'karaoke', label: 'Karaoke', description: 'Reduces center vocals (mono channel).' },
-  { value: '8d', label: '8D Audio', description: 'Rotating stereo panning effect.' },
-  { value: 'vibrato', label: 'Vibrato', description: 'Pitch modulation (retro/synth vibe).' },
-  { value: 'tremolo', label: 'Tremolo', description: 'Volume modulation (pulsating effect).' },
-  { value: 'radio', label: 'Radio', description: 'Lo-fi radio/telephone effect.' },
-];
-
-const BASSBOOST_EQ = [
-  { band: 0, gain: 0.15 },
-  { band: 1, gain: 0.20 },
-  { band: 2, gain: 0.18 },
-  { band: 3, gain: 0.12 },
-  { band: 4, gain: 0.06 },
-  { band: 5, gain: 0.0 },
-  { band: 6, gain: -0.03 },
-  { band: 7, gain: -0.03 },
-  { band: 8, gain: 0.0 },
-  { band: 9, gain: 0.0 },
-  { band: 10, gain: 0.03 },
-  { band: 11, gain: 0.03 },
-  { band: 12, gain: 0.0 },
-  { band: 13, gain: 0.0 },
-  { band: 14, gain: 0.0 },
-];
-
-const RADIO_EQ = [
-  { band: 0, gain: -0.25 },
-  { band: 1, gain: -0.20 },
-  { band: 2, gain: -0.15 },
-  { band: 3, gain: -0.10 },
-  { band: 4, gain: 0.0 },
-  { band: 5, gain: 0.10 },
-  { band: 6, gain: 0.15 },
-  { band: 7, gain: 0.20 },
-  { band: 8, gain: 0.15 },
-  { band: 9, gain: 0.10 },
-  { band: 10, gain: 0.0 },
-  { band: 11, gain: -0.10 },
-  { band: 12, gain: -0.15 },
-  { band: 13, gain: -0.20 },
-  { band: 14, gain: -0.25 },
-];
-
-const FILTER_PRESETS = {
-  bassboost: async (manager) => manager.setEQ(BASSBOOST_EQ),
-  nightcore: async (manager) => manager.toggleNightcore(1.25, 1.2, 1),
-  vaporwave: async (manager) => manager.toggleVaporwave(0.85, 0.8, 1),
-  soft: async (manager) => manager.setEQPreset('FullSound'),
-  karaoke: async (manager) => manager.toggleKaraoke(),
-  '8d': async (manager) => manager.toggleRotation(0.15),
-  vibrato: async (manager) => manager.toggleVibrato(8, 1),
-  tremolo: async (manager) => manager.toggleTremolo(4, 0.6),
-  radio: async (manager) => {
-    await manager.setEQ(RADIO_EQ);
-    await manager.toggleLowPass(15);
-  },
-};
+const FILTER_PRESET_CHOICES = SOUND_PRESET_CHOICES;
 
 const DASHBOARD_ACTION_INTERVAL_MS = 250;
 const DASHBOARD_SEARCH_INTERVAL_MS = 750;
@@ -625,7 +565,6 @@ function createApiServer(client) {
     likeTrack,
     dislikeTrack,
     rerollNext,
-    filterPresets: FILTER_PRESETS,
     isTrackSeekable,
     seekTrack,
     isUnseekableTrackError,
@@ -1610,6 +1549,7 @@ function buildPlayerStatusSnapshot(client, guildId) {
     repeatMode: player.repeatMode || 'off',
     volume: player.volume ?? 100,
     filters: player.filterManager?.activePreset || null,
+    sound: getSoundState(player),
     autoplay: config.autoplay ?? false,
     autoplayMode: config.autoplayMode ?? 'ai_assisted',
     autoplayNext: buildAutoplayNextSnapshot(guildId, config),

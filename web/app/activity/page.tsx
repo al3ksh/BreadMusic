@@ -17,7 +17,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, QueueTrack } from '@/lib/api';
+import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, QueueTrack, SoundState } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 import { ActivityPlayerControls } from '@/components/activity/ActivityPlayerControls';
 import { ActivityAutoplayBadge } from '@/components/activity/ActivityAutoplayBadge';
@@ -26,6 +26,7 @@ import { ActivityHistoryPanel } from '@/components/activity/ActivityHistoryPanel
 import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
 import { ActivitySearchPanel } from '@/components/activity/ActivitySearchPanel';
 import { ActivityLyricsPanel } from '@/components/activity/ActivityLyricsPanel';
+import { ActivitySoundPanel } from '@/components/activity/ActivitySoundPanel';
 import { activityRequest } from '@/lib/activity/transport';
 import { buildActivityRichPresence, type RichPresenceActivity } from '@/lib/activity/richPresence';
 
@@ -60,7 +61,13 @@ const ACTIVITY_ERROR_VISUALS: Record<ActivityErrorKind, { icon: typeof Bot; titl
   access: { icon: ShieldAlert, title: 'Access denied' },
   generic: { icon: AlertTriangle, title: 'Activity unavailable' },
 };
-type ActivityPanel = 'queue' | 'search' | 'lyrics' | null;
+type ActivityPanel = 'queue' | 'search' | 'lyrics' | 'sound' | null;
+const ACTIVITY_PANEL_TITLES: Record<Exclude<ActivityPanel, null>, string> = {
+  queue: 'Queue',
+  search: 'Add music',
+  lyrics: 'Live lyrics',
+  sound: 'Sound',
+};
 type ActivityNoticeTone = 'success' | 'error' | 'warning' | 'info';
 type ActivityNotice = { id: number; message: string; tone: ActivityNoticeTone };
 type ServerNotice = { id: string; message: string; tone: ActivityNoticeTone };
@@ -838,6 +845,26 @@ export default function ActivityPage() {
     if (applied) flashControl(action);
   }, [flashControl, playerAction]);
 
+  // Sound edits bypass playerAction so dragging a slider never locks the other controls.
+  const sendSound = useCallback(async (sound: SoundState) => {
+    if (!guildId) return false;
+    try {
+      const result = await activityFetch<{ sound?: SoundState }>(`/api/guilds/${guildId}/player/sound`, {
+        method: 'POST',
+        body: JSON.stringify({ sound }),
+      });
+      if (result.sound) {
+        const applied = result.sound;
+        setStatus((current) => ({ ...current, sound: applied, filters: applied.preset }));
+      }
+      return true;
+    } catch (error) {
+      if ((error as Error & { status?: number }).status === 403) await refreshCapabilities();
+      notify(error instanceof Error ? error.message : 'Could not change the sound', 'error');
+      return false;
+    }
+  }, [activityFetch, guildId, notify, refreshCapabilities]);
+
   const fetchHistoryPage = useCallback((page: number) => {
     return activityFetch<HistoryPage>(`/api/guilds/${guildId}/history?page=${page}&limit=25`);
   }, [activityFetch, guildId]);
@@ -1160,6 +1187,7 @@ export default function ActivityPage() {
   }, [channelId, closePanel, notify, playerAction, searchPlaylist, status.currentTrack]);
 
   const canDj = capabilities?.canControlPlayer === true;
+  const soundCustomized = Boolean(status.sound && (status.sound.preset || status.sound.speed !== 1 || status.sound.pitch !== 1 || status.sound.eq.some((gain) => gain !== 0)));
   const canQueue = capabilities?.canQueue === true;
   const hasTrack = Boolean(status.connected && status.currentTrack);
   const canSeekTrack = Boolean(canDj && status.currentTrack?.seekable);
@@ -1385,6 +1413,9 @@ export default function ActivityPage() {
       volumeDraft={volumeDraft}
       setVolumeDraft={setVolumeDraft}
       commitVolume={commitVolume}
+      soundOpen={activePanel === 'sound'}
+      soundActive={soundCustomized}
+      onToggleSound={() => togglePanel('sound')}
     />
   );
 
@@ -1628,13 +1659,15 @@ export default function ActivityPage() {
                 onPointerCancel={() => finishDrawerGesture(false)}
               >
                 <div>
-                  <strong>{activePanel === 'queue' ? 'Queue' : activePanel === 'search' ? 'Add music' : 'Live lyrics'}</strong>
+                  <strong>{ACTIVITY_PANEL_TITLES[activePanel]}</strong>
                   <span>
                     {activePanel === 'queue'
                       ? `${queue?.total || 0} tracks`
                       : activePanel === 'search'
                         ? 'Search or upload audio'
-                        : status.currentTrack?.title || 'Current track'}
+                        : activePanel === 'sound'
+                          ? 'Presets, EQ, speed and pitch'
+                          : status.currentTrack?.title || 'Current track'}
                   </span>
                 </div>
                 <button type="button" onClick={closePanel} aria-label="Close panel"><X size={18} /></button>
@@ -1747,6 +1780,10 @@ export default function ActivityPage() {
                     }}
                     loadLyrics={loadLyrics}
                   />
+                )}
+
+                {activePanel === 'sound' && (
+                  <ActivitySoundPanel sound={status.sound} canEdit={canDj} onChange={sendSound} />
                 )}
               </div>
             </aside>

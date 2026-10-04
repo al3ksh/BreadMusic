@@ -1,4 +1,5 @@
 const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES, handleAutoplay } = require('../../music/autoplay');
+const { applySound, getSoundState, normalizePreset, resetSound } = require('../../music/sound');
 
 const createMusicControlCommands = (context) => {
   const {
@@ -75,15 +76,12 @@ const createMusicControlCommands = (context) => {
     getUserInsights,
     withGuildMutex,
     FILTER_PRESET_CHOICES,
-    BASSBOOST_EQ,
-    RADIO_EQ,
     formatStatsDuration,
     formatCompactRankedCounts,
     formatSourceLabel,
     formatRankedSources,
     formatRankedRequesters,
     formatRankedTracks,
-    FILTER_PRESETS,
     queuePersist,
     HELP_CATEGORIES,
     HELP_PAGE_COUNT,
@@ -264,20 +262,16 @@ const createMusicControlCommands = (context) => {
       }
 
       if (sub === 'clear') {
-        await player.filterManager.resetFilters();
-        await player.filterManager.clearEQ();
-        await player.filterManager.applyPlayerFilters();
-        player.filterManager.activePreset = null;
+        await resetSound(player);
+        await queuePersist(player);
         await interaction.editReply('Filters cleared.');
         return;
       }
 
-      const preset = interaction.options.getString('name', true);
-      const handler = FILTER_PRESETS[preset];
-      if (!handler) throw new CommandError('Unknown preset.');
-      await handler(player.filterManager);
-      await player.filterManager.applyPlayerFilters();
-      player.filterManager.activePreset = preset;
+      const preset = normalizePreset(interaction.options.getString('name', true));
+      if (!preset) throw new CommandError('Unknown preset.');
+      await applySound(player, { ...getSoundState(player), preset });
+      await queuePersist(player);
       await interaction.editReply(`Applied preset **${preset}**.`);
     },
   },

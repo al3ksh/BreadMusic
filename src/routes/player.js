@@ -5,6 +5,7 @@ const path = require('path');
 const { prepareUploadArtwork, storeUploadArtwork } = require('../music/uploadArtwork');
 const { uploadArtworkUrl } = require('../music/uploadArtworkUrls');
 const { REROLL_FAILURES } = require('../music/autoplay');
+const { applySound, getSoundState, normalizePreset, resetSound } = require('../music/sound');
 
 // Anyone listening in the bot's voice channel may vote to skip and give autoplay feedback.
 const listenerActions = new Set(['skip', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
@@ -82,7 +83,6 @@ function createPlayerRouter({
   likeTrack,
   dislikeTrack,
   rerollNext,
-  filterPresets,
   isTrackSeekable,
   seekTrack,
   isUnseekableTrackError,
@@ -564,7 +564,7 @@ function createPlayerRouter({
         return res.json({ success: true, channelId: targetVoiceChannelId, channelName: channel.name });
       }
 
-      const djOnlyActions = new Set(['stop', 'clearqueue', 'shuffle', 'loop', 'back', 'volume', 'filter', 'autoplay', 'remove', 'seek', 'move', 'playnow', 'playlist']);
+      const djOnlyActions = new Set(['stop', 'clearqueue', 'shuffle', 'loop', 'back', 'volume', 'filter', 'sound', 'autoplay', 'remove', 'seek', 'move', 'playnow', 'playlist']);
       if (!privileged && djOnlyActions.has(action)) {
         return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
       }
@@ -809,20 +809,29 @@ function createPlayerRouter({
           const preset = typeof req.body?.preset === 'string' ? req.body.preset.toLowerCase() : '';
           if (!preset) return res.status(400).json({ error: 'preset is required' });
           if (preset === 'clear' || preset === 'off' || preset === 'none') {
-            await player.filterManager.resetFilters();
-            await player.filterManager.clearEQ();
-            await player.filterManager.applyPlayerFilters();
-            player.filterManager.activePreset = null;
+            const sound = await resetSound(player);
             await client.musicUI?.refresh(player).catch(() => {});
-            return res.json({ success: true, filter: null });
+            await savePlayerState(player).catch(() => {});
+            return res.json({ success: true, filter: null, sound });
           }
-          const handler = filterPresets[preset];
-          if (!handler) return res.status(400).json({ error: 'Unknown filter preset' });
-          await handler(player.filterManager);
-          await player.filterManager.applyPlayerFilters();
-          player.filterManager.activePreset = preset;
+          if (!normalizePreset(preset)) return res.status(400).json({ error: 'Unknown filter preset' });
+          const sound = await applySound(player, { ...getSoundState(player), preset });
           await client.musicUI?.refresh(player).catch(() => {});
-          return res.json({ success: true, filter: preset });
+          await savePlayerState(player).catch(() => {});
+          return res.json({ success: true, filter: preset, sound });
+        }
+        case 'sound': {
+          const body = req.body?.sound;
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return res.status(400).json({ error: 'sound is required' });
+          }
+          if (body.preset != null && !normalizePreset(body.preset)) {
+            return res.status(400).json({ error: 'Unknown filter preset' });
+          }
+          const sound = await applySound(player, { ...getSoundState(player), ...body });
+          await client.musicUI?.refresh(player).catch(() => {});
+          await savePlayerState(player).catch(() => {});
+          return res.json({ success: true, filter: sound.preset, sound });
         }
         case 'autoplay': {
           const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : !Boolean(guildConfig.autoplay);

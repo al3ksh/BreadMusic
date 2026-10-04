@@ -1,4 +1,4 @@
-import { Pause, Play, Radio, Repeat, Shuffle, SkipBack, SkipForward, Square, Volume2 } from 'lucide-react';
+import { Pause, Play, Radio, Repeat, Shuffle, SkipBack, SkipForward, SlidersHorizontal, Square, Volume2 } from 'lucide-react';
 import type { CSSProperties, MutableRefObject, ReactNode } from 'react';
 import type { PlayerStatus } from '@/lib/api';
 import { ActivitySpinner } from '@/components/activity/ActivityArtwork';
@@ -26,6 +26,9 @@ type ActivityPlayerControlsProps = {
   volumeDraft: number | null;
   setVolumeDraft: (value: number | null) => void;
   commitVolume: (value: number) => void | Promise<unknown>;
+  soundOpen?: boolean;
+  soundActive?: boolean;
+  onToggleSound?: () => void;
 };
 
 export function ActivityPlayerControls({
@@ -51,6 +54,9 @@ export function ActivityPlayerControls({
   volumeDraft,
   setVolumeDraft,
   commitVolume,
+  soundOpen = false,
+  soundActive = false,
+  onToggleSound,
 }: ActivityPlayerControlsProps) {
   return (
     <div className={`activity-controls-panel${iconOnly ? ' activity-icon-controls' : ''}`}>
@@ -66,6 +72,16 @@ export function ActivityPlayerControls({
         <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queueTotal || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
         <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
         {iconOnly && <ControlButton label={`Autoplay ${status.autoplay ? 'on' : 'off'}`} active={status.autoplay} feedback={controlFeedback === 'autoplay'} disabled={autoplayDisabled || !canDj || Boolean(actionBusy)} onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}><Radio size={16} /></ControlButton>}
+        {onToggleSound && (
+          <ControlButton
+            label={soundActive ? 'Sound (custom)' : 'Sound'}
+            active={soundOpen || soundActive}
+            disabled={!status.connected}
+            onClick={onToggleSound}
+          >
+            <SlidersHorizontal size={16} />
+          </ControlButton>
+        )}
         <div className={`activity-volume-control ${volumeOpen ? 'is-open' : ''}`} ref={volumeControlRef}>
           <button
             type="button"

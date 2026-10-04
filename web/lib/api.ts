@@ -147,6 +147,13 @@ export interface LyricsResult {
   provider: string;
 }
 
+export interface SoundState {
+  preset: string | null;
+  eq: number[];
+  speed: number;
+  pitch: number;
+}
+
 export interface PlayerStatus {
   connected: boolean;
   playing: boolean;
@@ -167,6 +174,7 @@ export interface PlayerStatus {
   repeatMode: string;
   volume: number;
   filters: string | null;
+  sound?: SoundState;
   autoplay: boolean;
   autoplayMode?: string;
   autoplayNext?: AutoplayNextTrack | null;
