@@ -9,9 +9,8 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 const MAX_SESSION_SEEDS = 40;
 const MAX_SESSION_RECENT = 40;
 
+// Server-wide signals only. Likes and dislikes belong to people (see userTaste and the library).
 const TASTE_LIMITS = {
-  likes: { max: 200, ttl: 90 * DAY_MS },
-  dislikes: { max: 300, ttl: 30 * DAY_MS },
   skips: { max: 200, ttl: 7 * DAY_MS },
   played: { max: 600, ttl: 3 * DAY_MS },
 };
@@ -29,7 +28,7 @@ function emptySession() {
 }
 
 function emptyTaste() {
-  return { likes: [], dislikes: [], skips: [], played: [] };
+  return { skips: [], played: [] };
 }
 
 function getProfile(guildId, create = false) {
@@ -42,6 +41,9 @@ function getProfile(guildId, create = false) {
   if (profile) {
     profile.session ??= emptySession();
     profile.taste ??= emptyTaste();
+    // Likes and dislikes used to be shared by the whole server; they are per person now.
+    delete profile.taste.likes;
+    delete profile.taste.dislikes;
     for (const kind of Object.keys(TASTE_LIMITS)) {
       if (!Array.isArray(profile.taste[kind])) profile.taste[kind] = [];
     }
@@ -115,57 +117,10 @@ function recordSkip(guildId, entry, now = Date.now()) {
   recordTaste(guildId, 'skips', entry, now);
 }
 
-function removeFrom(profile, kind, key) {
-  const before = profile.taste[kind].length;
-  profile.taste[kind] = profile.taste[kind].filter((entry) => entry.key !== key);
-  return profile.taste[kind].length !== before;
-}
-
-// Returns true when the track ends up liked, false when the like was removed.
-function toggleLike(guildId, entry, now = Date.now()) {
-  if (!guildId || !entry?.key) return false;
-  const profile = getProfile(guildId, true);
-  if (removeFrom(profile, 'likes', entry.key)) {
-    getStore().save();
-    return false;
-  }
-  removeFrom(profile, 'dislikes', entry.key);
-  profile.taste.likes = upsert(profile.taste.likes, entry, TASTE_LIMITS.likes, now);
-  getStore().save();
-  return true;
-}
-
-function recordDislike(guildId, entry, now = Date.now()) {
-  if (!guildId || !entry?.key) return;
-  const profile = getProfile(guildId, true);
-  removeFrom(profile, 'likes', entry.key);
-  profile.taste.dislikes = upsert(profile.taste.dislikes, entry, TASTE_LIMITS.dislikes, now);
-  getStore().save();
-}
-
-function removeDislike(guildId, key) {
-  const profile = getProfile(guildId);
-  if (!profile || !removeFrom(profile, 'dislikes', key)) return false;
-  getStore().save();
-  return true;
-}
-
 function getTaste(guildId, now = Date.now()) {
   const profile = getProfile(guildId);
   if (!profile) return emptyTaste();
   return pruneTaste(profile.taste, now);
-}
-
-function getTrackFeedback(guildId, key, now = Date.now()) {
-  if (!key) return null;
-  const taste = getTaste(guildId, now);
-  if (taste.likes.some((entry) => entry.key === key)) return 'like';
-  if (taste.dislikes.some((entry) => entry.key === key)) return 'dislike';
-  return null;
-}
-
-function listLikes(guildId, now = Date.now()) {
-  return [...getTaste(guildId, now).likes].sort((left, right) => right.at - left.at);
 }
 
 function flush() {
@@ -186,12 +141,7 @@ module.exports = {
   clearSession,
   recordPlayed,
   recordSkip,
-  toggleLike,
-  recordDislike,
-  removeDislike,
   getTaste,
-  getTrackFeedback,
-  listLikes,
   flush,
   __testing: { resetForTesting },
 };

@@ -73,10 +73,10 @@ test('/autoplay like toggles the like on the current track for any listener', as
   const guildId = 'command-like';
   const { run, calls, current } = setup(guildId);
   assert.match(await run('like'), /Liked \*\*Midnight City\*\*.*`\/liked` list/);
-  assert.equal(getTrackFeedback(guildId, current), 'like');
+  assert.equal(getTrackFeedback('listener-1', current), 'like');
   assert.equal(library.isLiked('listener-1', current), true);
   assert.match(await run('like'), /Removed your like/);
-  assert.equal(getTrackFeedback(guildId, current), null);
+  assert.equal(getTrackFeedback('listener-1', current), null);
   assert.equal(library.isLiked('listener-1', current), false);
   assert.ok(!calls.includes('assertDJ'));
   assert.ok(calls.includes('refresh'));
@@ -86,7 +86,7 @@ test('/autoplay dislike records the dislike and goes through the skip rules', as
   const guildId = 'command-dislike';
   const voted = setup(guildId, { skipResult: { skipped: false, message: 'Vote recorded (1/2).' } });
   assert.match(await voted.run('dislike'), /Disliked \*\*Midnight City\*\*\. Vote recorded/);
-  assert.equal(getTrackFeedback(guildId, voted.current), 'dislike');
+  assert.equal(getTrackFeedback('listener-1', voted.current), 'dislike');
   assert.deepEqual(voted.calls, ['skip']);
 
   const skipped = setup('command-dislike-skip');

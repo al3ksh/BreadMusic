@@ -84,6 +84,7 @@ const {
 } = require('./music/autoplay');
 const { flush: flushAutoplayProfiles } = require('./music/autoplay/profileStore');
 const { flush: flushLibrary } = require('./music/library');
+const { flush: flushAutoplayUserTaste } = require('./music/autoplay/userTaste');
 const {
   clearVoiceTrackStatus,
   handleVoiceStatusGatewayEvent,
@@ -1580,6 +1581,7 @@ async function gracefulShutdown(signal) {
     console.error('Failed to flush queue store:', error);
   });
   flushAutoplayProfiles();
+  flushAutoplayUserTaste();
   flushLibrary();
   client.lyricsUI?.clearAll();
 

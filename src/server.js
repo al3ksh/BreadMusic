@@ -24,6 +24,7 @@ const {
   rerollNext,
   rebuildProfileFromHistory,
   scheduleAutoplayPrefetch,
+  getListenerIds,
 } = require('./music/autoplay');
 const { SOUND_PRESET_CHOICES, getSoundState } = require('./music/sound');
 const { getLastfmClient } = require('./music/autoplay/lastfm');
@@ -491,8 +492,13 @@ function createApiServer(client) {
     savePlayerState,
     broadcastPlayerUpdate,
     playerTextChannelDisabled: PLAYER_TEXT_CHANNEL_DISABLED,
-    rebuildProfileFromHistory,
+    // Liked seeds come from the people listening right now.
+    rebuildProfileFromHistory: (guildId) => rebuildProfileFromHistory(
+      guildId,
+      getListenerIds(client.lavalink?.players?.get(guildId), client),
+    ),
     scheduleAutoplayPrefetch,
+    setAutoplay,
     getLastfmStatus: () => getLastfmClient().getStatus(),
   }));
 
@@ -1493,7 +1499,8 @@ function isUsableTextChannel(channel) {
   return channel.viewable !== false;
 }
 
-function buildPlayerStatusSnapshot(client, guildId) {
+// viewerId picks whose 👍/👎 the autoplay badge shows; feedback is per person.
+function buildPlayerStatusSnapshot(client, guildId, viewerId = null) {
   const player = client.lavalink?.players?.get(guildId);
   const guild = client.guilds.cache.get(guildId);
   const config = getConfig(guildId);
@@ -1511,7 +1518,6 @@ function buildPlayerStatusSnapshot(client, guildId) {
       volume: 100,
       filters: null,
       autoplay: config.autoplay ?? false,
-      autoplayMode: config.autoplayMode ?? 'ai_assisted',
       autoplayNext: null,
       autoplayFeedback: null,
       autoplayRateable: false,
@@ -1569,9 +1575,8 @@ function buildPlayerStatusSnapshot(client, guildId) {
     filters: player.filterManager?.activePreset || null,
     sound: getSoundState(player),
     autoplay: config.autoplay ?? false,
-    autoplayMode: config.autoplayMode ?? 'ai_assisted',
     autoplayNext: buildAutoplayNextSnapshot(guildId, config),
-    autoplayFeedback: config.autoplay ? getTrackFeedback(guildId, player.queue.current) : null,
+    autoplayFeedback: config.autoplay ? getTrackFeedback(viewerId, player.queue.current) : null,
     autoplayRateable: Boolean(config.autoplay && canRateTrack(player.queue.current)),
     voteSkip: getVoteSkipSnapshot(player, config, guild),
     sessionHistory,

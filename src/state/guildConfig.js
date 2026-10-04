@@ -15,13 +15,11 @@ const DEFAULT_CONFIG = {
   twentyFourSevenChannelId: null,
   defaultVolume: 100,
   autoplay: false,
-  autoplayMode: 'ai_assisted',
   activityControl: 'inherit',
   voiceChannelStatus: true,
   dashboardAccess: 'admin',
 };
 
-const AUTOPLAY_MODES = new Set(['classic', 'ai_assisted', 'discovery']);
 const DASHBOARD_ACCESS_LEVELS = new Set(['admin', 'mod', 'members']);
 const ACTIVITY_CONTROL_MODES = new Set(['inherit', 'admin', 'mod', 'dj', 'members']);
 
@@ -37,9 +35,8 @@ function normalizeVolumeConfig(config) {
     normalized.maxVolume,
     Number.isFinite(normalized.defaultVolume) ? normalized.defaultVolume : DEFAULT_CONFIG.defaultVolume,
   ));
-  if (!AUTOPLAY_MODES.has(normalized.autoplayMode)) {
-    normalized.autoplayMode = DEFAULT_CONFIG.autoplayMode;
-  }
+  // Autoplay used to offer several modes; there is one now.
+  delete normalized.autoplayMode;
   // Legacy 'dj' dashboard access becomes 'mod'; the DJ role stays music-only.
   if (normalized.dashboardAccess === 'dj') {
     normalized.dashboardAccess = 'mod';
@@ -121,7 +118,6 @@ function formatConfig(config) {
     `twentyFourSevenChannelId: ${config.twentyFourSevenChannelId ?? 'none'}`,
     `defaultVolume: ${config.defaultVolume}`,
     `autoplay: ${config.autoplay ? 'yes' : 'no'}`,
-    `autoplayMode: ${config.autoplayMode}`,
     `activityControl: ${config.activityControl}`,
     `voiceChannelStatus: ${config.voiceChannelStatus ? 'yes' : 'no'}`,
     `dashboardAccess: ${config.dashboardAccess}`,
@@ -142,6 +138,5 @@ module.exports = {
   listConfigs,
   DEFAULT_CONFIG,
   normalizeVolumeConfig,
-  AUTOPLAY_MODES,
   ACTIVITY_CONTROL_MODES,
 };

@@ -24,6 +24,7 @@ function createGuildConfigRouter({
   playerTextChannelDisabled,
   rebuildProfileFromHistory,
   scheduleAutoplayPrefetch,
+  setAutoplay,
   getLastfmStatus,
 }) {
   const router = express.Router();
@@ -185,7 +186,6 @@ function createGuildConfigRouter({
       playerTextChannelName,
       defaultVolume: config.defaultVolume,
       autoplay: config.autoplay,
-      autoplayMode: config.autoplayMode,
       lastfm: getLastfmStatus(),
       activityControl: config.activityControl,
       voiceChannelStatus: config.voiceChannelStatus,
@@ -219,10 +219,8 @@ function createGuildConfigRouter({
     if (typeof body.afkTimeout === 'number') updates.afkTimeout = Math.max(60000, body.afkTimeout);
     if (typeof body.persistentQueue === 'boolean') updates.persistentQueue = body.persistentQueue;
     if (typeof body.preferredSource === 'string') updates.preferredSource = body.preferredSource || null;
-    if (typeof body.autoplay === 'boolean') updates.autoplay = body.autoplay;
-    if (typeof body.autoplayMode === 'string' && ['classic', 'ai_assisted', 'discovery'].includes(body.autoplayMode)) {
-      updates.autoplayMode = body.autoplayMode;
-    }
+    // Autoplay goes through setAutoplay below so turning it off also drops its prepared pick.
+    const autoplayChanged = typeof body.autoplay === 'boolean' && body.autoplay !== Boolean(previousConfig.autoplay);
     if (typeof body.activityControl === 'string' && ['inherit', 'admin', 'mod', 'dj', 'members'].includes(body.activityControl)) {
       updates.activityControl = body.activityControl;
     }
@@ -232,7 +230,18 @@ function createGuildConfigRouter({
     if (typeof body.voiceChannelStatus === 'boolean') updates.voiceChannelStatus = body.voiceChannelStatus;
     if (typeof body.defaultVolume === 'number') updates.defaultVolume = Math.max(0, Math.min(100, body.defaultVolume));
 
-    const updated = setConfig(guildId, updates);
+    let updated = setConfig(guildId, updates);
+
+    if (autoplayChanged) {
+      setAutoplay(guildId, body.autoplay);
+      updated = getConfig(guildId);
+      const player = client.lavalink?.players?.get(guildId);
+      if (player) {
+        if (updated.autoplay && player.queue.current) scheduleAutoplayPrefetch(player, player.queue.current, client);
+        await client.musicUI?.refresh(player).catch(() => {});
+      }
+      broadcastPlayerUpdate(guildId);
+    }
 
     if (Object.prototype.hasOwnProperty.call(updates, 'maxVolume')) {
       const player = client.lavalink?.players?.get(guildId);

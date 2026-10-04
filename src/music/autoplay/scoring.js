@@ -12,6 +12,8 @@ const DISLIKED_ARTIST_PENALTY = 30;
 const PLAYED_REJECT_MS = 12 * 60 * 60 * 1000;
 const PLAYED_PENALTY = 18;
 const LIKED_ARTIST_BONUS = 10;
+// Each present listener who liked the artist adds the bonus once, up to this many listeners.
+const LIKED_ARTIST_MAX_LISTENERS = 3;
 
 const HARD_REJECT_TERMS = [
   'karaoke',
@@ -340,9 +342,10 @@ function scoreCandidate(candidate, context) {
       reasons.push('played-earlier');
     }
 
-    if (track.artistKey && taste.likedArtists?.has(track.artistKey)) {
-      score += LIKED_ARTIST_BONUS;
-      reasons.push('liked-artist');
+    const likedArtist = track.artistKey ? (taste.likedArtistCounts?.get(track.artistKey) || 0) : 0;
+    if (likedArtist > 0) {
+      score += LIKED_ARTIST_BONUS * Math.min(likedArtist, LIKED_ARTIST_MAX_LISTENERS);
+      reasons.push(`liked-artist:${likedArtist}`);
     }
   }
 

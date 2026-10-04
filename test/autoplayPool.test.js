@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 process.env.BREAD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bread-autoplay-pool-'));
+delete process.env.GEMINI_API_KEY;
 
 const pool = require('../src/music/autoplay/pool');
 const {
@@ -19,7 +20,6 @@ const {
   recordAutoplaySkip,
   rerollNext,
   setAutoplay,
-  setAutoplayMode,
   __testing,
 } = require('../src/music/autoplay');
 const { closeDatabases } = require('../src/state/sqliteStore');
@@ -31,6 +31,7 @@ test.after(() => {
 
 function track(title, author, identifier) {
   return {
+    encoded: `encoded-${identifier}`,
     info: {
       title,
       author,
@@ -66,7 +67,6 @@ function fakeNode(handler = (query) => ({ tracks: query.startsWith('https://') ?
 function setup(guildId, node = fakeNode()) {
   clearAutoplayState(guildId);
   setAutoplay(guildId, true);
-  setAutoplayMode(guildId, 'classic');
   // clearAutoplayState blocks autoplay briefly after a disconnect; a fresh session starts unblocked.
   const seed = track('Seed Song', 'Seed Artist', 'seedseedsee');
   addManualSeed(guildId, seed);
@@ -299,21 +299,24 @@ test('reroll needs autoplay and an empty queue', async () => {
 test('like toggles and dislike drops the seed and the prepared track', async () => {
   const guildId = 'pool-feedback';
   const { player, client, seed } = setup(guildId);
-  assert.deepEqual(likeTrack(guildId, seed), { liked: true });
-  assert.equal(getTrackFeedback(guildId, seed), 'like');
-  assert.deepEqual(likeTrack(guildId, seed), { liked: false });
-  assert.equal(getTrackFeedback(guildId, seed), null);
+  assert.deepEqual(likeTrack('user-1', seed), { liked: true });
+  assert.equal(getTrackFeedback('user-1', seed), 'like');
+  assert.equal(getTrackFeedback('user-2', seed), null, 'feedback belongs to the person who clicked');
+  assert.deepEqual(likeTrack('user-1', seed), { liked: false });
+  assert.equal(getTrackFeedback('user-1', seed), null);
+  likeTrack('user-1', seed);
 
   await __testing.prepareNext(player, seed, client);
   assert.ok(getAutoplayNext(guildId));
-  assert.deepEqual(dislikeTrack(guildId, seed), { disliked: true });
-  assert.equal(getTrackFeedback(guildId, seed), 'dislike');
+  assert.deepEqual(dislikeTrack(guildId, 'user-1', seed), { disliked: true });
+  assert.equal(getTrackFeedback('user-1', seed), 'dislike', 'a dislike replaces the like');
   assert.equal(getAutoplayNext(guildId), null);
   assert.deepEqual(__testing.getManualSeedPool(guildId), []);
 
-  const stream = { info: { ...seed.info, identifier: 'livelivelive', isStream: true } };
-  assert.equal(likeTrack(guildId, stream), null);
-  assert.equal(getTrackFeedback(guildId, stream), null);
+  const stream = { encoded: 'encoded-live', info: { ...seed.info, identifier: 'livelivelive', isStream: true } };
+  assert.equal(likeTrack('user-1', stream), null);
+  assert.equal(getTrackFeedback('user-1', stream), null);
+  assert.equal(likeTrack(null, seed), null);
 });
 
 test('now playing shows the prepared track and keeps the two control rows', async () => {

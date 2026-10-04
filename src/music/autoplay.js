@@ -1,5 +1,5 @@
-const { getConfig, setConfig, AUTOPLAY_MODES } = require('../state/guildConfig');
-const { getDiscoveryArtists, getGenreRadioPlan, pickCandidateWithGemini, resetGeminiAutoplayState } = require('./autoplayAi');
+const { getConfig, setConfig } = require('../state/guildConfig');
+const { getDiscoveryArtists, pickCandidateWithGemini, resetGeminiAutoplayState } = require('./autoplayAi');
 const {
   logAutoplay,
   normalizeTrack,
@@ -20,6 +20,8 @@ const {
 } = require('./autoplay/sources');
 const pool = require('./autoplay/pool');
 const profileStore = require('./autoplay/profileStore');
+const userTaste = require('./autoplay/userTaste');
+const library = require('./library');
 const { autoplayEvents } = require('./autoplay/events');
 const { getGuildHistory } = require('../state/analyticsStore');
 
@@ -46,25 +48,12 @@ const QUICK_SKIP_MAX_RATIO = 0.35;
 const ACCEPTED_PLAY_MIN_MS = 90_000;
 const ACCEPTED_PLAY_MIN_RATIO = 0.65;
 const PREPARE_DELAY_MS = 3_000;
-const GENRE_LOCK_MIN = 3;
-const GENRE_LOCK_BACKUP = 4;
 const EXHAUSTED_NOTICE_COOLDOWN_MS = 2 * 60 * 1000;
 const REROLL_COOLDOWN_MS = 1_500;
 
 function isAutoplayEnabled(guildId) {
   const config = getConfig(guildId);
   return config.autoplay ?? false;
-}
-
-function getAutoplayMode(guildId) {
-  const config = getConfig(guildId);
-  return AUTOPLAY_MODES.has(config.autoplayMode) ? config.autoplayMode : 'ai_assisted';
-}
-
-function setAutoplayMode(guildId, mode) {
-  if (!AUTOPLAY_MODES.has(mode)) return null;
-  setConfig(guildId, { autoplayMode: mode });
-  return mode;
 }
 
 function setAutoplay(guildId, enabled) {
@@ -249,16 +238,57 @@ function wasRecentlySkipped(guildId, track) {
   return profileStore.getTaste(guildId).skips.some((entry) => entry.key === normalized.key && entry.at >= cutoff);
 }
 
-function buildTasteContext(taste, now) {
-  const dislikedArtistCounts = new Map();
-  for (const entry of taste.dislikes) {
-    if (entry.artistKey) dislikedArtistCounts.set(entry.artistKey, (dislikedArtistCounts.get(entry.artistKey) || 0) + 1);
+// People in the bot's voice channel who are actually listening: no bots, nobody deafened.
+function getListenerIds(player, client) {
+  const channelId = player?.voiceChannelId;
+  const members = channelId ? client?.guilds?.cache?.get(player.guildId)?.channels?.cache?.get(channelId)?.members : null;
+  if (!members) return [];
+  const ids = [];
+  for (const member of members.values()) {
+    if (member?.user?.bot || member?.voice?.selfDeaf || member?.voice?.deaf) continue;
+    ids.push(member.id);
   }
+  return ids;
+}
+
+function likedEntries(userId) {
+  return library.listLiked(userId)
+    .map((entry) => normalizeTrack(library.entryToTrack(entry)))
+    .filter(Boolean);
+}
+
+// Likes and dislikes belong to people, so only the people listening right now shape the pick.
+// One listener's dislike rejects a track; an artist's dislike count is the most any single
+// listener gave it. Liked artists count how many listeners like them. Plays stay server-wide.
+function buildTasteContext(taste, now, listenerIds = []) {
+  const likedKeys = new Set();
+  const likedArtistCounts = new Map();
+  const dislikedKeys = new Set();
+  const dislikedArtistCounts = new Map();
+
+  for (const userId of new Set(listenerIds)) {
+    const artists = new Set();
+    for (const liked of likedEntries(userId)) {
+      likedKeys.add(liked.key);
+      if (liked.artistKey) artists.add(liked.artistKey);
+    }
+    for (const artistKey of artists) likedArtistCounts.set(artistKey, (likedArtistCounts.get(artistKey) || 0) + 1);
+
+    const perArtist = new Map();
+    for (const entry of userTaste.listDislikes(userId, now)) {
+      dislikedKeys.add(entry.key);
+      if (entry.artistKey) perArtist.set(entry.artistKey, (perArtist.get(entry.artistKey) || 0) + 1);
+    }
+    for (const [artistKey, count] of perArtist) {
+      dislikedArtistCounts.set(artistKey, Math.max(count, dislikedArtistCounts.get(artistKey) || 0));
+    }
+  }
+
   return {
     now,
-    likedKeys: new Set(taste.likes.map((entry) => entry.key)),
-    likedArtists: new Set(taste.likes.map((entry) => entry.artistKey).filter(Boolean)),
-    dislikedKeys: new Set(taste.dislikes.map((entry) => entry.key)),
+    likedKeys,
+    likedArtistCounts,
+    dislikedKeys,
     dislikedArtistCounts,
     played: new Map(taste.played.map((entry) => [entry.key, entry.at])),
   };
@@ -326,13 +356,13 @@ function selectManualSeeds(guildId, limit = ACTIVE_MANUAL_SEEDS) {
   return selected;
 }
 
-// The pool belongs to a listening profile; a new manual seed or mode switch means a new profile.
+// The pool belongs to a listening profile; a new manual seed means a new profile.
 function getProfileKey(guildId) {
   const seeds = getManualSeedPool(guildId).map((entry) => entry.key);
-  return `${getAutoplayMode(guildId)}|${seeds.length ? seeds.join(',') : 'auto'}`;
+  return seeds.length ? seeds.join(',') : 'auto';
 }
 
-function buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds = []) {
+function buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds = [], listenerIds = []) {
   const seed = normalizeTrack(seedTrack);
   const last = normalizeTrack(lastTrack);
   const manualSeeds = getManualSeedPool(guildId)
@@ -361,7 +391,8 @@ function buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds = []) {
     activeSeeds: activeSeeds.length ? activeSeeds : [primary].filter(Boolean),
     recent,
     skipped,
-    taste: buildTasteContext(taste, now),
+    listenerIds,
+    taste: buildTasteContext(taste, now, listenerIds),
     seedArtist: primary?.artist || last?.artist || '',
     seedTitle: primary?.cleanTitle || primary?.title || last?.cleanTitle || last?.title || '',
     seedDuration: primary?.duration || last?.duration || 0,
@@ -404,18 +435,14 @@ async function buildPool(player, lastTrack, client) {
   }
 
   const seedTrack = { info: activeSeed };
-  const context = buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds);
+  const context = buildContext(guildId, seedTrack, lastTrack, selectedManualSeeds, getListenerIds(player, client));
   if (!context.seedArtist && !context.seedTitle) {
     logAutoplay('debug', 'Could not build seed context');
     return false;
   }
 
-  const mode = getAutoplayMode(guildId);
   const profileKey = getProfileKey(guildId);
-  const planPromise = mode === 'classic'
-    ? Promise.resolve([])
-    : (mode === 'discovery' ? getGenreRadioPlan : getDiscoveryArtists)(context, { logger: logAutoplay })
-      .catch(() => []);
+  const planPromise = getDiscoveryArtists(context, { logger: logAutoplay }).catch(() => []);
   const requester = client?.user ?? null;
   const startedAt = Date.now();
 
@@ -434,7 +461,7 @@ async function buildPool(player, lastTrack, client) {
   const state = pool.mergeCandidates(guildId, candidates, { profileKey });
   state.seedTrack = seedTrack;
   state.activeSeeds = selectedManualSeeds;
-  logAutoplay('info', `Pool built in ${Date.now() - startedAt}ms: ${candidates.length} results, ${state.candidates.size} candidates (${mode})`);
+  logAutoplay('info', `Pool built in ${Date.now() - startedAt}ms: ${candidates.length} results, ${state.candidates.size} candidates`);
   return candidates.length > 0;
 }
 
@@ -455,9 +482,9 @@ function startBuild(player, lastTrack, client) {
   return building;
 }
 
-function scorePool(guildId, lastTrack) {
+function scorePool(guildId, lastTrack, listenerIds = []) {
   const state = pool.getPool(guildId);
-  const context = buildContext(guildId, state?.seedTrack ?? lastTrack, lastTrack, state?.activeSeeds ?? []);
+  const context = buildContext(guildId, state?.seedTrack ?? lastTrack, lastTrack, state?.activeSeeds ?? [], listenerIds);
   const scored = pool.getCandidates(guildId).map((candidate) => ({
     ...candidate,
     ...scoreCandidate(candidate, context),
@@ -466,21 +493,9 @@ function scorePool(guildId, lastTrack) {
 }
 
 // Gemini sees every candidate; the local fallback keeps to the radio/search pool so an AI outage
-// behaves like the original autoplay. Genre radio locks both onto the AI-planned artists.
-function selectionPools(scored, mode) {
+// behaves like the original autoplay.
+function selectionPools(scored) {
   const eligible = scored.filter((candidate) => !candidate.rejected);
-  if (mode === 'discovery') {
-    const locked = eligible.filter((candidate) => candidate.source === 'discovery');
-    if (locked.length >= GENRE_LOCK_MIN) {
-      const backup = eligible
-        .filter((candidate) => candidate.source !== 'discovery')
-        .sort((left, right) => right.score - left.score)
-        .slice(0, GENRE_LOCK_BACKUP);
-      const lockedPool = [...locked, ...backup];
-      return { aiPool: lockedPool, localPool: lockedPool };
-    }
-  }
-
   const core = eligible.filter((candidate) => candidate.source !== 'discovery');
   return { aiPool: scored, localPool: core.length ? core : scored };
 }
@@ -527,16 +542,16 @@ function refreshInBackground(player, lastTrack, client, eligibleCount) {
 // Picks a track from the pool, building it first only when there is nothing usable yet.
 async function pickFromPool(player, lastTrack, client, { useAi }) {
   const guildId = player.guildId;
-  const mode = getAutoplayMode(guildId);
+  const listenerIds = getListenerIds(player, client);
 
   if (pool.needsSyncBuild(guildId, getProfileKey(guildId))) {
     await startBuild(player, lastTrack, client);
   }
 
-  let { context, scored, eligibleCount } = scorePool(guildId, lastTrack);
+  let { context, scored, eligibleCount } = scorePool(guildId, lastTrack, listenerIds);
   if (!eligibleCount) {
     await startBuild(player, lastTrack, client);
-    ({ context, scored, eligibleCount } = scorePool(guildId, lastTrack));
+    ({ context, scored, eligibleCount } = scorePool(guildId, lastTrack, listenerIds));
   }
   if (!eligibleCount) {
     logCandidateSummary(scored, null);
@@ -544,8 +559,8 @@ async function pickFromPool(player, lastTrack, client, { useAi }) {
     return null;
   }
 
-  const { aiPool, localPool } = selectionPools(scored, mode);
-  const aiSelector = useAi && mode !== 'classic' ? pickCandidateWithGemini : async () => null;
+  const { aiPool, localPool } = selectionPools(scored);
+  const aiSelector = useAi ? pickCandidateWithGemini : async () => null;
   const selected = await selectCandidate(aiPool, context, aiSelector, localPool);
   logCandidateSummary(scored, selected);
   return selected ? { selected, eligibleCount } : null;
@@ -628,7 +643,7 @@ function scheduleAutoplayPrefetch(player, track, client) {
 
 // Uses the prepared track when it was prepared for this exact track and still passes scoring
 // after any skip feedback recorded since; otherwise picks locally from the pool.
-function takePreparedNext(guildId, lastTrack) {
+function takePreparedNext(guildId, lastTrack, listenerIds = []) {
   const next = pool.getNext(guildId);
   if (!next) return null;
 
@@ -637,7 +652,7 @@ function takePreparedNext(guildId, lastTrack) {
   if (next.preparedFor !== getTrackCacheKey(lastTrack) || next.epoch !== getEpoch(guildId)) return null;
 
   const state = pool.getPool(guildId);
-  const context = buildContext(guildId, state?.seedTrack ?? lastTrack, lastTrack, state?.activeSeeds ?? []);
+  const context = buildContext(guildId, state?.seedTrack ?? lastTrack, lastTrack, state?.activeSeeds ?? [], listenerIds);
   const verdict = scoreCandidate(next.candidate, context);
   if (verdict.rejected) {
     logAutoplay('info', `Prepared track no longer fits (${verdict.reason}): "${next.track.info.title}"`);
@@ -682,7 +697,8 @@ async function handleAutoplay(player, lastTrack, client) {
     noteSeedTrack(guildId, lastTrack);
     addToRecentTracks(guildId, lastTrack);
 
-    let selected = takePreparedNext(guildId, lastTrack);
+    const listenerIds = getListenerIds(player, client);
+    let selected = takePreparedNext(guildId, lastTrack, listenerIds);
     let eligibleCount = null;
     const usedPrepared = Boolean(selected);
     if (!selected) {
@@ -714,7 +730,7 @@ async function handleAutoplay(player, lastTrack, client) {
       player,
       lastTrack,
       client,
-      eligibleCount === null ? scorePool(guildId, lastTrack).eligibleCount : eligibleCount - 1,
+      eligibleCount === null ? scorePool(guildId, lastTrack, listenerIds).eligibleCount : eligibleCount - 1,
     );
     return true;
   } catch (error) {
@@ -754,9 +770,9 @@ function clearAutoplayState(guildId) {
   resetGeminiAutoplayState(guildId);
 }
 
-// Re-seeds the session from what people actually queued recently (plus a few liked tracks),
-// for when autoplay has drifted away from the server's taste.
-function rebuildProfileFromHistory(guildId) {
+// Re-seeds the session from what people actually queued recently (plus a few tracks liked by
+// the people listening now), for when autoplay has drifted away from the server's taste.
+function rebuildProfileFromHistory(guildId, listenerIds = []) {
   if (!guildId) return { seeds: 0 };
 
   const { items } = getGuildHistory(guildId, { page: 0, limit: 100 });
@@ -772,8 +788,18 @@ function rebuildProfileFromHistory(guildId) {
     picked.set(normalized.key, info);
   }
 
-  for (const like of profileStore.listLikes(guildId).slice(0, REBUILD_LIKED_SEEDS)) {
-    if (!picked.has(like.key)) picked.set(like.key, like);
+  // Round-robin across listeners so one long Liked list does not take every slot.
+  const likedLists = [...new Set(listenerIds)].map((userId) => library.listLiked(userId));
+  let likedAdded = 0;
+  for (let index = 0; likedAdded < REBUILD_LIKED_SEEDS && likedLists.some((list) => index < list.length); index += 1) {
+    for (const list of likedLists) {
+      if (likedAdded >= REBUILD_LIKED_SEEDS || !list[index]) continue;
+      const track = library.entryToTrack(list[index]);
+      const normalized = normalizeTrack(track);
+      if (!normalized || picked.has(normalized.key)) continue;
+      picked.set(normalized.key, track.info);
+      likedAdded += 1;
+    }
   }
 
   // History is newest first; seeds are stored oldest first so the newest stays the root.
@@ -809,27 +835,33 @@ function canRateTrack(track) {
   return feedbackEntry(track) !== null;
 }
 
-// 'like', 'dislike' or null for the given track.
-function getTrackFeedback(guildId, track) {
+// 'like', 'dislike' or null: what this person thinks of the track. A like is the track being
+// on their library Liked list.
+function getTrackFeedback(userId, track) {
   const entry = feedbackEntry(track);
-  return entry ? profileStore.getTrackFeedback(guildId, entry.key) : null;
+  if (!userId || !entry) return null;
+  if (userTaste.isDisliked(userId, entry.key)) return 'dislike';
+  return library.listLiked(userId).some((liked) => liked.key === entry.key) ? 'like' : null;
 }
 
-// Returns { liked } or null when the track cannot carry feedback (streams, uploads).
-function likeTrack(guildId, track) {
+// Toggles the track on the person's Liked list. Returns { liked } or null when the track cannot
+// carry feedback (streams, uploads, tracks without an encoded form).
+function likeTrack(userId, track) {
   const entry = feedbackEntry(track);
-  if (!guildId || !entry) return null;
-  const liked = profileStore.toggleLike(guildId, entry);
+  const result = userId && entry ? library.toggleLiked(userId, track) : null;
+  if (!result) return null;
+  const { liked } = result;
   logAutoplay('info', `${liked ? 'Liked' : 'Like removed'}: "${entry.title}" by ${entry.author || 'unknown'}`);
   return { liked };
 }
 
-// Records the dislike and drops the track from the seeds. The caller skips the track; the
-// next pick re-scores the pool, so the prepared track is redone as well.
-function dislikeTrack(guildId, track) {
+// Records the person's dislike and drops the track from the server's seeds. The caller skips
+// the track; the next pick re-scores the pool, so the prepared track is redone as well.
+function dislikeTrack(guildId, userId, track) {
   const entry = feedbackEntry(track);
-  if (!guildId || !entry) return null;
-  profileStore.recordDislike(guildId, entry);
+  if (!guildId || !userId || !entry) return null;
+  userTaste.recordDislike(userId, entry);
+  library.removeLiked(userId, entry.key);
 
   const session = getSession(guildId);
   const seeds = session.manualSeeds.filter((seed) => seed.key !== entry.key);
@@ -886,8 +918,6 @@ module.exports = {
   isAutoplayEnabled,
   setAutoplay,
   toggleAutoplay,
-  getAutoplayMode,
-  setAutoplayMode,
   getAutoplayNext,
   handleAutoplay,
   scheduleAutoplayPrefetch,
@@ -905,9 +935,11 @@ module.exports = {
   likeTrack,
   dislikeTrack,
   rerollNext,
+  getListenerIds,
   REROLL_FAILURES,
   __testing: {
     buildContext,
+    buildTasteContext,
     buildDiscoveryQueries,
     buildSearchQueries,
     scoreCandidate,

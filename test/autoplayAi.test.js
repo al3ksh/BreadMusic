@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { getDiscoveryArtists, getGeminiStatus, getGenreRadioPlan, pickCandidateWithGemini, __testing } = require('../src/music/autoplayAi');
+const { getDiscoveryArtists, getGeminiStatus, pickCandidateWithGemini, __testing } = require('../src/music/autoplayAi');
 
 function candidate(key, title, artist, score = 60) {
   return {
@@ -326,62 +326,7 @@ test('Gemini selector stays disabled when no API key is configured', async () =>
   assert.equal(called, false);
 });
 
-function genreRadioResponse(payload) {
-  return {
-    ok: true,
-    status: 200,
-    async json() {
-      return {
-        candidates: [{ content: { parts: [{ text: JSON.stringify(payload) }] } }],
-      };
-    },
-  };
-}
-
-test('genre radio plan stays scene-locked and excludes core artists', async () => {
-  let capturedBody = '';
-  const fetchImpl = async (_url, request) => {
-    capturedBody = request.body;
-    return genreRadioResponse({
-      genre: 'Polish hip-hop',
-      artists: [
-        { name: 'Seed Artist', distance: 'close' },
-        { name: 'Scene One', distance: 'close' },
-        { name: 'Scene Two', distance: 'close' },
-        { name: 'City One', distance: 'medium' },
-        { name: 'City Two', distance: 'medium' },
-        { name: 'Adjacent One', distance: 'broad' },
-      ],
-    });
-  };
-
-  const artists = await getGenreRadioPlan(context(), { apiKey: 'test-key', fetchImpl });
-
-  const request = JSON.parse(capturedBody);
-  const payload = JSON.parse(request.contents[0].parts[0].text);
-  assert.match(String(payload.task), /genre-locked/);
-  assert.equal(artists.length, 5);
-  assert.equal(artists.some((entry) => entry.name === 'Seed Artist'), false);
-});
-
-test('genre radio payload carries recent plays and rejected artists', () => {
-  const radioContext = context();
-  radioContext.recent = [
-    { ...radioContext.manualSeeds[0], artist: 'Recent Artist', author: 'Recent Artist', title: 'Recent Song' },
-  ];
-  radioContext.skipped = [
-    { ...radioContext.manualSeeds[0], artist: 'Rejected Artist', author: 'Rejected Artist', title: 'Rejected Song' },
-  ];
-
-  const payload = __testing.buildGenreRadioPayload(radioContext);
-
-  assert.deepEqual(payload.coreArtists, ['Seed Artist']);
-  assert.equal(payload.recentlyPlayedTracks.length, 1);
-  assert.deepEqual(payload.recentlyRejectedArtists, ['Rejected Artist']);
-  assert.match(payload.task, /without repeating/);
-});
-
-test('genre radio failure returns an empty plan and trips the breaker', async () => {
+test('planner failure returns an empty plan and trips the breaker', async () => {
   let requests = 0;
   const fetchImpl = async () => {
     requests += 1;
@@ -389,8 +334,8 @@ test('genre radio failure returns an empty plan and trips the breaker', async ()
   };
   const options = { apiKey: 'test-key', fetchImpl };
 
-  const first = await getGenreRadioPlan(context(), options);
-  const second = await getGenreRadioPlan(context(), options);
+  const first = await getDiscoveryArtists(context(), options);
+  const second = await getDiscoveryArtists(context(), options);
 
   assert.deepEqual(first, []);
   assert.deepEqual(second, []);
@@ -409,7 +354,7 @@ test('a thin planner answer is a valid empty plan, not a provider failure', asyn
   const options = { apiKey: 'test-key', fetchImpl };
 
   assert.deepEqual(await getDiscoveryArtists(context(), options), []);
-  assert.deepEqual(await getGenreRadioPlan(context(), options), []);
+  assert.deepEqual(await getDiscoveryArtists(context(), options), []);
   assert.equal(requests, 2, 'the breaker must stay closed after a thin plan');
   assert.equal(getGeminiStatus().consecutiveFailures, 0);
 });

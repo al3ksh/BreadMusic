@@ -44,8 +44,8 @@ async function withPlayerRouter(options, callback) {
       calls.push(['like', id, track]);
       return options.likeResult === undefined ? { liked: true } : options.likeResult;
     },
-    dislikeTrack: (id, track) => {
-      calls.push(['dislike', id, track]);
+    dislikeTrack: (id, userId, track) => {
+      calls.push(['dislike', id, userId, track]);
       return { disliked: true };
     },
     rerollNext: async () => {
@@ -78,7 +78,7 @@ test('listeners in the bot channel can like the current track without DJ rights'
     const { status, body } = await post('autoplay_like');
     assert.equal(status, 200);
     assert.equal(body.liked, true);
-    assert.deepEqual(calls[0], ['like', guildId, current]);
+    assert.deepEqual(calls[0], ['like', 'user', current]);
     assert.ok(calls.includes('refresh'));
   });
 });
@@ -95,11 +95,11 @@ test('autoplay feedback is refused outside the bot voice channel, DJ actions sta
 });
 
 test('a dislike is recorded and then goes through the vote skip rules', async () => {
-  await withPlayerRouter({}, async ({ post, calls }) => {
+  await withPlayerRouter({}, async ({ post, calls, guildId }) => {
     const { status, body } = await post('autoplay_dislike');
     assert.equal(status, 200);
     assert.equal(body.message, 'Vote recorded');
-    assert.equal(calls[0][0], 'dislike');
+    assert.deepEqual(calls[0].slice(0, 3), ['dislike', guildId, 'user']);
     assert.ok(calls.includes('voteSkip'));
   });
 });

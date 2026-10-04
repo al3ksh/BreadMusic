@@ -97,7 +97,7 @@ async function withApp(options, callback) {
     getRequestUser,
     addManualSeed: (_guildId, seed) => calls.push(['seed', seed.info.title]),
     clearAutoplayPrefetch: () => {},
-    likeTrack: () => ({ liked: options.guildLiked ?? true }),
+    likeTrack: (userId, current) => library.toggleLiked(userId, current),
   }));
 
   const server = app.listen(0);
@@ -225,7 +225,7 @@ test('liked tracks play before autoplay suggestions', async () => {
 });
 
 test('the badge like syncs into the listener Liked list', async () => {
-  await withApp({ guildLiked: true }, async ({ post, get, userId }) => {
+  await withApp({}, async ({ post, get, userId }) => {
     assert.equal((await post('/player/autoplay_like')).status, 200);
     assert.deepEqual((await get('/library')).body.liked.map((entry) => entry.title), ['Now']);
     assert.equal(library.isLiked(userId, track('Now', 'now00000001')), true);

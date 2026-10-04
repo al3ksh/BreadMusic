@@ -7,10 +7,13 @@ const path = require('node:path');
 process.env.BREAD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bread-autoplay-profile-'));
 
 const profileStore = require('../src/music/autoplay/profileStore');
+const userTaste = require('../src/music/autoplay/userTaste');
+const library = require('../src/music/library');
 const { scoreCandidate } = require('../src/music/autoplay/scoring');
 const {
   addManualSeed,
   clearAutoplayState,
+  getListenerIds,
   recordAutoplaySkip,
   rebuildProfileFromHistory,
   setAutoplay,
@@ -29,6 +32,7 @@ test.after(() => {
 
 function track(title, author, identifier) {
   return {
+    encoded: `encoded-${identifier}`,
     info: {
       title,
       author,
@@ -43,8 +47,10 @@ function track(title, author, identifier) {
 // Simulates a bot restart: everything in memory is dropped and the database is reopened.
 function restart() {
   profileStore.flush();
+  userTaste.flush();
   closeDatabases();
   profileStore.__testing.resetForTesting();
+  userTaste.__testing.resetForTesting();
   __testing.forgetSessionCache();
 }
 
@@ -52,29 +58,41 @@ function entry(key, artistKey = 'artist') {
   return { key, artistKey, authorKey: artistKey, title: key, author: artistKey };
 }
 
-test('session survives a restart and clearSession keeps taste', () => {
+test('session survives a restart and clearSession forgets it', () => {
   const guildId = 'profile-roundtrip';
   clearAutoplayState(guildId);
   addManualSeed(guildId, track('Seed A', 'Artist A', 'aaaaaaaaaaa'));
   addManualSeed(guildId, track('Seed B', 'Artist B', 'bbbbbbbbbbb'));
-  profileStore.toggleLike(guildId, entry('id:liked', 'artist b'));
 
   restart();
 
   assert.deepEqual(__testing.getManualSeedPool(guildId).map((seed) => seed.title), ['Seed A', 'Seed B']);
-  assert.equal(profileStore.getTrackFeedback(guildId, 'id:liked'), 'like');
 
   clearAutoplayState(guildId);
   restart();
 
   assert.deepEqual(__testing.getManualSeedPool(guildId), []);
-  assert.equal(profileStore.getTrackFeedback(guildId, 'id:liked'), 'like');
 });
 
 test('a stale session is not resumed', () => {
   const guildId = 'profile-stale';
   profileStore.saveSession(guildId, { manualSeeds: [{ title: 'Old', key: 'id:old' }] }, Date.now() - profileStore.SESSION_TTL_MS - 1);
   assert.equal(profileStore.getSession(guildId), null);
+});
+
+test('old server-wide likes and dislikes are dropped', () => {
+  const guildId = 'profile-legacy';
+  profileStore.recordSkip(guildId, entry('id:skip'));
+  const taste = profileStore.getTaste(guildId);
+  taste.likes = [entry('id:legacy-like')];
+  taste.dislikes = [entry('id:legacy-dislike')];
+
+  restart();
+
+  const reloaded = profileStore.getTaste(guildId);
+  assert.equal(reloaded.likes, undefined);
+  assert.equal(reloaded.dislikes, undefined);
+  assert.deepEqual(reloaded.skips.map((item) => item.key), ['id:skip']);
 });
 
 test('turning autoplay off forgets the session but not skips', () => {
@@ -107,18 +125,26 @@ test('taste lists are pruned by age and capped', () => {
   assert.ok(!taste.played.some((item) => item.key === 'id:old-play'));
 });
 
-test('like toggles and a dislike replaces a like', () => {
-  const guildId = 'profile-feedback';
-  assert.equal(profileStore.toggleLike(guildId, entry('id:x')), true);
-  assert.equal(profileStore.getTrackFeedback(guildId, 'id:x'), 'like');
-  assert.equal(profileStore.toggleLike(guildId, entry('id:x')), false);
-  assert.equal(profileStore.getTrackFeedback(guildId, 'id:x'), null);
+test('dislikes belong to one person, survive a restart and expire', () => {
+  const now = Date.now();
+  userTaste.recordDislike('user-a', entry('id:x'), now);
+  userTaste.recordDislike('user-a', entry('id:old'), now - userTaste.DISLIKE_LIMITS.ttl - 1);
 
-  profileStore.toggleLike(guildId, entry('id:x'));
-  profileStore.recordDislike(guildId, entry('id:x'));
-  assert.equal(profileStore.getTrackFeedback(guildId, 'id:x'), 'dislike');
-  assert.equal(profileStore.toggleLike(guildId, entry('id:x')), true);
-  assert.equal(profileStore.getTrackFeedback(guildId, 'id:x'), 'like');
+  restart();
+
+  assert.equal(userTaste.isDisliked('user-a', 'id:x', now), true);
+  assert.equal(userTaste.isDisliked('user-b', 'id:x', now), false);
+  assert.equal(userTaste.isDisliked('user-a', 'id:old', now), false);
+  assert.equal(userTaste.removeDislike('user-a', 'id:x'), true);
+  assert.equal(userTaste.isDisliked('user-a', 'id:x', now), false);
+});
+
+test('liking a track takes back the dislike', () => {
+  const song = track('Song', 'Band', 'likedislike');
+  const { key } = library.libraryEntry(song);
+  userTaste.recordDislike('user-c', { key, artistKey: 'band' });
+  library.setLiked('user-c', song, true);
+  assert.equal(userTaste.isDisliked('user-c', key), false);
 });
 
 function candidate(key, artist, source = 'search') {
@@ -153,7 +179,7 @@ function context(taste = {}, skipped = []) {
     taste: {
       now,
       likedKeys: new Set(),
-      likedArtists: new Set(),
+      likedArtistCounts: new Map(),
       dislikedKeys: new Set(),
       dislikedArtistCounts: new Map(),
       played: new Map(),
@@ -185,28 +211,56 @@ test('recently played tracks are rejected and older plays lower the score', () =
   assert.equal(base - older.score, 18);
 });
 
-test('liked artists get a bonus', () => {
+test('liked artists get a bonus per listener, capped at three', () => {
+  const score = (count) => scoreCandidate(candidate('k1', 'Band'), context({ likedArtistCounts: new Map([['band', count]]) })).score;
   const base = scoreCandidate(candidate('k1', 'Band'), context()).score;
-  const liked = scoreCandidate(candidate('k1', 'Band'), context({ likedArtists: new Set(['band']) })).score;
-  assert.equal(liked - base, 10);
+  assert.equal(score(1) - base, 10);
+  assert.equal(score(2) - base, 20);
+  assert.equal(score(5) - base, 30);
 });
 
-test('skip feedback fades with age', () => {
-  const skip = (weight, strength = 'strong') => ({ key: 'k1', artistKey: 'band', authorKey: 'band', strength, weight });
+test('taste merges only the listeners present', () => {
+  const now = Date.now();
+  const katy = (id) => track(`Katy ${id}`, 'Katy Perry', `katyperry0${id}`);
+  library.setLiked('fan', katy(1), true);
+  library.setLiked('fan', katy(2), true);
+  library.setLiked('fan-2', katy(3), true);
+  const [first, second] = [katy(1), katy(2)].map((song) => library.libraryEntry(song).key);
+  userTaste.recordDislike('hater', { key: first, artistKey: 'katy perry' }, now);
+  userTaste.recordDislike('hater-2', { key: second, artistKey: 'katy perry' }, now);
+  const played = { played: [] };
 
-  assert.equal(scoreCandidate(candidate('k1', 'Band'), context({}, [skip(1)])).reason, 'recently skipped');
-  assert.equal(scoreCandidate(candidate('k1', 'Band'), context({}, [skip(0.5)])).reason, 'recently skipped');
+  const fanOnly = __testing.buildTasteContext(played, now, ['fan']);
+  assert.equal(fanOnly.dislikedKeys.size, 0);
+  assert.equal(fanOnly.likedArtistCounts.get('katy perry'), 1);
 
-  const old = scoreCandidate(candidate('k1', 'Band'), context({}, [skip(0.25)]));
-  assert.equal(old.rejected, false, old.reason);
+  const fans = __testing.buildTasteContext(played, now, ['fan', 'fan-2', 'fan']);
+  assert.equal(fans.likedArtistCounts.get('katy perry'), 2);
 
-  // One strong channel skip rejects today, but only lowers the score a day later.
-  const otherTrack = (weight) => scoreCandidate(candidate('k2', 'Band'), context({}, [skip(weight)]));
-  assert.equal(otherTrack(1).reason, 'recently skipped channel');
-  assert.equal(otherTrack(0.25).rejected, false);
+  // Two people disliking one song each is not the same as one person disliking the artist twice.
+  const haters = __testing.buildTasteContext(played, now, ['fan', 'hater', 'hater-2']);
+  assert.deepEqual([...haters.dislikedKeys].sort(), [first, second].sort());
+  assert.equal(haters.dislikedArtistCounts.get('katy perry'), 1);
+
+  userTaste.recordDislike('hater', { key: 'id:another', artistKey: 'katy perry' }, now);
+  assert.equal(__testing.buildTasteContext(played, now, ['hater']).dislikedArtistCounts.get('katy perry'), 2);
 });
 
-test('rebuild seeds the session from manual history and likes', () => {
+test('listeners are the people in the voice channel, not bots or the deafened', () => {
+  const member = (id, extra = {}) => [id, { id, user: { bot: false }, voice: {}, ...extra }];
+  const members = new Map([
+    member('a'),
+    member('bot', { user: { bot: true } }),
+    member('deaf', { voice: { selfDeaf: true } }),
+    member('b'),
+  ]);
+  const client = { guilds: { cache: new Map([['g', { channels: { cache: new Map([['vc', { members }]]) } }]]) } };
+
+  assert.deepEqual(getListenerIds({ guildId: 'g', voiceChannelId: 'vc' }, client), ['a', 'b']);
+  assert.deepEqual(getListenerIds({ guildId: 'g', voiceChannelId: 'missing' }, client), []);
+});
+
+test('rebuild seeds the session from manual history and the listeners\' likes', () => {
   const guildId = 'profile-rebuild';
   clearAutoplayState(guildId);
 
@@ -214,15 +268,10 @@ test('rebuild seeds the session from manual history and likes', () => {
   recordTrackPlay(guildId, { ...track('Autoplayed', 'Artist B', 'aaaaaaaaaa2'), isAutoplay: true });
   recordTrackPlay(guildId, track('New Manual', 'Artist C', 'mmmmmmmmmm3'));
   recordTrackPlay(guildId, track('New Manual', 'Artist C', 'mmmmmmmmmm3'));
-  profileStore.toggleLike(guildId, {
-    ...entry('id:likedlike1', 'liked artist'),
-    title: 'Liked',
-    author: 'Liked Artist',
-    identifier: 'likedlike1',
-    duration: 200_000,
-  });
+  library.setLiked('rebuild-listener', track('Liked', 'Liked Artist', 'likedlike01'), true);
+  library.setLiked('rebuild-absent', track('Absent', 'Other Artist', 'absentlike1'), true);
 
-  const result = rebuildProfileFromHistory(guildId);
+  const result = rebuildProfileFromHistory(guildId, ['rebuild-listener']);
 
   const titles = __testing.getManualSeedPool(guildId).map((seed) => seed.title);
   assert.equal(result.seeds, 3);

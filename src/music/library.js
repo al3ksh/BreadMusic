@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { SqliteStore } = require('../state/sqliteStore');
 const { normalizeTrack, isLocalUploadTrack, isStreamTrack } = require('./autoplay/normalize');
+const userTaste = require('./autoplay/userTaste');
 
 // Per-user library: a "Liked" list and named playlists. Stored as encoded Lavalink tracks
 // so playing them back needs no search.
@@ -102,6 +103,8 @@ function setLiked(userId, track, liked, now = Date.now()) {
   const without = library.liked.filter((existing) => existing.key !== entry.key);
   library.liked = liked ? [...without, { ...entry, addedAt: now }].slice(-LIBRARY_LIMITS.liked) : without;
   getStore().save();
+  // Liking a track takes back the person's autoplay dislike of it.
+  if (liked) userTaste.removeDislike(userId, entry.key);
   return { liked };
 }
 

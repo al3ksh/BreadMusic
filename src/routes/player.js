@@ -93,7 +93,7 @@ function createPlayerRouter({
   const router = express.Router();
 
   router.get('/api/guilds/:guildId/status', requireAuth, requirePlayerAccess, (req, res) => {
-    res.json(buildPlayerStatusSnapshot(client, req.params.guildId));
+    res.json(buildPlayerStatusSnapshot(client, req.params.guildId, getRequestUser(req)?.id));
   });
 
   router.get('/api/guilds/:guildId/player/events', requireAuth, requirePlayerAccess, (req, res) => {
@@ -113,7 +113,7 @@ function createPlayerRouter({
       if (closed) return;
       try {
         writeSseEvent(res, 'snapshot', {
-          status: buildPlayerStatusSnapshot(client, guildId),
+          status: buildPlayerStatusSnapshot(client, guildId, getRequestUser(req)?.id),
           queue: buildQueueSnapshot(client, guildId, page),
           notice: getPlayerNotice(guildId),
           timestamp: Date.now(),
@@ -700,10 +700,9 @@ function createPlayerRouter({
           else await player.pause();
           break;
         case 'autoplay_like': {
-          const result = likeTrack(guildId, player.queue.current);
+          // The badge like is the listener's own Liked list.
+          const result = likeTrack(getRequestUser(req)?.id, player.queue.current);
           if (!result) return res.status(409).json({ error: 'This track cannot be liked.' });
-          // The badge like also lands in the listener's own Liked list.
-          library?.setLiked(getRequestUser(req)?.id, player.queue.current, result.liked);
           await client.musicUI?.refresh(player).catch(() => {});
           return res.json({ success: true, liked: result.liked });
         }
@@ -715,7 +714,7 @@ function createPlayerRouter({
         }
         // A dislike is remembered for autoplay and then goes through the normal skip rules.
         case 'autoplay_dislike':
-          dislikeTrack(guildId, player.queue.current);
+          dislikeTrack(guildId, getRequestUser(req)?.id, player.queue.current);
         // falls through
         case 'skip':
           if (privileged) {

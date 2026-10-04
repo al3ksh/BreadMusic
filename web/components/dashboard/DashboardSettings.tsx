@@ -123,14 +123,22 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
       .finally(() => setLoading(false));
   }, [guildId, toast]);
 
-  const save = useCallback(async (updates: Record<string, unknown>) => {
+  // Only the fields edited here are sent, so saving cannot undo a change made elsewhere since
+  // the page loaded (autoplay toggled from the player, for one).
+  const save = useCallback(async () => {
+    if (!config) return;
+    const updates = Object.fromEntries(Object.entries(config).filter(([key, value]) => (
+      JSON.stringify(value) !== JSON.stringify(savedConfig?.[key as keyof GuildConfig])
+    )));
     setSaving(true);
     try {
-      await apiFetch(`/guilds/${guildId}/config`, {
-        method: 'PUT',
-        body: JSON.stringify(updates),
-      });
-      setSavedConfig(updates as unknown as GuildConfig);
+      if (Object.keys(updates).length) {
+        await apiFetch(`/guilds/${guildId}/config`, {
+          method: 'PUT',
+          body: JSON.stringify(updates),
+        });
+      }
+      setSavedConfig(config);
       toast.success('Settings saved', 'Server configuration has been updated.');
     } catch (err) {
       const text = err instanceof Error ? err.message : 'Failed to save';
@@ -138,7 +146,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
     } finally {
       setSaving(false);
     }
-  }, [guildId, toast]);
+  }, [config, savedConfig, guildId, toast]);
 
   const reset = useCallback(async () => {
     if (!confirm('Reset all settings to defaults?')) return;
@@ -316,18 +324,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
         <Row label="Autoplay" desc="Play similar tracks when queue ends">
           <ToggleSwitch checked={config.autoplay} onChange={(v) => setConfig({ ...config, autoplay: v })} />
         </Row>
-        <Row label="Autoplay Mode" desc="Recommendation engine used when autoplay is on">
-          <select
-            value={config.autoplayMode || 'ai_assisted'}
-            onChange={(e) => setConfig({ ...config, autoplayMode: e.target.value as 'classic' | 'ai_assisted' | 'discovery' })}
-            className={selectClass + ' w-full sm:w-48'}
-          >
-            <option value="classic">Classic (no AI)</option>
-            <option value="ai_assisted">AI assisted</option>
-            <option value="discovery">Discovery radio</option>
-          </select>
-        </Row>
-        <Row label="Rebuild Autoplay" desc="Drifted off? Re-seed autoplay from what people queued here recently and from liked tracks">
+        <Row label="Rebuild Autoplay" desc="Drifted off? Re-seed autoplay from what people queued here recently and from the liked tracks of people listening now">
           <button
             type="button"
             onClick={rebuildAutoplay}
@@ -395,7 +392,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
       </Section>
 
       <div className="flex flex-col gap-3 pt-4 border-t border-border/50 sm:flex-row sm:items-center sm:gap-4">
-        <button onClick={() => save(config as any)} disabled={saving} className="w-full px-6 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all shadow-lg shadow-accent/20 disabled:opacity-50 cursor-pointer sm:w-auto">
+        <button onClick={save} disabled={saving} className="w-full px-6 py-2.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all shadow-lg shadow-accent/20 disabled:opacity-50 cursor-pointer sm:w-auto">
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
         <button onClick={reset} disabled={saving} className="w-full px-6 py-2.5 rounded-lg bg-danger/10 text-danger text-sm font-medium hover:bg-danger/20 transition-colors disabled:opacity-50 cursor-pointer sm:w-auto">
@@ -417,7 +414,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
           <button
             type="button"
             disabled={saving}
-            onClick={() => save(config as any)}
+            onClick={save}
             className="px-4 py-1.5 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-hover disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save changes'}

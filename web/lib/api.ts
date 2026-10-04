@@ -83,7 +83,6 @@ export interface GuildConfig {
   twentyFourSevenChannelName: string | null;
   defaultVolume: number;
   autoplay: boolean;
-  autoplayMode: 'classic' | 'ai_assisted' | 'discovery';
   lastfm?: LastfmStatus;
   activityControl: 'inherit' | 'admin' | 'mod' | 'dj' | 'members';
   voiceChannelStatus: boolean;
@@ -176,7 +175,6 @@ export interface PlayerStatus {
   filters: string | null;
   sound?: SoundState;
   autoplay: boolean;
-  autoplayMode?: string;
   autoplayNext?: AutoplayNextTrack | null;
   autoplayFeedback?: AutoplayFeedback;
   autoplayRateable?: boolean;

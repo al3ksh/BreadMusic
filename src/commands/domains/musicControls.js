@@ -1,6 +1,5 @@
 const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES, handleAutoplay } = require('../../music/autoplay');
 const { applySound, getSoundState, normalizePreset, resetSound } = require('../../music/sound');
-const { setLiked } = require('../../music/library');
 
 const createMusicControlCommands = (context) => {
   const {
@@ -105,12 +104,11 @@ const createMusicControlCommands = (context) => {
 
       if (subcommand === 'like') {
         const track = player.queue.current;
-        const result = likeTrack(interaction.guildId, track);
+        const result = likeTrack(interaction.user.id, track);
         if (!result) {
           await interaction.editReply('This track cannot be liked.');
           return;
         }
-        setLiked(interaction.user.id, track, result.liked);
         await interaction.client.musicUI.refresh(player);
         await interaction.editReply(
           result.liked
@@ -123,7 +121,7 @@ const createMusicControlCommands = (context) => {
       // A dislike is remembered for autoplay and then goes through the normal skip rules.
       if (subcommand === 'dislike') {
         const track = player.queue.current;
-        if (!dislikeTrack(interaction.guildId, track)) {
+        if (!dislikeTrack(interaction.guildId, interaction.user.id, track)) {
           await interaction.editReply('This track cannot be disliked.');
           return;
         }

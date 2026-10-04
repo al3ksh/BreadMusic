@@ -102,11 +102,11 @@ test('activity capabilities expose the configured volume limit', () => {
 test('default volume cannot exceed the configured maximum', () => {
   assert.deepEqual(
     normalizeVolumeConfig({ defaultVolume: 90, maxVolume: 40 }),
-    { defaultVolume: 40, maxVolume: 40, autoplayMode: 'ai_assisted', dashboardAccess: 'admin', activityControl: 'inherit' },
+    { defaultVolume: 40, maxVolume: 40, dashboardAccess: 'admin', activityControl: 'inherit' },
   );
   assert.deepEqual(
     normalizeVolumeConfig({ defaultVolume: 300, maxVolume: 900 }),
-    { defaultVolume: 100, maxVolume: 500, autoplayMode: 'ai_assisted', dashboardAccess: 'admin', activityControl: 'inherit' },
+    { defaultVolume: 100, maxVolume: 500, dashboardAccess: 'admin', activityControl: 'inherit' },
   );
 });
 
@@ -236,4 +236,8 @@ test('activityControl mod admits the mod role', () => {
     activityControl: 'mod',
   });
   assert.equal(access.canControlPlayer, true);
+});
+
+test('the removed autoplay mode setting is dropped from stored config', () => {
+  assert.equal('autoplayMode' in normalizeVolumeConfig({ autoplayMode: 'discovery' }), false);
 });

@@ -150,16 +150,6 @@ const createConfigCommands = (context) => {
           )
           .addStringOption((option) =>
             option
-              .setName('autoplay_mode')
-              .setDescription('Autoplay recommendation engine (when autoplay is on)')
-              .addChoices(
-                { name: 'Classic - local recommendations, no AI', value: 'classic' },
-                { name: 'AI assisted - current hybrid behavior', value: 'ai_assisted' },
-                { name: 'Discovery - AI genre radio with fresh tracks', value: 'discovery' },
-              ),
-          )
-          .addStringOption((option) =>
-            option
               .setName('activity_control')
               .setDescription('Who can control playback inside the Activity (must be in the bot voice channel)')
               .addChoices(
@@ -235,8 +225,6 @@ const createConfigCommands = (context) => {
       if (dashboardAccess) updates.dashboardAccess = dashboardAccess;
       const prefSource = interaction.options.getString('preferred_source');
       if (prefSource) updates.preferredSource = prefSource;
-      const autoplayMode = interaction.options.getString('autoplay_mode');
-      if (autoplayMode) updates.autoplayMode = autoplayMode;
       const activityControl = interaction.options.getString('activity_control');
       if (activityControl) updates.activityControl = activityControl;
 
