@@ -37,13 +37,18 @@ async function withApp(options, callback) {
     queue: {
       current: options.current === undefined ? track('Now', 'now00000001') : options.current,
       tracks: options.queue ?? [],
-      async add(tracks) { this.tracks.push(...tracks); },
+      async add(tracks) { this.tracks.push(...[].concat(tracks)); },
     },
     voiceChannelId: 'voice',
     textChannelId: 'text',
     playing: true,
     paused: false,
     async play() { calls.push('play'); },
+    async skip() { calls.push('skip'); },
+    async search(query) {
+      calls.push(['stream', query]);
+      return { tracks: [{ encoded: 'enc-radio', info: { title: 'stream', author: '', isStream: true } }] };
+    },
   };
   const guild = {
     members: { me: { voice: { channelId: 'voice' } } },
@@ -81,6 +86,7 @@ async function withApp(options, callback) {
     getRequestUser,
     getDashboardRequester,
     getUsableNode: () => node,
+    ...(options.radio ? { radio: options.radio } : {}),
   }));
   app.use(createPlayerRouter({
     client,
@@ -99,6 +105,7 @@ async function withApp(options, callback) {
     addManualSeed: (_guildId, seed) => calls.push(['seed', seed.info.title]),
     clearAutoplayPrefetch: () => {},
     likeTrack: (userId, current) => library.toggleLiked(userId, current),
+    ...(options.radio ? { radio: options.radio } : {}),
   }));
 
   const server = app.listen(0);
@@ -282,5 +289,44 @@ test('the Disliked list can undo a dislike, block and unblock an artist', async 
     userTaste.recordDislike(userId, { key: 'id:d2', artistKey: 'x', author: 'X', title: 'Y' });
     assert.deepEqual((await post('/library/dislikes/remove', { key: 'id:d2' })).body.tracks, []);
     assert.equal((await post('/library/dislikes/remove', { key: 'id:d2' })).status, 404);
+  });
+});
+
+test('radio stations are searched, saved and played from the Activity', async () => {
+  const radioModule = require('../src/music/radio');
+  const station = {
+    id: 'garden:abc', source: 'radio-garden', name: 'Garden FM', url: 'https://stream.example/garden',
+    homepage: '', country: 'Poland', place: 'Kraków', tags: [], favicon: '', codec: '', bitrate: 0,
+  };
+  const radio = {
+    ...radioModule,
+    searchStations: async () => [station],
+    resolveStation: async (id) => {
+      if (id !== station.id) throw new radioModule.RadioError('That station is no longer available.');
+      return station;
+    },
+    reportPlay: () => {},
+  };
+  await withApp({ radio, current: null, canQueue: true }, async ({ get, post, player, calls }) => {
+    const found = await get('/radio/search?q=garden');
+    assert.equal(found.status, 200);
+    assert.equal(found.body.stations[0].name, 'Garden FM');
+    assert.equal(found.body.stations[0].url, undefined, 'stream links stay on the server');
+
+    const saved = await post('/library/stations/add', { stationId: 'garden:abc' });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.body.stations.map((entry) => entry.id), ['garden:abc']);
+    assert.equal((await get('/library')).body.stations[0].place, 'Kraków');
+    assert.equal((await post('/library/stations/add', { stationId: 'garden:gone' })).status, 404);
+
+    player.playing = false;
+    const played = await post('/player/radio', { stationId: 'garden:abc' });
+    assert.equal(played.status, 200);
+    assert.deepEqual(calls.find((call) => call[0] === 'stream'), ['stream', 'https://stream.example/garden']);
+    assert.equal(player.queue.tracks[0].info.title, 'Garden FM');
+    assert.equal(player.queue.tracks[0].info.author, 'Kraków, Poland');
+
+    assert.equal((await post('/library/stations/remove', { id: 'garden:abc' })).body.stations.length, 0);
+    assert.equal((await post('/library/stations/remove', { id: 'garden:abc' })).status, 404);
   });
 });

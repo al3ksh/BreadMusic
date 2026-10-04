@@ -1,36 +1,32 @@
 const defaultRadio = require('../../music/radio');
-const { isStreamTrack } = require('../../music/autoplay/normalize');
+const defaultLibrary = require('../../music/library');
+const { playStation } = require('../../music/radioPlayback');
 
 const AUTOCOMPLETE_LIMIT = 15;
+const COMPONENT_PREFIX = 'radio:';
+const SAVE_PREFIX = `${COMPONENT_PREFIX}save:`;
 
 const createRadioCommands = (context) => {
   const {
     SlashCommandBuilder,
     EmbedBuilder,
     MessageFlags,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    CommandError,
     ensureVoice,
     classifyPlaybackError,
     describeSearchFailure,
     queuePersist,
     BRAND_COLORS,
     radio = defaultRadio,
+    library = defaultLibrary,
   } = context;
 
   async function failQuietly(interaction, title, description) {
     await interaction.deleteReply().catch(() => {});
     await interaction.followUp({ content: `**${title}**\n${description}`, flags: MessageFlags.Ephemeral });
-  }
-
-  // The stream itself carries no useful metadata, so the station details become the track info.
-  function dressTrack(track, station) {
-    const location = radio.describeStationLocation(station);
-    track.info.title = station.name;
-    track.info.author = location || station.tags.join(', ') || 'Live radio';
-    track.info.isStream = true;
-    if (station.favicon) track.info.artworkUrl = station.favicon;
-    if (station.homepage) track.info.uri = station.homepage;
-    track.radioStation = { id: station.id, source: station.source };
-    return track;
   }
 
   function buildStationEmbed(station, user, voiceChannelId, replaced) {
@@ -48,6 +44,27 @@ const createRadioCommands = (context) => {
     return embed;
   }
 
+  // Custom ids are capped at 100 characters, so very long pasted stream links get no button.
+  function buildSaveRow(station) {
+    const customId = `${SAVE_PREFIX}${station.id}`;
+    if (!ActionRowBuilder || customId.length > 100) return [];
+    return [new ActionRowBuilder().addComponents(new ButtonBuilder()
+      .setCustomId(customId)
+      .setLabel('Save station')
+      .setEmoji('⭐')
+      .setStyle(ButtonStyle.Secondary))];
+  }
+
+  function savedChoices(userId, term) {
+    const needle = term.toLowerCase();
+    return library.listStations(userId)
+      .filter((station) => !needle || station.name.toLowerCase().includes(needle))
+      .map((station) => {
+        const choice = radio.formatStationChoice(station);
+        return { ...choice, name: `⭐ ${choice.name}`.slice(0, 100) };
+      });
+  }
+
   return [
     {
       data: new SlashCommandBuilder()
@@ -58,18 +75,51 @@ const createRadioCommands = (context) => {
           .setDescription('Station name, genre or country - or a stream / Radio Garden link.')
           .setAutocomplete(true)
           .setRequired(true)),
+      componentPrefix: COMPONENT_PREFIX,
+      // The save button toggles the station in the clicker's own list.
+      async handleComponent(interaction) {
+        if (!interaction.customId.startsWith(SAVE_PREFIX)) return;
+        const stationId = interaction.customId.slice(SAVE_PREFIX.length);
+        const userId = interaction.user.id;
+        if (library.isStationSaved(userId, stationId)) {
+          library.removeStation(userId, stationId);
+          await interaction.reply({ content: 'Removed the station from your saved stations.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+        let station;
+        try {
+          station = await radio.resolveStation(stationId);
+        } catch (error) {
+          throw new CommandError(error instanceof radio.RadioError ? error.message : 'Could not look up that station.');
+        }
+        const result = library.saveStation(userId, station);
+        if (!result.ok) {
+          throw new CommandError(result.reason === 'limit'
+            ? `You can save up to ${library.LIBRARY_LIMITS.stations} stations. Remove one in the Activity first.`
+            : 'This station cannot be saved.');
+        }
+        await interaction.reply({
+          content: `⭐ Saved **${station.name}**. Find it at the top of \`/radio\` and in the Activity radio tab.`,
+          flags: MessageFlags.Ephemeral,
+        });
+      },
       async autocomplete(interaction) {
         const focused = String(interaction.options.getFocused() ?? '').trim();
         if (/^https?:\/\//i.test(focused)) {
           await interaction.respond([{ name: focused.slice(0, 100), value: focused.slice(0, 100) }]).catch(() => {});
           return;
         }
+        // Your saved stations come first, then the directory.
+        const saved = savedChoices(interaction.user?.id, focused);
+        let found = [];
         try {
-          const stations = await radio.searchStations(focused, { limit: AUTOCOMPLETE_LIMIT });
-          await interaction.respond(stations.map(radio.formatStationChoice)).catch(() => {});
+          found = (await radio.searchStations(focused, { limit: AUTOCOMPLETE_LIMIT })).map(radio.formatStationChoice);
         } catch {
-          await interaction.respond([]).catch(() => {});
+          // The saved list still works when the directory is down.
         }
+        const savedIds = new Set(saved.map((choice) => choice.value));
+        const choices = [...saved, ...found.filter((choice) => !savedIds.has(choice.value))].slice(0, 25);
+        await interaction.respond(choices).catch(() => {});
       },
       async execute(interaction) {
         await interaction.deferReply();
@@ -84,41 +134,28 @@ const createRadioCommands = (context) => {
 
         const { player, voiceChannelId } = await ensureVoice(interaction, { requireSameChannel: true, createPlayer: true });
 
-        let result;
+        let played;
         try {
-          result = await player.search(station.url, interaction.user);
+          played = await playStation(player, station, interaction.user, { radio });
         } catch (error) {
           const failure = classifyPlaybackError(error);
           await failQuietly(interaction, failure.title, failure.description);
           return;
         }
-        const track = result?.tracks?.[0];
-        if (!track) {
-          const failure = describeSearchFailure(result);
+        if (!played.track) {
+          const failure = describeSearchFailure(played.result);
           await failQuietly(interaction, 'Station is not playing', failure.description);
           return;
         }
-        dressTrack(track, station);
 
-        // A station never ends, so picking another one while radio plays switches right away.
-        const replacing = Boolean(player.queue.current && isStreamTrack(player.queue.current) && (player.playing || player.paused));
-        if (replacing) {
-          await player.queue.add(track, 0);
-          await player.skip();
-          if (player.paused) await player.resume();
-        } else {
-          const autoplayIndex = player.queue.tracks.findIndex((queued) => queued.isAutoplay);
-          if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, track);
-          else await player.queue.add(track);
-          if (!player.playing && !player.paused) await player.play();
-        }
-
-        radio.reportPlay(station);
         await queuePersist(player);
-        await interaction.editReply({ embeds: [buildStationEmbed(station, interaction.user, voiceChannelId, replacing)] });
+        await interaction.editReply({
+          embeds: [buildStationEmbed(station, interaction.user, voiceChannelId, played.replaced)],
+          components: buildSaveRow(station),
+        });
       },
     },
   ];
 };
 
-module.exports = { createRadioCommands };
+module.exports = { createRadioCommands, COMPONENT_PREFIX };

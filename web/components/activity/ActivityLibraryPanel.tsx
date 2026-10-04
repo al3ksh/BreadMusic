@@ -26,10 +26,25 @@ export type LibraryPlaylistSummary = {
   shareCode?: string | null;
 };
 
+export type RadioStation = {
+  id: string;
+  source: string;
+  name: string;
+  homepage: string;
+  country: string;
+  place: string;
+  tags: string[];
+  favicon: string;
+  codec: string;
+  bitrate: number;
+  addedAt?: number;
+};
+
 export type LibrarySnapshot = {
   liked: LibraryEntry[];
   playlists: LibraryPlaylistSummary[];
-  limits?: { liked: number; playlists: number; tracks: number; name: number };
+  stations?: RadioStation[];
+  limits?: { liked: number; playlists: number; tracks: number; name: number; stations?: number };
 };
 
 type LibraryPlaylist = { id: string; name: string; tracks: LibraryEntry[]; shareCode?: string | null };

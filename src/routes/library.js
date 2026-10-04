@@ -1,5 +1,7 @@
 const express = require('express');
 const defaultUserTaste = require('../music/autoplay/userTaste');
+const defaultRadio = require('../music/radio');
+const { publicStation } = require('../music/radioPlayback');
 
 // The client never needs the encoded Lavalink blob, only what it shows.
 function publicEntry(entry) {
@@ -8,7 +10,7 @@ function publicEntry(entry) {
 }
 
 function publicSnapshot(snapshot) {
-  return { ...snapshot, liked: snapshot.liked.map(publicEntry) };
+  return { ...snapshot, liked: snapshot.liked.map(publicEntry), stations: (snapshot.stations ?? []).map(publicStation) };
 }
 
 const CREATE_FAILURES = {
@@ -48,6 +50,7 @@ function createLibraryRouter({
   getDashboardRequester,
   getUsableNode,
   userTaste = defaultUserTaste,
+  radio = defaultRadio,
 }) {
   const router = express.Router();
   const base = '/api/guilds/:guildId/library';
@@ -213,6 +216,43 @@ function createLibraryRouter({
     const created = library.createPlaylistWithFreeName(userIdOf(req), req.body?.name || result?.playlist?.name || 'Imported', tracks);
     if (!created.ok) return res.status(created.reason === 'limit' ? 409 : 400).json({ error: CREATE_FAILURES[created.reason], reason: created.reason });
     return res.json({ success: true, playlist: created.playlist, added: created.added, skipped: created.skipped });
+  });
+
+  // Radio Browser search for the Activity radio tab; stream links stay on the server.
+  router.get('/api/guilds/:guildId/radio/search', requireAuth, requirePlayerAccess, async (req, res) => {
+    const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
+    try {
+      const stations = await radio.searchStations(query, { limit: 20 });
+      return res.json({ stations: stations.map(publicStation) });
+    } catch (error) {
+      console.warn('[Radio] Search failed:', error.message);
+      return res.status(502).json({ error: 'The radio directory is not answering right now.' });
+    }
+  });
+
+  router.post(`${base}/stations/add`, ...mutate, async (req, res) => {
+    const stationId = typeof req.body?.stationId === 'string' ? req.body.stationId.trim() : '';
+    if (!stationId) return res.status(400).json({ error: 'Pick a station to save.' });
+    let station;
+    try {
+      station = await radio.resolveStation(stationId);
+    } catch (error) {
+      return res.status(404).json({ error: error instanceof radio.RadioError ? error.message : 'Could not look up that station.' });
+    }
+    const result = library.saveStation(userIdOf(req), station);
+    if (!result.ok) {
+      return res.status(result.reason === 'limit' ? 409 : 400).json({
+        error: result.reason === 'limit' ? `You can save up to ${library.LIBRARY_LIMITS.stations} stations.` : 'This station cannot be saved.',
+        reason: result.reason,
+      });
+    }
+    return res.json({ success: true, stations: library.listStations(userIdOf(req)).map(publicStation) });
+  });
+
+  router.post(`${base}/stations/remove`, ...mutate, (req, res) => {
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!library.removeStation(userIdOf(req), id)) return res.status(404).json({ error: 'That station is not saved.' });
+    return res.json({ success: true, stations: library.listStations(userIdOf(req)).map(publicStation) });
   });
 
   return router;

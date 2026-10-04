@@ -16,6 +16,7 @@ import { DashboardLyrics } from '@/components/dashboard/DashboardLyrics';
 import { DashboardEconomy } from '@/components/dashboard/DashboardEconomy';
 import { DashboardControl } from '@/components/dashboard/DashboardControl';
 import { AutoplayRating } from '@/components/dashboard/DashboardAutoplay';
+import { DashboardRadio } from '@/components/dashboard/DashboardRadio';
 
 type Tab = 'settings' | 'status' | 'player' | 'history' | 'lyrics' | 'economy' | 'control';
 
@@ -423,6 +424,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       resume: 'Playback resumed.',
       autoplay_dislike: 'Disliked and skipped. Autoplay will avoid this track.',
       autoplay_reroll: 'Autoplay picked a different next track.',
+      radio: 'Station started.',
     };
 
     const silentActions = new Set(['seek', 'volume', 'search']);
@@ -975,6 +977,10 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
             )}
           </div>
         </div>
+      )}
+
+      {status.connected && (
+        <DashboardRadio guildId={guildId} onPlay={(stationId) => playerAction('radio', { stationId })} />
       )}
 
       {status.connected && queue && (

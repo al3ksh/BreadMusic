@@ -27,6 +27,8 @@ import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
 import { ActivityHistoryPanel } from '@/components/activity/ActivityHistoryPanel';
 import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
 import { ActivitySearchPanel } from '@/components/activity/ActivitySearchPanel';
+import { ActivityRadioPanel } from '@/components/activity/ActivityRadioPanel';
+import type { RadioStation } from '@/components/activity/ActivityLibraryPanel';
 import { ActivityLyricsPanel } from '@/components/activity/ActivityLyricsPanel';
 import { ActivitySoundPanel } from '@/components/activity/ActivitySoundPanel';
 import { ActivityLibraryPanel } from '@/components/activity/ActivityLibraryPanel';
@@ -196,6 +198,7 @@ export default function ActivityPage() {
   const [activePanel, setActivePanel] = useState<ActivityPanel>(null);
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
   const [queueView, setQueueView] = useState<'queue' | 'history'>('queue');
+  const [addView, setAddView] = useState<'music' | 'radio'>('music');
   const [drawerClosing, setDrawerClosing] = useState(false);
   const [drawerDragY, setDrawerDragY] = useState<number | null>(null);
   const [drawerDragging, setDrawerDragging] = useState(false);
@@ -920,6 +923,17 @@ export default function ActivityPage() {
       return false;
     }
   }, [activityFetch, guildId, notify, refreshCapabilities]);
+
+  const searchRadioStations = useCallback(async (query: string) => {
+    const result = await activityFetch<{ stations: RadioStation[] }>(`/api/guilds/${guildId}/radio/search?q=${encodeURIComponent(query)}`);
+    return result.stations;
+  }, [activityFetch, guildId]);
+
+  const playRadioStation = useCallback(async (station: RadioStation) => {
+    const applied = await playerAction('radio', { stationId: station.id, channelId });
+    if (applied) notify(`Tuned in to ${station.name}`, 'success');
+    return applied;
+  }, [channelId, notify, playerAction]);
 
   const fetchHistoryPage = useCallback((page: number) => {
     return activityFetch<HistoryPage>(`/api/guilds/${guildId}/history?page=${page}&limit=25`);
@@ -1770,7 +1784,7 @@ export default function ActivityPage() {
                     {activePanel === 'queue'
                       ? `${queue?.total || 0} tracks`
                       : activePanel === 'search'
-                        ? 'Search or upload audio'
+                        ? addView === 'radio' ? 'Live stations from around the world' : 'Search or upload audio'
                         : activePanel === 'sound'
                           ? 'Presets, EQ, speed and pitch'
                           : activePanel === 'library'
@@ -1851,6 +1865,41 @@ export default function ActivityPage() {
                 )}
 
                 {activePanel === 'search' && (
+                  <div className="activity-queue-switch" role="tablist" aria-label="Add music view">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={addView === 'music'}
+                      className={addView === 'music' ? 'active' : ''}
+                      onClick={() => setAddView('music')}
+                    >
+                      Music
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={addView === 'radio'}
+                      className={addView === 'radio' ? 'active' : ''}
+                      onClick={() => setAddView('radio')}
+                    >
+                      Radio
+                    </button>
+                  </div>
+                )}
+
+                {activePanel === 'search' && addView === 'radio' && (
+                  <ActivityRadioPanel
+                    canQueue={canQueue}
+                    refreshKey={libraryRefreshKey}
+                    searchStations={searchRadioStations}
+                    libraryRequest={libraryRequest}
+                    onPlay={playRadioStation}
+                    onLibraryChange={bumpLibrary}
+                    notify={notify}
+                  />
+                )}
+
+                {activePanel === 'search' && addView === 'music' && (
                   <ActivitySearchPanel
                     canDj={canDj}
                     canQueue={canQueue}

@@ -4277,3 +4277,12 @@ html.activity-vt-karaoke .activity-track-swap {
   object-position: left center;
   animation-duration: 300ms;
 }
+
+.activity-search-actions button.activity-radio-star.is-saved {
+  color: #f5c84c;
+  border-color: rgba(245, 200, 76, 0.35);
+}
+
+.activity-search-actions button.activity-radio-star.is-saved svg {
+  fill: currentColor;
+}

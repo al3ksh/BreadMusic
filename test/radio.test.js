@@ -111,6 +111,9 @@ test('resolveStation handles a UUID, a Radio Garden link, a stream URL and free 
   const direct = await radio.resolveStation('https://stream.example.com/live.mp3');
   assert.equal(direct.name, 'stream.example.com');
   assert.equal(direct.url, 'https://stream.example.com/live.mp3');
+  // Ids handed out earlier (saved stations, Activity picks) resolve back the same way.
+  assert.equal((await radio.resolveStation(garden.id)).url, garden.url);
+  assert.equal((await radio.resolveStation(direct.id)).url, direct.url);
 
   assert.equal((await radio.resolveStation('Jazz')).name, 'Jazz Radio');
   await assert.rejects(radio.resolveStation('nothing here'), RadioError);
@@ -153,6 +156,14 @@ function setupCommand({ current = null, playing = false } = {}) {
     resolveStation: async () => station,
     reportPlay: () => calls.push(['report']),
   };
+  const saved = new Map();
+  const library = {
+    LIBRARY_LIMITS: { stations: 25 },
+    listStations: () => [...saved.values()],
+    isStationSaved: (userId, id) => saved.has(id),
+    saveStation: (userId, value) => { saved.set(value.id, value); return { ok: true, saved: true }; },
+    removeStation: (userId, id) => saved.delete(id),
+  };
   const [command] = createRadioCommands({
     ...discord,
     BRAND_COLORS: { primary: 0x123456 },
@@ -160,7 +171,9 @@ function setupCommand({ current = null, playing = false } = {}) {
     classifyPlaybackError: () => ({ title: 'x', description: 'y' }),
     describeSearchFailure: () => ({ title: 'x', description: 'y' }),
     queuePersist: async () => calls.push(['persist']),
+    CommandError: Error,
     radio,
+    library,
   });
   const run = async () => {
     const replies = [];
@@ -174,7 +187,7 @@ function setupCommand({ current = null, playing = false } = {}) {
     });
     return replies.at(-1);
   };
-  return { command, run, calls, player };
+  return { command, run, calls, player, saved, station };
 }
 
 test('/radio dresses the stream with the station details and starts it', async () => {
@@ -200,9 +213,36 @@ test('/radio autocomplete lists stations and echoes pasted links', async () => {
   const { command } = setupCommand();
   const respond = async (focused) => {
     let choices;
-    await command.autocomplete({ options: { getFocused: () => focused }, respond: async (value) => { choices = value; } });
+    await command.autocomplete({ user: { id: 'u1' }, options: { getFocused: () => focused }, respond: async (value) => { choices = value; } });
     return choices;
   };
   assert.deepEqual((await respond('rmf')).map((choice) => choice.value), [RMF.stationuuid]);
   assert.deepEqual(await respond('https://radio.garden/listen/x/abc'), [{ name: 'https://radio.garden/listen/x/abc', value: 'https://radio.garden/listen/x/abc' }]);
 });
+
+test('/radio reply carries a save button that toggles the station for the clicker', async () => {
+  const { command, run, saved } = setupCommand();
+  const reply = await run();
+  const button = reply.components[0].components[0].toJSON();
+  assert.equal(button.custom_id, `radio:save:${RMF.stationuuid}`);
+
+  const click = async () => {
+    let answer;
+    await command.handleComponent({ customId: button.custom_id, user: { id: 'u2' }, reply: async (value) => { answer = value; } });
+    return answer.content;
+  };
+  assert.match(await click(), /Saved \*\*RMF FM\*\*/);
+  assert.equal(saved.has(RMF.stationuuid), true);
+  assert.match(await click(), /Removed/);
+  assert.equal(saved.size, 0);
+});
+
+test('/radio autocomplete puts saved stations first without duplicates', async () => {
+  const { command, saved, station } = setupCommand();
+  saved.set(station.id, station);
+  let choices;
+  await command.autocomplete({ user: { id: 'u1' }, options: { getFocused: () => 'rmf' }, respond: async (value) => { choices = value; } });
+  assert.equal(choices.length, 1);
+  assert.match(choices[0].name, /^⭐ RMF FM/);
+});
+

@@ -156,3 +156,25 @@ test('share codes copy a playlist to another user and can be revoked', () => {
   assert.equal(library.setPlaylistShared(owner, 'Party', false).code, null);
   assert.deepEqual(library.importShared(friend, shared.code), { ok: false, reason: 'unknown' });
 });
+
+test('saved radio stations: newest first, toggled off, capped', () => {
+  const station = (id, name = id) => ({ id, source: 'radio-browser', name, url: 'http://secret/stream', tags: ['pop'], favicon: 'http://insecure/icon.png' });
+  assert.equal(library.saveStation('station-user', { id: '' }).reason, 'invalid');
+  assert.deepEqual(library.saveStation('station-user', station('a', 'Alpha'), 1), { ok: true, saved: true });
+  library.saveStation('station-user', station('garden:b', 'Beta'), 2);
+  const [first, second] = library.listStations('station-user');
+  assert.equal(first.id, 'garden:b');
+  assert.equal(second.name, 'Alpha');
+  assert.equal(second.url, undefined, 'the stream link is resolved again at play time');
+  assert.equal(second.favicon, '');
+  assert.equal(library.isStationSaved('station-user', 'a'), true);
+  assert.equal(library.getLibrarySnapshot('station-user').stations.length, 2);
+
+  assert.equal(library.removeStation('station-user', 'a'), true);
+  assert.equal(library.removeStation('station-user', 'a'), false);
+  assert.equal(library.isStationSaved('station-user', 'a'), false);
+
+  for (let i = 0; i < library.LIBRARY_LIMITS.stations - 1; i += 1) library.saveStation('station-user', station(`s${i}`));
+  assert.equal(library.saveStation('station-user', station('one-too-many')).reason, 'limit');
+  assert.equal(library.saveStation('station-user', station('garden:b', 'Beta again')).ok, true, 'saving again only refreshes it');
+});

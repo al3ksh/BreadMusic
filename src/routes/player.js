@@ -7,6 +7,8 @@ const { uploadArtworkUrl } = require('../music/uploadArtworkUrls');
 const { REROLL_FAILURES } = require('../music/autoplay');
 const { applySound, getSoundState, normalizePreset, resetSound } = require('../music/sound');
 const { isStreamTrack } = require('../music/autoplay/normalize');
+const defaultRadio = require('../music/radio');
+const { playStation } = require('../music/radioPlayback');
 
 // Anyone listening in the bot's voice channel may vote to skip and give autoplay feedback.
 const listenerActions = new Set(['skip', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
@@ -90,6 +92,7 @@ function createPlayerRouter({
   audioUploadDirectory,
   broadcastPlayerUpdate,
   library = null,
+  radio = defaultRadio,
 }) {
   const router = express.Router();
 
@@ -447,7 +450,7 @@ function createPlayerRouter({
       let botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
       const privileged = capabilities.canControlPlayer === true;
       const canQueue = capabilities.canQueue === true;
-      const queueContributorAction = action === 'search' || action === 'play' || action === 'library';
+      const queueContributorAction = action === 'search' || action === 'play' || action === 'library' || action === 'radio';
       if (!privileged && !listenerActions.has(action) && !(canQueue && queueContributorAction)) {
         return res.status(403).json({ error: 'Player control is not enabled for your role' });
       }
@@ -574,7 +577,7 @@ function createPlayerRouter({
         return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
       }
 
-      const isPlaybackAction = ['play', 'playnow', 'playlist', 'library'].includes(action);
+      const isPlaybackAction = ['play', 'playnow', 'playlist', 'library', 'radio'].includes(action);
       if (isPlaybackAction && req.activityUser && !memberVoiceChannelId) {
         return res.status(403).json({ error: 'Join the voice channel Bread is playing in before controlling playback' });
       }
@@ -691,6 +694,29 @@ function createPlayerRouter({
           await client.musicUI?.refresh(player).catch(() => {});
           await savePlayerState(player).catch(() => {});
           return res.json({ success: true, title: playable.name, count: tracksToAdd.length, mode: 'queue' });
+        }
+
+        // Plays a station picked in the Activity radio tab (a search result or a saved station).
+        case 'radio': {
+          const stationId = typeof req.body?.stationId === 'string' ? req.body.stationId.trim() : '';
+          if (!stationId) return res.status(400).json({ error: 'Pick a station' });
+          let station;
+          try {
+            station = await radio.resolveStation(stationId);
+          } catch (error) {
+            return res.status(404).json({ error: error instanceof radio.RadioError ? error.message : 'Could not look up that station' });
+          }
+          let played;
+          try {
+            played = await playStation(player, station, getDashboardRequester(req, client), { radio });
+          } catch (error) {
+            const failure = classifyPlaybackError(error);
+            return res.status(502).json({ error: failure.description || failure.title });
+          }
+          if (!played.track) return res.status(404).json({ error: 'That station is not streaming right now' });
+          await client.musicUI?.refresh(player).catch(() => {});
+          await savePlayerState(player).catch(() => {});
+          return res.json({ success: true, title: station.name, mode: played.replaced ? 'switched' : 'queue' });
         }
 
         case 'pause':

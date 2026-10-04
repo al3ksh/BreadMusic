@@ -10,6 +10,7 @@ const LIBRARY_LIMITS = {
   playlists: 50,
   tracks: 500,
   name: 60,
+  stations: 25,
 };
 
 const LIKED_ID = 'liked';
@@ -27,12 +28,13 @@ function getUserLibrary(userId, create = false) {
   const data = getStore().data;
   let library = data[userId];
   if (!library && create) {
-    library = { liked: [], playlists: [] };
+    library = { liked: [], playlists: [], stations: [] };
     data[userId] = library;
   }
   if (library) {
     if (!Array.isArray(library.liked)) library.liked = [];
     if (!Array.isArray(library.playlists)) library.playlists = [];
+    if (!Array.isArray(library.stations)) library.stations = [];
   }
   return library ?? null;
 }
@@ -314,8 +316,57 @@ function shuffled(items, random = Math.random) {
   return copy;
 }
 
+// Saved radio stations keep what is needed to show them; playing one resolves the id again,
+// so a station that moved its stream keeps working.
+function stationEntry(station) {
+  if (!station || typeof station.id !== 'string' || !station.id || station.id.length > 500) return null;
+  const text = (value, length = 200) => (typeof value === 'string' ? value.slice(0, length) : '');
+  return {
+    id: station.id,
+    source: text(station.source, 30),
+    name: text(station.name, 120) || 'Radio station',
+    homepage: text(station.homepage, 300),
+    country: text(station.country, 80),
+    place: text(station.place, 80),
+    tags: Array.isArray(station.tags) ? station.tags.filter((tag) => typeof tag === 'string').slice(0, 4).map((tag) => tag.slice(0, 40)) : [],
+    favicon: /^https:\/\//i.test(station.favicon || '') ? text(station.favicon, 300) : '',
+    codec: text(station.codec, 20),
+    bitrate: Number(station.bitrate) || 0,
+  };
+}
+
+function listStations(userId) {
+  return [...(getUserLibrary(userId)?.stations ?? [])].reverse();
+}
+
+function isStationSaved(userId, stationId) {
+  return Boolean(getUserLibrary(userId)?.stations.some((entry) => entry.id === stationId));
+}
+
+// Returns { ok, saved } or { ok: false, reason: 'invalid' | 'limit' }.
+function saveStation(userId, station, now = Date.now()) {
+  const entry = stationEntry(station);
+  if (!userId || !entry) return { ok: false, reason: 'invalid' };
+  const library = getUserLibrary(userId, true);
+  const without = library.stations.filter((existing) => existing.id !== entry.id);
+  if (without.length >= LIBRARY_LIMITS.stations) return { ok: false, reason: 'limit' };
+  library.stations = [...without, { ...entry, addedAt: now }];
+  getStore().save();
+  return { ok: true, saved: true };
+}
+
+function removeStation(userId, stationId) {
+  const library = getUserLibrary(userId);
+  if (!library) return false;
+  const before = library.stations.length;
+  library.stations = library.stations.filter((entry) => entry.id !== stationId);
+  if (library.stations.length === before) return false;
+  getStore().save();
+  return true;
+}
+
 function getLibrarySnapshot(userId) {
-  return { liked: listLiked(userId), playlists: listPlaylists(userId), limits: LIBRARY_LIMITS };
+  return { liked: listLiked(userId), playlists: listPlaylists(userId), stations: listStations(userId), limits: LIBRARY_LIMITS };
 }
 
 function flush() {
@@ -351,6 +402,10 @@ module.exports = {
   deletePlaylist,
   resolvePlayable,
   shuffled,
+  listStations,
+  isStationSaved,
+  saveStation,
+  removeStation,
   getLibrarySnapshot,
   flush,
   __testing: { resetForTesting },

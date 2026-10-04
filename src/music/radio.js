@@ -128,6 +128,9 @@ function createRadio({ fetchImpl = (...args) => fetch(...args), now = () => Date
     }
     const garden = value.match(RADIO_GARDEN_PATTERN);
     if (garden) return resolveRadioGarden(garden[1]);
+    // Station ids from earlier lookups (saved stations, Activity picks) resolve back the same way.
+    if (/^garden:[A-Za-z0-9_-]+$/.test(value)) return resolveRadioGarden(value.slice('garden:'.length));
+    if (value.startsWith('url:')) return resolveStation(value.slice('url:'.length));
     if (/^https?:\/\//i.test(value)) {
       let host;
       try {
