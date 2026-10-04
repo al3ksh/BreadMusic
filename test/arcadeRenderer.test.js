@@ -76,7 +76,8 @@ test('every arcade wager remains optional', () => {
   const duelBet = duel.options.find((option) => option.name === 'bet');
   assert.notEqual(duelBet.required, true);
   const stats = commands.find((entry) => entry.data.name === 'stats').data.toJSON();
-  assert.ok(stats.options.some((option) => option.name === 'arcade'));
+  const view = stats.options.find((option) => option.name === 'view');
+  assert.ok(view.choices.some((choice) => choice.value === 'arcade'));
 });
 
 test('replay buttons preserve the game options and can only be consumed once', () => {

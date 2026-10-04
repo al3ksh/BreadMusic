@@ -182,7 +182,7 @@ const HELP_CATEGORIES = [
       { name: '/help', value: 'Show this help menu.' },
       { name: '/ping', value: 'Check latency.' },
       { name: '/dashboard', value: 'Open the web dashboard for this server.' },
-      { name: '/stats', value: 'Show listening or Arcade statistics.' },
+      { name: '/stats', value: 'Listening, sources, rhythm and Arcade stats as an image.' },
       { name: '/config', value: 'Manage guild settings (or use the dashboard).' },
     ],
   },

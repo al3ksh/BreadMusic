@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { classifyQuery, isOrigin, originLabel, originOf, tagOrigin } = require('../src/music/trackOrigin');
-const { buildOriginSvg, toRows } = require('../src/music/originRenderer');
+const { buildView, toOriginRows } = require('../src/stats/views');
 
 test('classifyQuery tells links from text searches', () => {
   assert.equal(classifyQuery('https://open.spotify.com/track/abc'), 'spotify');
@@ -50,7 +50,7 @@ test('origin insights count tagged plays and report older ones as untracked', ()
       requester: { id: userId, username: userId, bot: false },
       ...extra,
     });
-    play('a', { origin: 'spotify' });
+    play('a', { origin: 'spotify', info: { identifier: 'a', title: 'a', author: 'Artist', duration: 1000, sourceName: 'spotify' } });
     play('b', { origin: 'spotify' });
     play('c', { origin: 'search' }, 'user-2');
     play('d', { isAutoplay: true });
@@ -62,6 +62,7 @@ test('origin insights count tagged plays and report older ones as untracked', ()
     assert.equal(server.untracked, 1);
     assert.deepEqual(server.origins.map((entry) => [entry.origin, entry.count]), [['spotify', 2], ['autoplay', 1], ['search', 1]]);
     assert.equal(server.origins[0].share, 0.5);
+    assert.deepEqual(server.platforms.map((entry) => [entry.source, entry.count]), [['youtube', 4], ['spotify', 1]]);
 
     const member = getOriginInsights('guild-origins', { range: '7d', userId: 'user-2' });
     assert.equal(member.userId, 'user-2');
@@ -76,20 +77,30 @@ test('origin insights count tagged plays and report older ones as untracked', ()
 test('origin image folds the long tail and escapes names', () => {
   const origins = ['spotify', 'youtube', 'search', 'upload', 'library', 'history', 'autoplay', 'soundcloud', 'link']
     .map((origin) => ({ origin, count: 1, share: 1 / 9 }));
-  const rows = toRows(origins);
+  const rows = toOriginRows(origins);
   assert.equal(rows.length, 7);
   assert.equal(rows.at(-1).label, 'Everything else');
   assert.equal(rows.at(-1).count, 3);
 
-  const svg = buildOriginSvg({
-    title: 'Where the music came from',
+  const { svg } = buildView('sources', {
+    isMember: false,
     subject: 'Bread & <Friends>',
     rangeLabel: 'Last 7 days',
-    insights: { userId: null, total: 9, tracked: 9, untracked: 0, origins, detailedHistoryDays: 35 },
+    insights: {
+      userId: null,
+      total: 9,
+      tracked: 9,
+      untracked: 0,
+      origins,
+      platforms: [{ source: 'youtube', count: 6, share: 6 / 9 }, { source: 'spotify', count: 3, share: 3 / 9 }],
+      detailedHistoryDays: 35,
+    },
   });
   assert.match(svg, /Spotify link/);
   assert.match(svg, /Everything else/);
   assert.match(svg, /Bread &amp; &lt;Friends&gt;/);
   assert.match(svg, /Top input: Spotify link/);
   assert.match(svg, /LAST 7 DAYS/);
+  assert.match(svg, /AUDIO STREAMED FROM/);
+  assert.match(svg, /YouTube 67%/);
 });

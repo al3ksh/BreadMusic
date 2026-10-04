@@ -9,7 +9,7 @@ test('arcade stats persist global and guild outcomes', () => {
   process.env.BREAD_DATA_DIR = tempDir;
 
   const { closeDatabases } = require('../src/state/sqliteStore');
-  const { getArcadeStats, recordArcadeGame } = require('../src/games/arcadeStats');
+  const { getArcadeStats, getGuildArcadeStats, recordArcadeGame } = require('../src/games/arcadeStats');
   const userId = 'arcade-user';
   const guildId = 'arcade-guild';
   recordArcadeGame({ userId, guildId, game: 'slots', outcome: 'win', bet: 25, payout: 50 });
@@ -30,6 +30,16 @@ test('arcade stats persist global and guild outcomes', () => {
   );
   assert.equal(guild.byGame.slots.games, 2);
   assert.equal(guild.byGame.slots.wins, 1);
+
+  recordArcadeGame({ userId: 'arcade-rival', guildId, game: 'dice', outcome: 'win', bet: 10, payout: 100 });
+  const server = getGuildArcadeStats(guildId);
+  assert.equal(server.playerCount, 2);
+  assert.equal(server.games, 3);
+  assert.equal(server.totalWagered, 60);
+  assert.equal(server.biggestPayout, 100);
+  assert.deepEqual(server.byGame.dice, { games: 1, wins: 1 });
+  assert.deepEqual(server.players.map((player) => player.userId), ['arcade-rival', userId]);
+  assert.equal(getGuildArcadeStats('other-guild').playerCount, 0);
 
   closeDatabases();
   fs.rmSync(tempDir, { recursive: true, force: true });

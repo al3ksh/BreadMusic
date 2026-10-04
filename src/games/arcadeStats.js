@@ -56,7 +56,28 @@ function getArcadeStats(userId, guildId = null) {
   return normalizeStats(arcadeStore.get(key, null));
 }
 
+// Sums every member's record on one server and ranks the players.
+function getGuildArcadeStats(guildId, limit = 5) {
+  const prefix = `guild:${guildId}:`;
+  const totals = emptyStats();
+  const players = [];
+  for (const [key, value] of arcadeStore.entries()) {
+    if (!key.startsWith(prefix)) continue;
+    const stats = normalizeStats(value);
+    players.push({ userId: key.slice(prefix.length), ...stats });
+    for (const field of ['games', 'wins', 'losses', 'draws', 'totalWagered', 'totalPayout']) totals[field] += stats[field];
+    totals.biggestPayout = Math.max(totals.biggestPayout, stats.biggestPayout);
+    for (const [game, gameStats] of Object.entries(stats.byGame)) {
+      const merged = totals.byGame[game] || { games: 0, wins: 0 };
+      totals.byGame[game] = { games: merged.games + (gameStats.games || 0), wins: merged.wins + (gameStats.wins || 0) };
+    }
+  }
+  players.sort((a, b) => (b.totalPayout - b.totalWagered) - (a.totalPayout - a.totalWagered) || b.games - a.games);
+  return { ...totals, players: players.slice(0, limit), playerCount: players.length };
+}
+
 module.exports = {
+  getGuildArcadeStats,
   getArcadeStats,
   recordArcadeGame,
 };

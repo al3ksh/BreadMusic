@@ -374,16 +374,24 @@ default `2`). Values `1`-`2` are recommended for Raspberry Pi deployments;
 higher values increase peak CPU and memory use. Concurrent requests above the
 limit receive the same result as a static PNG instead of waiting in a queue.
 
-Listening statistics are available through `/stats user` and `/stats server`;
-game history is available through `/stats arcade`.
-User stats include top tracks and artists, source preference, active days and an
-estimated requested duration. `/stats server detailed:true` adds source ranking,
-requester ranking and retained activity patterns to the server overview.
-`/stats sources` renders an image showing how songs were requested: Spotify,
-YouTube or other links, text search, local uploads, liked songs and playlists,
-history replays or autoplay. It covers the whole server or one `member`, over
-the retained 35 days at most. Plays recorded before this tracking existed are
-counted as untracked.
+`/stats` replies with a generated image for the whole server, or for one
+`member`. A menu under the image switches between five views and buttons switch
+the `range` (24 hours, 7 days, all time); `view` picks the first one:
+
+- **Overview**: plays, time listened, tracks, requesters and the last 14 days.
+- **Top tracks & artists**: the five most played songs with their artwork, top
+  artists and, for the server, top requesters.
+- **Sources**: how songs were requested (Spotify, YouTube or other links, text
+  search, uploads, liked songs and playlists, history replays or autoplay) and
+  which platform the audio streamed from. Plays recorded before this tracking
+  existed are counted as untracked.
+- **Rhythm**: plays by hour and weekday, peak hour, active days and streak.
+- **Arcade**: wins, losses, BREAD won or lost and favourite games; the server
+  version ranks its players.
+
+Only the member who ran the command can switch views. Hourly patterns, streaks
+and the sources view use the retained 35 days of detailed history. Hours are
+shown in `STATS_TIME_ZONE` (an IANA zone such as `Europe/Warsaw`, default `UTC`).
 When a DJ role is configured, listeners without that role can still use Skip: Bread
 opens one shared vote in the player text channel, lists its voters and synchronizes
 its progress and final result with the dashboard and Discord Activity.

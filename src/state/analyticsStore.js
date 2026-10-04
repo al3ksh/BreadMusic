@@ -16,6 +16,33 @@ const RANGE_ALL = 'all';
 const RANGE_24H = '24h';
 const RANGE_7D = '7d';
 const RANGE_CHOICES = new Set([RANGE_ALL, RANGE_24H, RANGE_7D]);
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+// Hours and weekdays are read in the server's zone so "most active hour" means local time.
+function resolveTimeZone(value) {
+  const zone = typeof value === 'string' && value.trim() ? value.trim() : 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return zone;
+  } catch {
+    return 'UTC';
+  }
+}
+
+const STATS_TIME_ZONE = resolveTimeZone(process.env.STATS_TIME_ZONE);
+const clockFormat = new Intl.DateTimeFormat('en-US', {
+  timeZone: STATS_TIME_ZONE,
+  hour: 'numeric',
+  hourCycle: 'h23',
+  weekday: 'short',
+});
+
+function localClock(timestamp) {
+  const parts = clockFormat.formatToParts(new Date(timestamp));
+  const hour = Number.parseInt(parts.find((part) => part.type === 'hour')?.value, 10) % 24;
+  const weekday = WEEKDAYS.indexOf(parts.find((part) => part.type === 'weekday')?.value);
+  return { hour: Number.isFinite(hour) ? hour : 0, weekday: Math.max(0, weekday) };
+}
 
 function ensureGuildBucket(guildId) {
   const fallback = {
@@ -515,6 +542,7 @@ function buildEventDetails(events, tracksMap, limit) {
   const sourceCounts = {};
   const artistCounts = {};
   const hourCounts = Array.from({ length: 24 }, () => 0);
+  const weekdayCounts = Array.from({ length: 7 }, () => 0);
   const activeDays = new Set();
   let estimatedDuration = 0;
   let autoplayPlays = 0;
@@ -528,7 +556,9 @@ function buildEventDetails(events, tracksMap, limit) {
     estimatedDuration += Number.isFinite(track.duration) ? track.duration : 0;
     if (event.autoplay) autoplayPlays += 1;
     if (Number.isFinite(event.ts)) {
-      hourCounts[new Date(event.ts).getUTCHours()] += 1;
+      const clock = localClock(event.ts);
+      hourCounts[clock.hour] += 1;
+      weekdayCounts[clock.weekday] += 1;
       activeDays.add(toDayKey(event.ts));
     }
   }
@@ -544,6 +574,9 @@ function buildEventDetails(events, tracksMap, limit) {
     averagePerActiveDay: activeDays.size ? events.length / activeDays.size : 0,
     longestStreakDays: getLongestDayStreak(activeDays),
     mostActiveHour: mostActiveHour.hour,
+    hourCounts,
+    weekdayCounts,
+    timeZone: STATS_TIME_ZONE,
     topSources: toRankedCounts(sourceCounts, limit),
     topArtists: toRankedCounts(artistCounts, limit),
     retainedEventCount: events.length,
@@ -692,6 +725,7 @@ function getUserInsights(guildId, userId, options = {}) {
     lastRequestAt: range === RANGE_ALL ? (storedUser?.lastPlayedAt || null) : aggregates.lastPlayAt,
     topTracks: buildTopTracksFromRange(aggregates.tracks, guild.tracks || {}, limit),
     details: { ...details, historyScoped: range === RANGE_ALL },
+    trend14d: buildTrend14d(events.filter((event) => event?.userId === userId), now),
     detailedHistoryDays: EVENT_RETENTION_DAYS,
   };
 }
@@ -711,6 +745,7 @@ function getOriginInsights(guildId, options = {}) {
 
   const startTimestamp = getRangeStartTimestamp(range, now);
   const counts = {};
+  const platformCounts = {};
   let total = 0;
   let untracked = 0;
   for (const event of events) {
@@ -718,6 +753,8 @@ function getOriginInsights(guildId, options = {}) {
     if (userId && event.userId !== userId) continue;
     total += 1;
     const track = event.track || guild.tracks[event.trackKey] || {};
+    const platform = track.source || 'unknown';
+    platformCounts[platform] = (platformCounts[platform] || 0) + 1;
     const origin = originOf({ origin: event.origin, autoplay: event.autoplay, source: track.source });
     if (!origin) {
       untracked += 1;
@@ -731,7 +768,12 @@ function getOriginInsights(guildId, options = {}) {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([origin, count]) => ({ origin, count, share: tracked ? count / tracked : 0 }));
 
-  return { range, userId, total, tracked, untracked, origins, detailedHistoryDays: EVENT_RETENTION_DAYS };
+  // Where the audio actually streamed from, which differs from the request for Spotify links.
+  const platforms = Object.entries(platformCounts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([source, count]) => ({ source, count, share: total ? count / total : 0 }));
+
+  return { range, userId, total, tracked, untracked, origins, platforms, detailedHistoryDays: EVENT_RETENTION_DAYS };
 }
 
 module.exports = {
