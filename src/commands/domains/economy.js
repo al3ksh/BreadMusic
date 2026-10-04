@@ -72,7 +72,6 @@ const createEconomyCommands = (context) => {
     getGuildInsights,
     getUserInsights,
     withGuildMutex,
-    FILTER_PRESET_CHOICES,
     formatStatsDuration,
     formatCompactRankedCounts,
     formatSourceLabel,

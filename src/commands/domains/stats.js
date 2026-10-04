@@ -73,7 +73,6 @@ const createStatsCommands = (context) => {
     getUserInsights,
     getArcadeStats,
     withGuildMutex,
-    FILTER_PRESET_CHOICES,
     formatStatsDuration,
     formatCompactRankedCounts,
     formatSourceLabel,

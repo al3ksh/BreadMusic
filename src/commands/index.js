@@ -81,9 +81,6 @@ const { BRAND_COLORS } = require('../theme');
 const { buildDashboardUrl } = require('../dashboard/url');
 const { getGuildInsights, getUserInsights } = require('../state/analyticsStore');
 const { withGuildMutex } = require('../music/guildMutex');
-const { SOUND_PRESET_CHOICES } = require('../music/sound');
-
-const FILTER_PRESET_CHOICES = SOUND_PRESET_CHOICES;
 
 function formatStatsDuration(milliseconds) {
   const totalMinutes = Math.max(0, Math.round((milliseconds || 0) / 60000));
@@ -380,7 +377,6 @@ const commandContext = {
   getGuildInsights,
   getUserInsights,
   withGuildMutex,
-  FILTER_PRESET_CHOICES,
   formatStatsDuration,
   formatCompactRankedCounts,
   formatSourceLabel,

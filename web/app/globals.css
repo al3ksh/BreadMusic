@@ -912,10 +912,10 @@ a { color: inherit; text-decoration: none; }
   gap: 9px;
 }
 
-/* Damped springs: --activity-spring overshoots ~20%, --activity-spring-soft ~9%. */
+/* Damped springs: --activity-spring overshoots ~12%, --activity-spring-soft ~5%. */
 :root {
-  --activity-spring: linear(0, 0.106, 0.35, 0.634, 0.887, 1.07, 1.174, 1.205, 1.185, 1.136, 1.077, 1.025, 0.987, 0.965, 0.958, 0.962, 0.972, 0.984, 0.995, 1.003, 1.007, 1.009, 1.008, 1.006, 1.003, 1.001, 1);
-  --activity-spring-soft: linear(0, 0.089, 0.287, 0.517, 0.727, 0.891, 1.003, 1.067, 1.092, 1.092, 1.077, 1.056, 1.035, 1.017, 1.004, 0.996, 0.992, 0.991, 0.992, 0.994, 0.996, 0.998, 0.999, 1);
+  --activity-spring: linear(0, 0.083, 0.273, 0.5, 0.714, 0.888, 1.011, 1.084, 1.116, 1.117, 1.1, 1.075, 1.048, 1.024, 1.006, 0.994, 0.988, 0.986, 0.987, 0.989, 0.993, 0.996, 0.998, 1, 1.001, 1);
+  --activity-spring-soft: linear(0, 0.064, 0.21, 0.388, 0.563, 0.716, 0.839, 0.929, 0.99, 1.026, 1.045, 1.05, 1.047, 1.04, 1.031, 1.023, 1.015, 1.009, 1.004, 1.001, 0.999, 0.998, 0.998, 1);
 }
 
 .activity-control-button {
@@ -976,10 +976,10 @@ a { color: inherit; text-decoration: none; }
 
 @keyframes activity-control-feedback {
   0% { filter: brightness(1); transform: scale(0.92); }
-  22% { filter: brightness(1.45); transform: scale(1.1); }
-  42% { filter: brightness(1.25); transform: scale(0.96); }
-  62% { filter: brightness(1.1); transform: scale(1.03); }
-  80% { transform: scale(0.995); }
+  22% { filter: brightness(1.45); transform: scale(1.06); }
+  42% { filter: brightness(1.25); transform: scale(0.975); }
+  62% { filter: brightness(1.1); transform: scale(1.015); }
+  80% { transform: scale(0.998); }
   100% { filter: brightness(1); transform: scale(1); }
 }
 
@@ -3904,7 +3904,7 @@ html.activity-vt .activity-compact-art {
 }
 
 @keyframes activity-card-in {
-  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  from { opacity: 0; transform: translateY(10px) scale(0.975); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 

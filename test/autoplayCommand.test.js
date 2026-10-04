@@ -13,7 +13,7 @@ const { closeDatabases } = require('../src/state/sqliteStore');
 const library = require('../src/music/library');
 const userTaste = require('../src/music/autoplay/userTaste');
 
-const baseContext = { ...discord, FILTER_PRESET_CHOICES: [], BRAND_COLORS: { secondary: '#213d7c' }, CommandError: class extends Error {} };
+const baseContext = { ...discord, BRAND_COLORS: { secondary: '#213d7c' }, CommandError: class extends Error {} };
 
 test.after(() => {
   closeDatabases();
