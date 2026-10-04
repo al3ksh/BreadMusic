@@ -1,0 +1,2 @@
+# Keep every text file LF in the repo and in working copies, on Windows too.
+* text=auto eol=lf
