@@ -47,3 +47,7 @@ lavalink/*.log
 lavalink/application.yml
 lavalink/Lavalink.jar
 lavalink/plugins/*.jar
+
+# Local screenshots and render scratch
+.shots/
+/shot-*.png

@@ -136,3 +136,22 @@ test('artwork fetch only allows public https hosts', async () => {
   assert.equal(called, false);
   assert.equal(await fetchArtwork('https://cdn.example.com/broken.jpg', { fetchImpl: async () => { throw new Error('boom'); } }), null);
 });
+
+test('only the member who ran /stats can switch its views', async () => {
+  const discord = require('discord.js');
+  const { createStatsCommands } = require('../src/commands/domains/stats');
+  const [command] = createStatsCommands({ ...discord, CommandError: class extends Error {}, getBalance: () => 0 });
+  const calls = [];
+  const interaction = {
+    customId: buildCustomId('range', { ownerId: 'owner', targetId: null, view: 'overview', range: '7d' }),
+    user: { id: 'stranger' },
+    reply: async (payload) => calls.push(['reply', payload]),
+    deferUpdate: async () => calls.push(['deferUpdate']),
+    editReply: async () => calls.push(['editReply']),
+  };
+  await command.handleComponent(interaction);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'reply');
+  assert.match(calls[0][1].content, /yourself/);
+  assert.equal(calls[0][1].flags, discord.MessageFlags.Ephemeral);
+});

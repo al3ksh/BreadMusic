@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-03-autoplay-rework-design.md`
 
+**Status:** all four stages shipped to main (Oct 2026); boxes below are ticked for the record.
+
 ## Global Constraints
 
 - Public exports of `src/music/autoplay.js` keep their names and call signatures; `handleAutoplay` still returns a boolean.
@@ -43,9 +45,9 @@
 - Produces `normalize.js`: `normalizeTrack(track)`, `normalizeComparable(s)`, `makeTrackKey(o)`, `snapshotTrackInfo(t)`, `isLocalUploadTrack(t)`, `isYouTubeIdentifier(id)`, `getTrackCacheKey(t)`, `cleanTitle`, `tokenOverlap(a,b)`, `logAutoplay(level,msg)`.
 - Produces `scoring.js`: `scoreCandidate(candidate, context) → {score, rejected, reason}`, `pickCandidateLocally(scored, random?)`, `MIN_SCORE`. Scoring reads recency only from `context.recent` (no module Maps) so it is pure.
 
-- [ ] Step 1: Move code; replace `isTrackRecent(guildId, …)` / `isArtistOverplayed(guildId, …)` with versions taking `context.recent`.
-- [ ] Step 2: `npm test` → all autoplay tests PASS.
-- [ ] Step 3: Commit `refactor(autoplay): extract normalization and scoring modules`.
+- [x] Step 1: Move code; replace `isTrackRecent(guildId, …)` / `isArtistOverplayed(guildId, …)` with versions taking `context.recent`.
+- [x] Step 2: `npm test` → all autoplay tests PASS.
+- [x] Step 3: Commit `refactor(autoplay): extract normalization and scoring modules`.
 
 ### Task 2: Sources with ytmsearch fallback and parallel runner
 
@@ -56,15 +58,15 @@
 **Interfaces:**
 - Produces: `searchTracks(node, query, { requester, limit = 12, prefer = 'music' }) → Promise<Track[]>` (`prefer:'music'` tries `ytmsearch:` then `ytsearch:` when empty/error; `'video'` only `ytsearch:`); `resolveYouTubeId(node, normalizedTrack, requester)`; `fetchRadioMix(node, videoId, requester)`; `collectCandidates(sourceTasks, { budgetMs = 9000 }) → Promise<Candidate[]>` where `sourceTasks` is `Array<{ name, run: () => Promise<Candidate[]> }>`; results from tasks finishing after the budget are dropped; a rejected task yields `[]`.
 
-- [ ] Step 1: Tests with a fake node `{ connected, search({query}) }`:
+- [x] Step 1: Tests with a fake node `{ connected, search({query}) }`:
   - `ytmsearch empty falls back to ytsearch` — fake returns `[]` for `ytmsearch:` prefix → result comes from the `ytsearch:` call; calls recorded in order `['ytmsearch:x','ytsearch:x']`.
   - `ytmsearch error falls back to ytsearch`.
   - `disconnected node yields no candidates` — `connected:false` → `[]`, `search` never called.
   - `collectCandidates drops sources past budget` — one task resolves at 10 ms, one at 200 ms, `budgetMs:50` → only the first's candidates; total elapsed < 150 ms.
   - `collectCandidates isolates failures` — a throwing task does not lose the other task's candidates.
-- [ ] Step 2: Run `node --test test/autoplaySources.test.js` → FAIL (module missing).
-- [ ] Step 3: Implement.
-- [ ] Step 4: Run → PASS. Commit `feat(autoplay): ytmsearch sources with parallel budgeted retrieval`.
+- [x] Step 2: Run `node --test test/autoplaySources.test.js` → FAIL (module missing).
+- [x] Step 3: Implement.
+- [x] Step 4: Run → PASS. Commit `feat(autoplay): ytmsearch sources with parallel budgeted retrieval`.
 
 ### Task 3: Candidate pool, early next pick, skip fast path
 
@@ -79,7 +81,7 @@
 - `autoplay.js` new exports: `getAutoplayNext(guildId) → { title, author, uri, artworkUrl, source } | null`, `autoplayEvents`, `__testing.setSearchImpl(fn)` for injecting a fake search.
 - Behaviour: `scheduleAutoplayPrefetch(player, track, client)` waits 3 s then calls `prepareNext`; `prepareNext` = ensure pool (build if empty/needsRefresh, background otherwise) → re-score with fresh context → select (Gemini unless classic) → `setNext` → emit `next-changed`. `recordAutoplaySkip` records feedback then, if `next` now scores `rejected`, replaces it via local pick from the pool (no network) and emits `next-changed`. `handleAutoplay` uses `next` if its `preparedFor` epoch matches; otherwise local pick from pool; otherwise synchronous build; if still nothing and autoplay is on → emit `exhausted` (rate-limited 2 min).
 
-- [ ] Step 1: Tests (fake player `{ guildId, node:{connected:true, search}, queue:{tracks:[],current,add}, playing:false, paused:false, play }`, fake client with `lavalink.players.get(guildId) === player`, mode `classic` via `setAutoplayMode`, autoplay enabled via `setAutoplay`):
+- [x] Step 1: Tests (fake player `{ guildId, node:{connected:true, search}, queue:{tracks:[],current,add}, playing:false, paused:false, play }`, fake client with `lavalink.players.get(guildId) === player`, mode `classic` via `setAutoplayMode`, autoplay enabled via `setAutoplay`):
   - `prepared next is consumed without new searches` — after `prepareNext`, record search count; `handleAutoplay` queues `getAutoplayNext` track and search count unchanged.
   - `skip while building uses pool immediately` — pool has candidates, a background build is pending (search never resolves); skip of artist A + `handleAutoplay` resolves < 100 ms and queues a non-A track.
   - `skip rejection re-picks next from pool` — `next` is artist A; two strong skips of A → `getAutoplayNext` is not A and `next-changed` fired.
@@ -87,30 +89,30 @@
   - `empty eligible pool triggers build then exhausted` — search returns only rejected tracks → `handleAutoplay` false and `exhausted` emitted once; second call within 2 min emits nothing.
   - `manual seed marks pool stale` — after `addManualSeed` with a new key, `needsRefresh` is true.
   - pool unit tests: merge dedupe/priority, 20-min expiry, cap 150.
-- [ ] Step 2: Run → FAIL.
-- [ ] Step 3: Implement; genre radio backup sorted by score desc before `slice(0, 4)`; `addManualSeed` ignores `info.isStream` and tracks without positive duration; no prefetch for streams.
-- [ ] Step 4: `npm test` → all PASS (old `__testing` helpers kept or adapted only where behaviour intentionally changed).
-- [ ] Step 5: Commit `feat(autoplay): candidate pool with instant skips and early next pick`.
+- [x] Step 2: Run → FAIL.
+- [x] Step 3: Implement; genre radio backup sorted by score desc before `slice(0, 4)`; `addManualSeed` ignores `info.isStream` and tracks without positive duration; no prefetch for streams.
+- [x] Step 4: `npm test` → all PASS (old `__testing` helpers kept or adapted only where behaviour intentionally changed).
+- [x] Step 5: Commit `feat(autoplay): candidate pool with instant skips and early next pick`.
 
 ### Task 4: Gemini breaker fix
 
 **Files:** Modify `src/music/autoplayAi.js:594-650`; Test `test/autoplayAi.test.js`
 
-- [ ] Step 1: Test `too few valid artists does not open the breaker` — fetch returns valid JSON with 1 artist → `getDiscoveryArtists` returns `[]` and `getGeminiStatus().circuitOpen === false`. Keep existing genre test semantics for HTTP failure (adjust its fixture if it relied on too-few-artists).
-- [ ] Step 2: Run → FAIL. Step 3: implement (log `info`, return `[]`, call `recordGeminiSuccess`). Step 4: PASS. Commit `fix(autoplay-ai): sparse plans no longer trip the breaker`.
+- [x] Step 1: Test `too few valid artists does not open the breaker` — fetch returns valid JSON with 1 artist → `getDiscoveryArtists` returns `[]` and `getGeminiStatus().circuitOpen === false`. Keep existing genre test semantics for HTTP failure (adjust its fixture if it relied on too-few-artists).
+- [x] Step 2: Run → FAIL. Step 3: implement (log `info`, return `[]`, call `recordGeminiSuccess`). Step 4: PASS. Commit `fix(autoplay-ai): sparse plans no longer trip the breaker`.
 
 ### Task 5: Wire events into bot (Up-next refresh + exhausted notice)
 
 **Files:** Modify `src/bot.js` (Lavalink events ~544–610), `src/music/ui.js` (add `sendAutoplayNotice(player, text)` reusing the 30 s TTL path of `sendPlaybackError`), `src/server.js` (`setPlayerNotice` for exhausted, see existing `getPlayerNotice`).
 
-- [ ] Step 1: `autoplayEvents.on('next-changed')` → `broadcastPlayerUpdate(guildId)`; `on('exhausted')` → `musicUI.sendAutoplayNotice(player, "Autoplay couldn't find a fitting track — add a song to keep going.")` + dashboard notice.
-- [ ] Step 2: `npm test` PASS; manual smoke with `scripts/evaluate-autoplay.js` if it still runs.
-- [ ] Step 3: Commit `feat(autoplay): announce when autoplay runs dry`.
+- [x] Step 1: `autoplayEvents.on('next-changed')` → `broadcastPlayerUpdate(guildId)`; `on('exhausted')` → `musicUI.sendAutoplayNotice(player, "Autoplay couldn't find a fitting track — add a song to keep going.")` + dashboard notice.
+- [x] Step 2: `npm test` PASS; manual smoke with `scripts/evaluate-autoplay.js` if it still runs.
+- [x] Step 3: Commit `feat(autoplay): announce when autoplay runs dry`.
 
 ### Task 6: Stage 1 ship
 
-- [ ] Push branch `feat/autoplay-stage1`, open PR to `al3ksh/BreadMusic`, bind with ccd_pr, check CI.
-- [ ] Ask user to confirm deploy; back up `~/apps/discord-bot` on the Pi; sync only changed `src/music/**`, `src/bot.js`, `package.json`, tests; `docker compose up -d --build bot`; watch logs with `AUTOPLAY_LOG_LEVEL=info`; measure skip→trackStart latency.
+- [x] Push branch `feat/autoplay-stage1`, open PR to `al3ksh/BreadMusic`, bind with ccd_pr, check CI.
+- [x] Ask user to confirm deploy; back up `~/apps/discord-bot` on the Pi; sync only changed `src/music/**`, `src/bot.js`, `package.json`, tests; `docker compose up -d --build bot`; watch logs with `AUTOPLAY_LOG_LEVEL=info`; measure skip→trackStart latency.
 
 ---
 
