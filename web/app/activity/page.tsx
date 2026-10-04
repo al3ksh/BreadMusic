@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { flushSync } from 'react-dom';
 import {
   AlertTriangle,
   AudioLines,
@@ -486,13 +487,32 @@ export default function ActivityPage() {
           queue: initialQueue.status === 'fulfilled' ? initialQueue.value : undefined,
         });
 
+        // The intro icon morphs into the player artwork where View Transitions exist; elsewhere
+        // the intro's own fade-out is the transition. activity-vt keeps the icon on screen while
+        // the rest of the intro leaves, so the morph starts from it.
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const morph = !reduceMotion && typeof document.startViewTransition === 'function';
+        const root = document.documentElement;
+        if (morph) root.classList.add('activity-vt');
         setMessage('Activity ready');
         setIntroExiting(true);
-        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         if (!reduceMotion) await new Promise((resolve) => window.setTimeout(resolve, 360));
-        if (cancelled) return;
-        setPhase('ready');
-        setMessage('');
+        if (cancelled) {
+          root.classList.remove('activity-vt');
+          return;
+        }
+        if (morph) {
+          const transition = document.startViewTransition(() => {
+            flushSync(() => {
+              setPhase('ready');
+              setMessage('');
+            });
+          });
+          transition.finished.finally(() => root.classList.remove('activity-vt'));
+        } else {
+          setPhase('ready');
+          setMessage('');
+        }
       } catch (error) {
         if (cancelled) return;
         const failureMessage = error instanceof Error ? error.message : 'Could not start Bread Activity';
@@ -1202,6 +1222,7 @@ export default function ActivityPage() {
   const currentDuration = status.currentTrack?.duration || 0;
   const displayedPosition = seekDraft ?? position;
   // Signed upload URLs are for playback, not public track pages.
+  const trackKey = status.currentTrack?.uri || 'idle';
   const currentTrackLink = /^https?:\/\//i.test(currentTrackUri) && !currentTrackUri.includes('/api/uploads/')
     ? currentTrackUri
     : '';
@@ -1288,8 +1309,17 @@ export default function ActivityPage() {
     setDropIndex(null);
   }, [canDj, dragIndex, playerAction, stopQueueAutoScroll]);
 
-  const handleQueueRemove = useCallback((index: number) => {
-    if (canDj) playerAction('remove', { start: index });
+  // Drops the row locally once the bot confirms, so the collapsed card doesn't flash back
+  // before the queue update arrives over the event stream.
+  const handleQueueRemove = useCallback(async (index: number) => {
+    if (!canDj) return;
+    const removed = await playerAction('remove', { start: index });
+    if (!removed) return;
+    setQueue((current) => current && {
+      ...current,
+      tracks: current.tracks.filter((_, trackIndex) => trackIndex !== index),
+      total: Math.max(0, current.total - 1),
+    });
   }, [canDj, playerAction]);
 
   const loadMoreQueue = useCallback(async () => {
@@ -1537,7 +1567,7 @@ export default function ActivityPage() {
         <section className={`activity-compact-player ${status.paused ? 'is-paused' : 'is-playing'}`}>
           <div className="activity-compact-track">
             <div className="activity-compact-art">
-              <ActivityArtwork src={status.currentTrack?.artwork} />
+              <ActivityArtwork key={trackKey} src={status.currentTrack?.artwork} />
               {hasTrack && <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />}
             </div>
             <div className="activity-compact-copy">
@@ -1545,14 +1575,14 @@ export default function ActivityPage() {
                 <img src="/assets/breadicon.png?v=3" alt="" />
                 <span>{status.paused ? 'Paused' : 'Playing'}</span>
               </div>
-              <h1>
+              <h1 key={`title-${trackKey}`} className="activity-track-swap">
                 {currentTrackLink ? (
                   <a href={currentTrackLink} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); openExternalUrl(currentTrackLink); }}>
                     {status.currentTrack?.title}
                   </a>
                 ) : status.currentTrack?.title || 'Nothing is playing'}
               </h1>
-              <p>{status.currentTrack?.author || 'Bread'}</p>
+              <p key={`author-${trackKey}`} className="activity-track-swap is-second">{status.currentTrack?.author || 'Bread'}</p>
             </div>
           </div>
 
@@ -1578,7 +1608,7 @@ export default function ActivityPage() {
 
         <section className={`activity-player-stage ${status.paused ? 'is-paused' : 'is-playing'}`}>
           <div className="activity-track-art">
-            <ActivityArtwork src={status.currentTrack?.artwork} large />
+            <ActivityArtwork key={trackKey} src={status.currentTrack?.artwork} large />
             {hasTrack && <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />}
           </div>
 
@@ -1607,14 +1637,14 @@ export default function ActivityPage() {
                   </span>
                 )}
               </div>
-              <h1>
+              <h1 key={`title-${trackKey}`} className="activity-track-swap">
                 {currentTrackLink ? (
                   <a href={currentTrackLink} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); openExternalUrl(currentTrackLink); }}>
                     {status.currentTrack?.title}
                   </a>
                 ) : status.currentTrack?.title || 'Nothing is playing'}
               </h1>
-              <p>{status.currentTrack?.author || 'Open Add music to start playback.'}</p>
+              <p key={`author-${trackKey}`} className="activity-track-swap is-second">{status.currentTrack?.author || 'Open Add music to start playback.'}</p>
               {hasTrack && <small className="activity-track-requester">Requested by <strong>{status.currentTrack?.requester || 'Unknown'}</strong></small>}
               {hasTrack && (
                 <div className="activity-mini-progress" aria-hidden="true">

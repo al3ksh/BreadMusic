@@ -1,5 +1,6 @@
 import { ChevronDown, Dices, Disc3, GripVertical, Radio, Trash2 } from 'lucide-react';
-import type { Dispatch, SetStateAction } from 'react';
+import { useState } from 'react';
+import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import type { AutoplayNextTrack, QueueTrack } from '@/lib/api';
 import { formatAutoplaySource } from '@/components/dashboard/DashboardAutoplay';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
@@ -46,14 +47,31 @@ export function ActivityQueuePanel({
   onReroll,
 }: ActivityQueuePanelProps) {
   const showAutoplayNext = Boolean(autoplayNext && queue && queue.total === 0);
+  const [leaving, setLeaving] = useState<string | null>(null);
+  const keys = cardKeys(queue?.tracks ?? []);
+
+  // The row collapses first and the request goes out once it has folded away. If removal
+  // fails the row simply reappears with the next render.
+  const removeWithCollapse = async (index: number, key: string) => {
+    if (leaving) return;
+    setLeaving(key);
+    if (!prefersReducedMotion()) await new Promise((resolve) => window.setTimeout(resolve, 220));
+    try {
+      await handleQueueRemove(index);
+    } finally {
+      setLeaving(null);
+    }
+  };
+
   return (
     <div className="activity-queue-list">
       {!queue?.tracks.length ? (showAutoplayNext ? null : (
         <div className="activity-empty"><Disc3 size={20} /><span>Queue is empty</span></div>
       )) : queue.tracks.map((track, index) => (
         <div
-          className={`activity-queue-row ${dropIndex === index ? 'drop-target' : ''}`}
-          key={`${track.uri}-${index}`}
+          className={`activity-queue-row activity-card ${dropIndex === index ? 'drop-target' : ''}${leaving === keys[index] ? ' is-leaving' : ''}`}
+          key={keys[index]}
+          style={{ '--stagger-index': Math.min(index, 12) } as CSSProperties}
           draggable={canDj && !queueRestore}
           onDragStart={() => { stopQueueAutoScroll(); setDragIndex(index); setDropIndex(index); }}
           onDragOver={(event) => { if (canDj && !queueRestore) { event.preventDefault(); setDropIndex(index); } }}
@@ -65,11 +83,11 @@ export function ActivityQueuePanel({
           <ActivityArtwork src={track.artwork} />
           <div className="activity-queue-copy"><strong>{track.title}</strong><span>{track.author} - {track.requester || 'Unknown requester'}</span></div>
           <time>{formatDuration(track.duration)}</time>
-          <button type="button" className="activity-queue-remove" disabled={!canDj} onClick={(event) => { event.stopPropagation(); handleQueueRemove(index); }} aria-label={`Remove ${track.title}`} title="Remove from queue"><Trash2 size={14} /></button>
+          <button type="button" className="activity-queue-remove" disabled={!canDj || Boolean(leaving)} onClick={(event) => { event.stopPropagation(); void removeWithCollapse(index, keys[index]); }} aria-label={`Remove ${track.title}`} title="Remove from queue"><Trash2 size={14} /></button>
         </div>
       ))}
       {showAutoplayNext && autoplayNext && (
-        <div className="activity-queue-row activity-autoplay-next">
+        <div className="activity-queue-row activity-card activity-autoplay-next" key={autoplayNext.uri}>
           <Radio size={14} className="activity-drag-icon" />
           <div className="activity-queue-index">·</div>
           <ActivityArtwork src={autoplayNext.artwork ?? null} />
@@ -93,6 +111,20 @@ export function ActivityQueuePanel({
       )}
     </div>
   );
+}
+
+// Keys survive removals above a row: the nth copy of a uri keeps the same key wherever it moves.
+export function cardKeys(tracks: { uri: string }[]) {
+  const seen = new Map<string, number>();
+  return tracks.map(({ uri }) => {
+    const occurrence = seen.get(uri) ?? 0;
+    seen.set(uri, occurrence + 1);
+    return `${uri}#${occurrence}`;
+  });
+}
+
+export function prefersReducedMotion() {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 }
 
 function formatDuration(duration: number) {

@@ -3442,6 +3442,257 @@ a { color: inherit; text-decoration: none; }
   }
 }
 
+/* ---- Activity motion pass ---- */
+
+/* Intro: the logo springs in, the wave lights from the centre bar outwards. */
+.activity-intro-visual img {
+  animation: activity-logo-spring 980ms var(--activity-spring) both;
+}
+
+@keyframes activity-logo-spring {
+  0% { opacity: 0; transform: translateY(22px) scale(0.6) rotate(-8deg); filter: blur(8px); }
+  35% { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); filter: blur(0); }
+}
+
+.activity-intro-wave {
+  animation: activity-wave-pop 620ms var(--activity-spring) 320ms both;
+}
+
+.activity-intro-wave i {
+  --wave-delay: 120ms;
+  animation:
+    activity-wave-light 560ms var(--activity-spring) calc(520ms + var(--wave-delay)) both,
+    activity-wave 900ms ease-in-out calc(1080ms + var(--wave-delay)) infinite alternate;
+}
+
+.activity-intro-wave i:nth-child(3) { --wave-delay: 0ms; }
+.activity-intro-wave i:nth-child(2),
+.activity-intro-wave i:nth-child(4) { --wave-delay: 60ms; }
+
+@keyframes activity-wave-pop {
+  from { opacity: 0; transform: translateY(10px) scale(0.7); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes activity-wave-light {
+  from { opacity: 0.25; background: #4a4a55; box-shadow: none; transform: scaleY(0.4); }
+  to { opacity: 1; background: #aaa4ed; box-shadow: 0 0 10px rgba(170, 164, 237, 0.55); transform: scaleY(1); }
+}
+
+.activity-intro-message {
+  animation: activity-intro-message-spring 460ms var(--activity-spring-soft) both;
+}
+
+@keyframes activity-intro-message-spring {
+  from { opacity: 0; transform: translateY(10px); filter: blur(3px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+/* With View Transitions the icon stays put while the rest leaves, then morphs into the artwork. */
+html.activity-vt .activity-intro.is-leaving .activity-intro-content { animation: none; }
+html.activity-vt .activity-intro.is-leaving .activity-intro-content > :not(.activity-intro-visual),
+html.activity-vt .activity-intro.is-leaving .activity-intro-ring,
+html.activity-vt .activity-intro.is-leaving .activity-intro-wave {
+  animation: activity-intro-content-out 300ms cubic-bezier(0.7, 0, 0.84, 0) both;
+}
+html.activity-vt .activity-intro.is-leaving .activity-intro-visual img {
+  animation: none;
+  transform: scale(0.94);
+  transition: transform 320ms var(--activity-spring-soft);
+}
+
+html.activity-vt .activity-intro-visual img,
+html.activity-vt .activity-track-art,
+html.activity-vt .activity-compact-art {
+  view-transition-name: activity-art;
+}
+
+::view-transition-group(activity-art) {
+  animation-duration: 640ms;
+  animation-timing-function: var(--activity-spring-soft);
+}
+
+::view-transition-old(activity-art),
+::view-transition-new(activity-art) {
+  height: 100%;
+  object-fit: cover;
+  animation-duration: 380ms;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 360ms;
+}
+
+/* Track change: artwork and title slide in from the right. */
+.activity-track-art > :first-child,
+.activity-compact-art > :first-child {
+  animation: activity-art-swap 620ms var(--activity-spring-soft) both;
+}
+
+.activity-track-swap {
+  animation: activity-title-swap 520ms var(--activity-spring-soft) both;
+}
+
+.activity-track-swap.is-second { animation-delay: 50ms; }
+
+@keyframes activity-art-swap {
+  from { opacity: 0; transform: translateX(28px) scale(0.92) rotate(2deg); }
+  to { opacity: 1; transform: translateX(0) scale(1) rotate(0); }
+}
+
+@keyframes activity-title-swap {
+  from { opacity: 0; transform: translateX(18px); filter: blur(3px); }
+  to { opacity: 1; transform: translateX(0); filter: blur(0); }
+}
+
+/* Toasts. */
+.activity-notice {
+  animation: activity-notice-in 520ms var(--activity-spring) both;
+}
+
+/* Panels: spring in, then the header and body follow 30ms apart. */
+.activity-drawer {
+  animation: activity-drawer-spring 560ms ease-out both;
+  /* The solid shadow fills the strip the bounce briefly uncovers at the screen edge. */
+  box-shadow: -22px 0 54px rgba(0, 0, 0, 0.34), 18px 0 0 #101011;
+}
+
+@media (max-width: 700px) {
+  .activity-drawer {
+    animation-name: activity-sheet-spring;
+    box-shadow: 0 -22px 54px rgba(0, 0, 0, 0.38), 0 18px 0 #101011;
+  }
+}
+
+/* A small hand-tuned bounce: a full spring would overshoot far enough to open a gap at the edge. */
+@keyframes activity-sheet-spring {
+  0% { transform: translateY(100%); opacity: 0.65; animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1); }
+  58% { transform: translateY(-14px); opacity: 1; animation-timing-function: ease-in-out; }
+  80% { transform: translateY(4px); }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes activity-drawer-spring {
+  0% { transform: translateX(100%); opacity: 0.65; animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1); }
+  58% { transform: translateX(-14px); opacity: 1; animation-timing-function: ease-in-out; }
+  80% { transform: translateX(4px); }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+.activity-drawer-header > div,
+.activity-drawer-header > button,
+.activity-drawer-body {
+  animation: activity-content-in 480ms var(--activity-spring-soft) 90ms both;
+}
+
+.activity-drawer-header > button { animation-delay: 120ms; }
+.activity-drawer-body { animation-delay: 150ms; }
+
+@keyframes activity-content-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.activity-drawer.is-closing .activity-drawer-header > *,
+.activity-drawer.is-closing .activity-drawer-body { animation: none; }
+
+/* Cards: queue rows, search results and history. */
+.activity-queue-list,
+.activity-history-list,
+.activity-search-results {
+  gap: 6px;
+}
+
+.activity-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 11px;
+  animation: activity-card-in 560ms var(--activity-spring-soft) both;
+  animation-delay: calc(var(--stagger-index, 0) * 30ms);
+  transition: transform 340ms var(--activity-spring), background 160ms ease, border-color 160ms ease, box-shadow 220ms ease;
+}
+
+.activity-queue-row.activity-card {
+  grid-template-columns: 15px 18px 44px minmax(0, 1fr) auto auto;
+  gap: 10px;
+  min-height: 62px;
+  padding: 8px 9px;
+}
+
+.activity-queue-row.activity-history-row.activity-card {
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
+}
+
+.activity-search-result.activity-card,
+.activity-search-playlist.activity-card {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 62px;
+  padding: 8px 9px;
+}
+
+.activity-search-playlist.activity-card {
+  background: rgba(91, 80, 153, 0.18);
+  border-color: rgba(143, 134, 224, 0.42);
+}
+
+.activity-queue-row.activity-autoplay-next.activity-card {
+  border: 1px dashed rgba(162, 156, 229, 0.32);
+}
+
+.activity-card img,
+.activity-card .activity-queue-art {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .activity-card:hover {
+    background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.26);
+    transform: translateY(-2px);
+  }
+}
+
+.activity-card:active:not(:has(button:active)) {
+  transform: scale(0.97);
+  transition-duration: 90ms;
+  transition-timing-function: ease-out;
+}
+
+.activity-card.drop-target {
+  background: rgba(108, 101, 189, 0.16);
+  border-color: rgba(162, 156, 229, 0.55);
+  outline: none;
+}
+
+.activity-card.is-leaving {
+  overflow: hidden;
+  pointer-events: none;
+  animation: activity-card-out 220ms cubic-bezier(0.55, 0, 0.75, 0.2) forwards;
+}
+
+@keyframes activity-card-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes activity-card-out {
+  0% { opacity: 1; max-height: 80px; transform: translateX(0) scale(1); }
+  45% { opacity: 0; max-height: 80px; transform: translateX(26px) scale(0.95); }
+  100% { opacity: 0; max-height: 0; min-height: 0; margin-block: -3px; padding-block: 0; border-width: 0; transform: translateX(26px) scale(0.95); }
+}
+
+.activity-card button:active:not(:disabled) {
+  transform: scale(0.88);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .activity-drawer,
   .activity-drawer-backdrop,
@@ -3480,6 +3731,19 @@ a { color: inherit; text-decoration: none; }
   .activity-drawer.is-closing,
   .activity-drawer-backdrop.is-closing { opacity: 0; }
   .activity-lyrics-list { scroll-behavior: auto; }
+  .activity-drawer-header > div,
+  .activity-drawer-header > button,
+  .activity-drawer-body,
+  .activity-intro-wave,
+  .activity-track-art > :first-child,
+  .activity-compact-art > :first-child,
+  .activity-track-swap,
+  .activity-card,
+  .activity-card.is-leaving { animation: none; }
+  .activity-card { transition-timing-function: ease; transition-duration: 120ms; }
+  .activity-card:hover,
+  .activity-card:active:not(:has(button:active)),
+  .activity-card button:active:not(:disabled) { transform: none; }
 }
 .delay-200 { animation-delay: 0.2s; }
 .delay-300 { animation-delay: 0.3s; }

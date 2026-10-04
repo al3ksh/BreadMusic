@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { History, Play, Plus, SquarePlus } from 'lucide-react';
 import type { HistoryPage } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
@@ -93,11 +94,11 @@ export function ActivityHistoryPanel({
 
   return (
     <div className="activity-history-list">
-      {history.items.map((entry) => {
+      {history.items.map((entry, index) => {
         const replayable = isReplayable(entry.track.uri);
         const busy = busyUri === entry.track.uri || Boolean(actionBusy);
         return (
-          <div className="activity-queue-row activity-history-row" key={entry.id}>
+          <div className="activity-queue-row activity-history-row activity-card" key={entry.id} style={{ '--stagger-index': Math.min(index, 12) } as CSSProperties}>
             <ActivityArtwork src={entry.track.artwork} />
             <div className="activity-queue-copy">
               <strong>

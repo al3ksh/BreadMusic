@@ -1,5 +1,5 @@
 import { ChevronDown, FileAudio, ListPlus, Play, Search, Upload } from 'lucide-react';
-import type { ChangeEvent } from 'react';
+import type { CSSProperties, ChangeEvent } from 'react';
 import type { QueueTrack } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 
@@ -82,7 +82,7 @@ export function ActivitySearchPanel({
       {(searchPlaylist || searchResults.length > 0) && (
         <div className="activity-search-results">
           {searchPlaylist && (
-            <div className="activity-search-playlist">
+            <div className="activity-search-playlist activity-card" style={{ '--stagger-index': 0 } as CSSProperties}>
               <ActivityArtwork src={searchPlaylist.artwork} />
               <span>
                 <strong>{searchPlaylist.name}</strong>
@@ -94,7 +94,7 @@ export function ActivitySearchPanel({
             </div>
           )}
           {searchResults.map((track, index) => (
-            <div key={`${track.uri}-${index}`} className="activity-search-result">
+            <div key={`${track.uri}-${index}`} className="activity-search-result activity-card" style={{ '--stagger-index': Math.min(index + (searchPlaylist ? 1 : 0), 12) } as CSSProperties}>
               <ActivityArtwork src={track.artwork} />
               <span><strong>{track.title}</strong><small>{track.author} - {formatMs(track.duration)}</small></span>
               <div className="activity-search-actions">
