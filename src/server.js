@@ -38,6 +38,8 @@ const { createAuthRouter } = require('./routes/auth');
 const { hydratePlayer, getStoredLocalUploadPaths, savePlayerState } = require('./state/queueStore');
 const { createGuildConfigRouter } = require('./routes/guildConfig');
 const { createPlayerRouter } = require('./routes/player');
+const { createLibraryRouter } = require('./routes/library');
+const library = require('./music/library');
 const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
 const { createServerExtensionHost } = require('./extensions/serverExtensions');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
@@ -570,6 +572,19 @@ function createApiServer(client) {
     isUnseekableTrackError,
     audioUploadDirectory: UPLOAD_DIR,
     broadcastPlayerUpdate,
+    library,
+  }));
+
+  app.use(createLibraryRouter({
+    client,
+    library,
+    requireAuth,
+    requirePlayerAccess,
+    requireTrustedOrigin,
+    requireDashboardActionRateLimit,
+    getRequestUser,
+    getDashboardRequester,
+    getUsableNode,
   }));
 
   app.get('/api/guilds/:guildId/health', requireAuth, requireGuildAccess, (req, res) => {

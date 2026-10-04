@@ -28,6 +28,7 @@ import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
 import { ActivitySearchPanel } from '@/components/activity/ActivitySearchPanel';
 import { ActivityLyricsPanel } from '@/components/activity/ActivityLyricsPanel';
 import { ActivitySoundPanel } from '@/components/activity/ActivitySoundPanel';
+import { ActivityLibraryPanel } from '@/components/activity/ActivityLibraryPanel';
 import { activityRequest } from '@/lib/activity/transport';
 import { buildActivityRichPresence, type RichPresenceActivity } from '@/lib/activity/richPresence';
 
@@ -62,12 +63,13 @@ const ACTIVITY_ERROR_VISUALS: Record<ActivityErrorKind, { icon: typeof Bot; titl
   access: { icon: ShieldAlert, title: 'Access denied' },
   generic: { icon: AlertTriangle, title: 'Activity unavailable' },
 };
-type ActivityPanel = 'queue' | 'search' | 'lyrics' | 'sound' | null;
+type ActivityPanel = 'queue' | 'search' | 'lyrics' | 'sound' | 'library' | null;
 const ACTIVITY_PANEL_TITLES: Record<Exclude<ActivityPanel, null>, string> = {
   queue: 'Queue',
   search: 'Add music',
   lyrics: 'Live lyrics',
   sound: 'Sound',
+  library: 'Library',
 };
 type ActivityNoticeTone = 'success' | 'error' | 'warning' | 'info';
 type ActivityNotice = { id: number; message: string; tone: ActivityNoticeTone };
@@ -182,6 +184,7 @@ export default function ActivityPage() {
   const [queueRestore, setQueueRestore] = useState<{ id: number; revision: string; throughPage: number } | null>(null);
   const [position, setPosition] = useState(0);
   const [activePanel, setActivePanel] = useState<ActivityPanel>(null);
+  const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
   const [queueView, setQueueView] = useState<'queue' | 'history'>('queue');
   const [drawerClosing, setDrawerClosing] = useState(false);
   const [drawerDragY, setDrawerDragY] = useState<number | null>(null);
@@ -816,7 +819,8 @@ export default function ActivityPage() {
       }
       if (action === 'autoplay_like') {
         setStatus((current) => ({ ...current, autoplayFeedback: result.liked ? 'like' : null }));
-        notify(result.liked ? 'Liked: autoplay will pick more like this' : 'Like removed', 'success');
+        notify(result.liked ? 'Liked: saved to your Library, autoplay will pick more like this' : 'Like removed', 'success');
+        setLibraryRefreshKey((key) => key + 1);
       }
       if (action === 'autoplay_dislike' && !result.voteSkip) notify('Disliked: autoplay will avoid this track', 'success');
       return true;
@@ -881,6 +885,28 @@ export default function ActivityPage() {
     } catch (error) {
       if ((error as Error & { status?: number }).status === 403) await refreshCapabilities();
       notify(error instanceof Error ? error.message : 'Could not change the sound', 'error');
+      return false;
+    }
+  }, [activityFetch, guildId, notify, refreshCapabilities]);
+
+  const libraryRequest = useCallback(<T,>(path: string, body?: Record<string, unknown>) => {
+    return activityFetch<T>(`/api/guilds/${guildId}/library${path}`, body
+      ? { method: 'POST', body: JSON.stringify(body) }
+      : {});
+  }, [activityFetch, guildId]);
+
+  const playLibrary = useCallback(async (playlistId: string, shuffle: boolean) => {
+    if (!guildId) return false;
+    try {
+      const result = await activityFetch<{ title?: string; count?: number }>(`/api/guilds/${guildId}/player/library`, {
+        method: 'POST',
+        body: JSON.stringify({ playlistId, shuffle }),
+      });
+      notify(`${shuffle ? 'Shuffled in' : 'Queued'} ${result.count ?? 0} tracks from ${result.title || 'your library'}`, 'success');
+      return true;
+    } catch (error) {
+      if ((error as Error & { status?: number }).status === 403) await refreshCapabilities();
+      notify(error instanceof Error ? error.message : 'Could not queue that playlist', 'error');
       return false;
     }
   }, [activityFetch, guildId, notify, refreshCapabilities]);
@@ -1667,6 +1693,7 @@ export default function ActivityPage() {
           canQueue={canQueue}
           hasTrack={hasTrack}
           togglePanel={togglePanel}
+          showLibrary
         />
 
         {activePanel && (
@@ -1697,6 +1724,8 @@ export default function ActivityPage() {
                         ? 'Search or upload audio'
                         : activePanel === 'sound'
                           ? 'Presets, EQ, speed and pitch'
+                          : activePanel === 'library'
+                            ? 'Your Liked tracks and playlists'
                           : status.currentTrack?.title || 'Current track'}
                   </span>
                 </div>
@@ -1814,6 +1843,17 @@ export default function ActivityPage() {
 
                 {activePanel === 'sound' && (
                   <ActivitySoundPanel sound={status.sound} canEdit={canDj} onChange={sendSound} />
+                )}
+
+                {activePanel === 'library' && (
+                  <ActivityLibraryPanel
+                    canQueue={canQueue}
+                    hasTrack={hasTrack}
+                    refreshKey={libraryRefreshKey}
+                    request={libraryRequest}
+                    onPlay={playLibrary}
+                    notify={notify}
+                  />
                 )}
               </div>
             </aside>

@@ -1,5 +1,6 @@
 const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES, handleAutoplay } = require('../../music/autoplay');
 const { applySound, getSoundState, normalizePreset, resetSound } = require('../../music/sound');
+const { setLiked } = require('../../music/library');
 
 const createMusicControlCommands = (context) => {
   const {
@@ -109,10 +110,11 @@ const createMusicControlCommands = (context) => {
           await interaction.editReply('This track cannot be liked.');
           return;
         }
+        setLiked(interaction.user.id, track, result.liked);
         await interaction.client.musicUI.refresh(player);
         await interaction.editReply(
           result.liked
-            ? `\uD83D\uDC4D Liked **${track.info.title}**. Autoplay will pick more like it.`
+            ? `\uD83D\uDC4D Liked **${track.info.title}**. Autoplay will pick more like it, and it is in your \`/liked\` list.`
             : `Removed your like from **${track.info.title}**.`,
         );
         return;

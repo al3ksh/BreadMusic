@@ -83,6 +83,7 @@ const {
   autoplayEvents,
 } = require('./music/autoplay');
 const { flush: flushAutoplayProfiles } = require('./music/autoplay/profileStore');
+const { flush: flushLibrary } = require('./music/library');
 const {
   clearVoiceTrackStatus,
   handleVoiceStatusGatewayEvent,
@@ -1380,6 +1381,11 @@ function canControlPlayer(interaction, guildConfig) {
 }
 
 async function handleAutocomplete(interaction) {
+  const command = client.commands.get(interaction.commandName);
+  if (typeof command?.autocomplete === 'function') {
+    await command.autocomplete(interaction);
+    return;
+  }
   if (interaction.commandName !== 'play') {
     await interaction.respond([]).catch(() => {});
     return;
@@ -1574,6 +1580,7 @@ async function gracefulShutdown(signal) {
     console.error('Failed to flush queue store:', error);
   });
   flushAutoplayProfiles();
+  flushLibrary();
   client.lyricsUI?.clearAll();
 
   try {

@@ -281,6 +281,7 @@ const { createUtilityCommands } = require('./domains/utility');
 const { createMusicCommands } = require('./domains/music');
 const { createStatsCommands } = require('./domains/stats');
 const { createMusicControlCommands } = require('./domains/musicControls');
+const { createLibraryCommands } = require('./domains/library');
 const { createConfigCommands } = require('./domains/config');
 const { createSystemCommands } = require('./domains/system');
 const { createBlackjackCommands } = require('./domains/games');
@@ -390,6 +391,7 @@ const commands = [
   ...createMusicCommands(commandContext),
   ...createStatsCommands(commandContext),
   ...createMusicControlCommands(commandContext),
+  ...createLibraryCommands(commandContext),
   ...createConfigCommands(commandContext),
   ...createSystemCommands(commandContext),
   ...createBlackjackCommands(commandContext),

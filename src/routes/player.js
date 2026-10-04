@@ -88,6 +88,7 @@ function createPlayerRouter({
   isUnseekableTrackError,
   audioUploadDirectory,
   broadcastPlayerUpdate,
+  library = null,
 }) {
   const router = express.Router();
 
@@ -442,7 +443,7 @@ function createPlayerRouter({
       let botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
       const privileged = capabilities.canControlPlayer === true;
       const canQueue = capabilities.canQueue === true;
-      const queueContributorAction = action === 'search' || action === 'play';
+      const queueContributorAction = action === 'search' || action === 'play' || action === 'library';
       if (!privileged && !listenerActions.has(action) && !(canQueue && queueContributorAction)) {
         return res.status(403).json({ error: 'Player control is not enabled for your role' });
       }
@@ -569,7 +570,7 @@ function createPlayerRouter({
         return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
       }
 
-      const isPlaybackAction = ['play', 'playnow', 'playlist'].includes(action);
+      const isPlaybackAction = ['play', 'playnow', 'playlist', 'library'].includes(action);
       if (isPlaybackAction && req.activityUser && !memberVoiceChannelId) {
         return res.status(403).json({ error: 'Join the voice channel Bread is playing in before controlling playback' });
       }
@@ -665,6 +666,29 @@ function createPlayerRouter({
           return res.json({ success: true, title: cachedSearch.playlist.name, count: tracksToAdd.length, mode: 'queue', truncated: cachedSearch.playlist.truncated });
         }
 
+        // Plays the requester's Liked list or one of their saved playlists.
+        case 'library': {
+          if (!library) return res.status(503).json({ error: 'The library is not available' });
+          const userId = getRequestUser(req)?.id;
+          const playlistId = typeof req.body?.playlistId === 'string' ? req.body.playlistId : '';
+          const playable = playlistId ? library.resolvePlayable(userId, playlistId) : null;
+          if (!playable) return res.status(404).json({ error: 'Playlist not found' });
+          if (playable.tracks.length === 0) return res.status(409).json({ error: 'This playlist is empty' });
+
+          const requester = getDashboardRequester(req, client);
+          const entries = req.body?.shuffle === true ? library.shuffled(playable.tracks) : playable.tracks;
+          const tracksToAdd = entries.map((entry) => library.entryToTrack(entry, requester));
+          tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
+          clearAutoplayPrefetch(guildId);
+          const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
+          if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, ...tracksToAdd);
+          else await player.queue.add(tracksToAdd);
+          if (!player.queue.current && !player.playing && !player.paused) await player.play();
+          await client.musicUI?.refresh(player).catch(() => {});
+          await savePlayerState(player).catch(() => {});
+          return res.json({ success: true, title: playable.name, count: tracksToAdd.length, mode: 'queue' });
+        }
+
         case 'pause':
           if (!player.paused) await player.pause();
           break;
@@ -678,6 +702,8 @@ function createPlayerRouter({
         case 'autoplay_like': {
           const result = likeTrack(guildId, player.queue.current);
           if (!result) return res.status(409).json({ error: 'This track cannot be liked.' });
+          // The badge like also lands in the listener's own Liked list.
+          library?.setLiked(getRequestUser(req)?.id, player.queue.current, result.liked);
           await client.musicUI?.refresh(player).catch(() => {});
           return res.json({ success: true, liked: result.liked });
         }

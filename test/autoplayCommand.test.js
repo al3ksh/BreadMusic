@@ -10,6 +10,7 @@ const discord = require('discord.js');
 const { createMusicControlCommands } = require('../src/commands/domains/musicControls');
 const { getTrackFeedback, isAutoplayEnabled, setAutoplay } = require('../src/music/autoplay');
 const { closeDatabases } = require('../src/state/sqliteStore');
+const library = require('../src/music/library');
 
 const baseContext = { ...discord, FILTER_PRESET_CHOICES: [] };
 
@@ -20,6 +21,7 @@ test.after(() => {
 
 function setup(guildId, { skipResult } = {}) {
   const current = {
+    encoded: 'enc-midnight',
     info: {
       title: 'Midnight City',
       author: 'M83',
@@ -51,6 +53,7 @@ function setup(guildId, { skipResult } = {}) {
     const replies = [];
     await command.execute({
       guildId,
+      user: { id: 'listener-1' },
       client: { musicUI: { refresh: async () => calls.push('refresh') } },
       options: { getSubcommand: () => subcommand },
       deferReply: async () => {},
@@ -69,10 +72,12 @@ test('/autoplay offers toggle, like, dislike and next', () => {
 test('/autoplay like toggles the like on the current track for any listener', async () => {
   const guildId = 'command-like';
   const { run, calls, current } = setup(guildId);
-  assert.match(await run('like'), /Liked \*\*Midnight City\*\*/);
+  assert.match(await run('like'), /Liked \*\*Midnight City\*\*.*`\/liked` list/);
   assert.equal(getTrackFeedback(guildId, current), 'like');
+  assert.equal(library.isLiked('listener-1', current), true);
   assert.match(await run('like'), /Removed your like/);
   assert.equal(getTrackFeedback(guildId, current), null);
+  assert.equal(library.isLiked('listener-1', current), false);
   assert.ok(!calls.includes('assertDJ'));
   assert.ok(calls.includes('refresh'));
 });
