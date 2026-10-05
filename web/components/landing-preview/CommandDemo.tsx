@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useReducer, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowUp, BookOpen, Check, Hash, Headphones, LayoutGrid, ListMusic, LoaderCircle, Pause, Play, Plus, Repeat2, RotateCcw, Shuffle, SkipBack, SkipForward, Square, Volume2 } from 'lucide-react';
-import { artwork, asset, commands, demoTracks, type DemoTrack } from './demo';
-import { demoReducer, initialState, queueEmbed, trackEmbed, type Embed, type Message, type Playback } from './demo-state';
+import { ArrowUp, BookOpen, Check, Hash, Headphones, LayoutGrid, ListMusic, LoaderCircle, Pause, Play, Plus, Repeat2, RotateCcw, Shuffle, SkipBack, SkipForward, Square, Star, Volume2 } from 'lucide-react';
+import { artwork, asset, commands, demoTracks, quickCommands, soundPresets, statsViews, type DemoTrack } from './demo';
+import { autoplayNext, demoReducer, initialState, queueEmbed, soundEmbed, trackEmbed, type DemoAction, type DemoState, type Embed, type Message, type Playback } from './demo-state';
 import contract from './bot-contract.json';
 import styles from './preview.module.css';
 import { ActivityDemo } from './ActivityDemo';
@@ -12,11 +12,11 @@ import { usePreviewSearch } from './usePreviewSearch';
 
 function Text({ value }: { value: string }) {
   const parts: ReactNode[] = [];
-  const pattern = /\[([^\]]+)\]\((https:\/\/[^\s)]+)\)|`([^`]+)`|<#\d+>/g;
+  const pattern = /\[([^\]]+)\]\((https:\/\/[^\s)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|<#\d+>/g;
   let end = 0;
   for (const match of value.matchAll(pattern)) {
     parts.push(value.slice(end, match.index));
-    parts.push(match[1] ? <a key={match.index} href={match[2]} target="_blank" rel="noreferrer">{match[1]}</a> : match[3] ? <code key={match.index}>{match[3]}</code> : <span className={styles.channelMention} key={match.index}><Volume2 size={13} /> listening room</span>);
+    parts.push(match[1] ? <a key={match.index} href={match[2]} target="_blank" rel="noreferrer">{match[1]}</a> : match[3] ? <code key={match.index}>{match[3]}</code> : match[4] ? <b key={match.index}>{match[4]}</b> : <span className={styles.channelMention} key={match.index}><Volume2 size={13} /> listening room</span>);
     end = match.index! + match[0].length;
   }
   parts.push(value.slice(end));
@@ -56,10 +56,12 @@ function PlayerButtons({ state, busy, run, openActivity }: { state: Playback; bu
   })}</div>)}</div>;
 }
 
-function BotReply({ message, state, live, busy, run, openActivity }: { message: Message; state: Playback; live: boolean; busy: boolean; run: (value: string) => void; openActivity: () => void }) {
+function BotReply({ message, state, dispatch, live, busy, run, openActivity }: { message: Message; state: DemoState; dispatch: (action: DemoAction) => void; live: boolean; busy: boolean; run: (value: string) => void; openActivity: () => void }) {
   const [page, setPage] = useState(0);
+  const [view, setView] = useState(message.view || 'overview');
   const player = live ? state : message.snapshot;
-  const embed = message.kind === 'player' ? player.current ? trackEmbed('nowPlaying', player.current, player) : contract.empty : message.embed?.title === contract.queue.title ? queueEmbed(message.snapshot, page) : message.embed;
+  const liveSound = message.kind === 'sound' && message.id === state.soundId;
+  const embed = message.kind === 'player' ? player.current ? trackEmbed('nowPlaying', player.current, player, live && state.autoplay ? { upNext: autoplayNext(state) } : undefined) : contract.empty : message.kind === 'sound' ? soundEmbed(liveSound ? state.preset : message.preset || 'off') : message.embed?.title === contract.queue.title ? queueEmbed(message.snapshot, page) : message.embed;
   const pages = Math.max(1, Math.ceil(message.snapshot.queue.length / 10));
   return <article className={styles.botMessage} data-message={message.id}>
     <img src="/assets/breadicon.png" alt="" width={36} height={36} />
@@ -71,6 +73,9 @@ function BotReply({ message, state, live, busy, run, openActivity }: { message: 
         {message.text && <p>{message.text}</p>}
         {message.kind === 'player' && live && state.current && <PlayerButtons state={state} busy={busy} run={run} openActivity={openActivity} />}
         {message.embed?.title === contract.queue.title && <div className={styles.queuePagination}><button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</button><button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}>Next</button></div>}
+        {message.stationId && <button type="button" className={styles.playAgain} disabled={busy} onClick={() => dispatch({ type: 'saveStation', id: message.stationId! })}><Star size={14} fill={state.savedStations.includes(message.stationId) ? 'currentColor' : 'none'} /> {state.savedStations.includes(message.stationId) ? 'Saved' : 'Save station'}</button>}
+        {liveSound && <select className={styles.discordSelect} aria-label="Sound preset" value={state.preset} onChange={event => dispatch({ type: 'preset', preset: event.target.value })}>{soundPresets.map(preset => <option key={preset.id} value={preset.id}>{preset.label} - {preset.description}</option>)}</select>}
+        {message.kind === 'stats' && <><img className={styles.statsReply} src={asset(`stats-${view}.png`)} alt={`Bread stats: ${statsViews.find(item => item.id === view)?.label}`} width={1200} height={700} /><select className={styles.discordSelect} aria-label="Stats view" value={view} onChange={event => setView(event.target.value)}>{statsViews.map(item => <option key={item.id} value={item.id}>{item.emoji} {item.label}</option>)}</select></>}
         {message.kind === 'slots' && <><picture><source media="(prefers-reduced-motion: reduce)" srcSet={asset(`slots-${message.round ?? 0}.png`)} /><img className={styles.gameReply} src={`${asset(`slots-${message.round ?? 0}.gif`)}?round=${message.id}`} alt="Bread Arcade slots result" /></picture><button className={styles.playAgain} disabled={busy} onClick={() => run('/slots')}><RotateCcw size={14} /> Play again</button></>}
         {message.private && <small className={styles.privateReply}>Only you can see this</small>}
       </div>
@@ -156,6 +161,7 @@ export function CommandDemo() {
   type Suggestion = { name: string; detail: string; value: string; image?: string; track?: DemoTrack; option?: string };
   const suggestions: Suggestion[] = isPlay
     ? (query ? matchedQuery === query ? matches : [] : demoTracks).map(track => ({ name: track.title, detail: `${track.artist} - ${track.duration}`, value: `/play ${track.artist} - ${track.title}`, image: artwork(track), track }))
+    : activeCommand?.choices ? activeCommand.choices.filter(choice => { const typed = input.slice(activeCommand.name.length + 1).trim().toLowerCase(); return !typed || choice.label.toLowerCase().includes(typed) || choice.value.toLowerCase().includes(typed); }).map(choice => ({ name: choice.label, detail: choice.detail, value: `${activeCommand.name} ${choice.value}` }))
     : commands.filter(command => input === '' || command.name.startsWith(input.toLowerCase())).slice(0, 7).map(command => ({ name: command.name, detail: command.detail, value: command.input, option: command.option }));
   const showSuggestions = focused && !busy && input.startsWith('/') && (suggestions.length > 0 || isPlay) && !selectedTrack;
   const choose = (index: number) => {
@@ -177,14 +183,14 @@ export function CommandDemo() {
       <header className={styles.chatHeader}><span><Hash size={20} /> music</span><span className={styles.sandbox}>Demo · No audio</span><button type="button" title="Reset demo" aria-label="Reset demo" onClick={reset}><RotateCcw size={17} /></button></header>
       <div className={styles.voiceStrip}><Headphones size={15} /><span>{state.current ? 'Voice connected' : 'Disconnected'}<small>listening room</small></span><button type="button" onClick={() => run('/queue')} disabled={Boolean(busy)} aria-label="Show demo queue"><ListMusic size={16} />{state.queue.length} queued</button></div>
       <div className={styles.chatMessages} ref={logRef} role="log" aria-label="Bread conversation" aria-live="off" aria-busy={Boolean(busy)}>
-        {state.messages.map((message) => <BotReply key={message.id} message={message} state={state} live={message.kind === 'player' && message.id === state.playerId} busy={Boolean(busy)} run={run} openActivity={openActivity} />)}
+        {state.messages.map((message) => <BotReply key={message.id} message={message} state={state} dispatch={dispatch} live={message.kind === 'player' && message.id === state.playerId} busy={Boolean(busy)} run={run} openActivity={openActivity} />)}
         {busy && <div className={styles.thinking}><img src="/assets/breadicon.png" alt="" width={28} height={28} /><span>Bread is thinking<div className={styles.typing}><i /><i /><i /></div></span></div>}
       </div>
       <span className={styles.srOnly} role="status">{status}</span>
       {error && <div className={styles.demoError} role="alert">{error}</div>}
       <div className={styles.composer}>
-        <div className={styles.mobileCommands} aria-label="Quick commands">{commands.filter(command => ['/play', '/queue', '/volume', '/seek', '/slots'].includes(command.name)).map(command => <button type="button" key={command.name} onClick={() => fill(command.input)}>{command.name}</button>)}</div>
-        {showSuggestions && <div className={styles.suggestions}><div className={styles.suggestionHeading}><img src="/assets/breadicon.png" alt="" width={20} height={20} /><strong>{isPlay ? '/play' : 'Bread'}</strong><span>{isPlay ? 'query' : 'Commands'}</span>{isPlay && autocomplete.searching && <LoaderCircle className={styles.searchSpinner} size={15} />}</div><div id="bread-suggestions" role="listbox" aria-label={isPlay ? 'Matching tracks' : 'Bread commands'}>{suggestions.map((item, index) => <button type="button" role="option" id={`suggestion-${index}`} aria-selected={suggestion === index} key={item.value} onPointerDown={event => event.preventDefault()} onClick={() => choose(index)}>{item.image ? <img src={item.image} alt="" width={32} height={32} /> : <span className={styles.slashIcon}>/</span>}<span><b>{item.name}{item.option && <em>{item.option}</em>}</b><small>{item.detail}</small></span></button>)}</div>{isPlay && !suggestions.length && <div className={styles.autocompleteStatus} role="status">{autocomplete.error || (autocomplete.searching || matchedQuery !== query && query.length >= 2 ? 'Searching...' : query.length < 2 ? 'Type at least 2 characters.' : 'No results found.')}</div>}</div>}
+        <div className={styles.mobileCommands} aria-label="Quick commands">{quickCommands.map(name => commands.find(command => command.name === name)!).map(command => <button type="button" key={command.name} onClick={() => fill(command.input)}>{command.name.split(' ')[0]}</button>)}</div>
+        {showSuggestions && <div className={styles.suggestions}><div className={styles.suggestionHeading}><img src="/assets/breadicon.png" alt="" width={20} height={20} /><strong>{isPlay ? '/play' : activeCommand?.choices ? activeCommand.name : 'Bread'}</strong><span>{isPlay ? 'query' : activeCommand?.choices ? activeCommand.option : 'Commands'}</span>{isPlay && autocomplete.searching && <LoaderCircle className={styles.searchSpinner} size={15} />}</div><div id="bread-suggestions" role="listbox" aria-label={isPlay ? 'Matching tracks' : activeCommand?.choices ? `${activeCommand.option} choices` : 'Bread commands'}>{suggestions.map((item, index) => <button type="button" role="option" id={`suggestion-${index}`} aria-selected={suggestion === index} key={item.value} onPointerDown={event => event.preventDefault()} onClick={() => choose(index)}>{item.image ? <img src={item.image} alt="" width={32} height={32} /> : <span className={styles.slashIcon}>/</span>}<span><b>{item.name}{item.option && <em>{item.option}</em>}</b><small>{item.detail}</small></span></button>)}</div>{isPlay && !suggestions.length && <div className={styles.autocompleteStatus} role="status">{autocomplete.error || (autocomplete.searching || matchedQuery !== query && query.length >= 2 ? 'Searching...' : query.length < 2 ? 'Type at least 2 characters.' : 'No results found.')}</div>}</div>}
         <form onSubmit={(event) => { event.preventDefault(); if (showSuggestions && suggestions.length) choose(suggestion); else run(input, selectedTrack || undefined); }} className={styles.commandInput}>
           {activeCommand && <div className={styles.commandToken}><button type="button" title="Change command" onClick={() => fill('/')}>{activeCommand.name}</button><span>{activeCommand.option}</span></div>}
           <input ref={inputRef} role="combobox" aria-label="Try a Bread command" aria-autocomplete="list" aria-expanded={showSuggestions} aria-controls={showSuggestions ? 'bread-suggestions' : undefined} aria-activedescendant={showSuggestions && suggestions.length ? `suggestion-${suggestion}` : undefined} value={activeCommand ? input.slice(activeCommand.name.length + 1) : input} onChange={(event) => { const value = event.target.value; setSelectedTrack(null); setInput(activeCommand && !value.startsWith('/') ? `${activeCommand.name} ${value}` : value); setSuggestion(0); setFocused(true); }} onFocus={() => { if (!selectedTrack) setFocused(true); }} onBlur={() => setFocused(false)} onKeyDown={(event) => {
@@ -200,7 +206,7 @@ export function CommandDemo() {
     <aside className={styles.demoSidebar} aria-label="Demo music library">
       <h3>Queue something good.</h3>
       <div className={styles.demoLibrary}>{demoTracks.map((track) => <button type="button" key={track.title} disabled={Boolean(busy)} onClick={() => run(`/play ${track.artist} - ${track.title}`, track)} aria-label={`Queue ${track.title}`}><img src={asset(`${track.cover}.jpg`)} alt="" width={42} height={42} /><span><b>{track.title}</b><small>{track.artist}</small></span><Plus size={17} /></button>)}</div>
-      <div className={styles.commandChoices}>{commands.filter((command) => ['/play', '/queue', '/volume', '/seek', '/slots'].includes(command.name)).map((command) => <button key={command.name} type="button" onClick={() => fill(command.input)}><code>{command.name}</code><span>{command.detail}</span><ArrowUp size={14} /></button>)}</div>
+      <div className={styles.commandChoices}>{quickCommands.map(name => commands.find(command => command.name === name)!).map((command) => <button key={command.name} type="button" onClick={() => fill(command.input)}><code>{command.name}</code><span>{command.detail}</span><ArrowUp size={14} /></button>)}</div>
     </aside>
   </div></div></>;
 }

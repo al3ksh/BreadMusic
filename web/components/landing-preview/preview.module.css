@@ -142,7 +142,7 @@
 .screenCaption { border-top: 1px solid var(--line); display: flex; align-items: baseline; justify-content: space-between; gap: 32px; padding: 23px 0; }
 .screenCaption h3 { font-size: 18px; flex-shrink: 0; }
 .screenCaption p { font-size: 13px; max-width: 490px; }
-.featureNotes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 64px; margin-top: 62px; }
+.featureNotes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 48px 64px; margin-top: 62px; }
 .featureNotes svg { margin-bottom: 18px; color: var(--lilac); }
 .featureNotes h3 { margin-bottom: 9px; }
 .featureNotes p { font-size: 13px; max-width: 290px; }
@@ -241,6 +241,8 @@
 .privateReply { display: block; font-size: 10px; color: #b5bac1; margin-top: 8px; }
 .gameReply { width: min(100%, 480px); border-radius: 6px; }
 .playAgain { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
+.statsReply { display: block; width: min(100%, 520px); height: auto; border-radius: 6px; }
+.discordSelect { display: block; width: min(100%, 520px); min-height: 40px; margin-top: 8px; padding: 0 12px; color: #dbdee1; background: #1e1f22; border: 1px solid #111214; border-radius: 4px; font: inherit; font-size: 13px; }
 .thinking { display: flex; gap: 12px; align-items: center; font-size: 12px; color: #b5bac1; }
 .thinking img { border-radius: 50%; }
 .typing { display: inline-flex; gap: 3px; margin-left: 7px; }
@@ -540,7 +542,7 @@
   .embedFooter { font-size: 10px; margin-top: 8px; }
   .embedFooter span { display: none; }
   .playerButtons button { height: 44px; }
-  .queuePagination button, .playAgain { min-height: 44px; }
+  .queuePagination button, .playAgain, .discordSelect { min-height: 44px; }
   .composer { padding: 4px 10px 8px; }
   .commandInput { padding: 0 0 0 10px; }
   .commandInput input { font-size: 16px; }

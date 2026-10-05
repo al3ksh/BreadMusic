@@ -12,7 +12,7 @@ export async function generateMetadata({ searchParams }: HomeProps): Promise<Met
   if (params.frame_id && params.instance_id && params.platform) return { title: 'Bread Activity', robots: { index: false, follow: false } };
   const { origin } = landingDemoConfig();
   const title = 'Bread - Music for your Discord';
-  const description = 'A shared player, live lyrics and a queue everyone can add to. Try Bread Activity, slash commands and Arcade.';
+  const description = 'A shared player, live lyrics, radio and autoplay that learns. Try Bread Activity, slash commands and Arcade.';
   return {
     title, description, alternates: { canonical: origin || '/' },
     openGraph: { title, description, type: 'website', url: origin || undefined, images: [{ url: `${origin}/assets/landing-preview/activity.png`, width: 1000, height: 560, alt: 'Bread Activity music player' }] },

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowDown, ArrowUpRight, AudioLines, BookOpenText, Expand, Github, Headphones, LayoutDashboard, ListMusic, Menu, Monitor, Plus, Radio, ShieldCheck, X } from 'lucide-react';
+import { ArrowDown, ArrowUpRight, ChartColumn, BookOpenText, Expand, Github, Headphones, LayoutDashboard, ListMusic, Menu, MicVocal, Monitor, Plus, Radio, ShieldCheck, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import { AddToDiscordModal } from '@/components/landing/AddToDiscordModal';
 import { CommandDemo } from './CommandDemo';
 import { ArcadeCarousel } from './ArcadeCarousel';
@@ -20,9 +20,9 @@ const views = [
 ];
 const faqs = [
   ['Do I need to know the commands?', 'No. Open Activity in your Discord voice channel or use the web dashboard to search, queue and control playback. Slash commands are there when you want them.'],
-  ['What can I play?', 'Search for tracks, paste supported music links or upload an audio file. Bread supports YouTube and SoundCloud playback, with Spotify links resolved to a playable source. Availability depends on the source.'],
+  ['What can I play?', 'Search for tracks, paste supported music links or upload an audio file. Bread supports YouTube and SoundCloud playback, with Spotify links resolved to a playable source, and live radio stations through /radio. Availability depends on the source.'],
   ['Who can control the music?', 'You choose the control policy for your server. DJ roles, Activity permissions, vote skip and volume limits keep control with the right people.'],
-  ['Is this a live connection to my server?', 'No. Search returns real YouTube and SoundCloud metadata, but the player is silent and its queue stays in this browser tab. The preview does not connect to Discord or change any server. Screenshots and Arcade rounds use sample data.'],
+  ['Is this a live connection to my server?', 'No. Search returns real YouTube and SoundCloud metadata, but the player is silent and its queue stays in this browser tab. The preview does not connect to Discord or change any server. Screenshots, stats images and Arcade rounds use sample data.'],
   ['Can I self-host Bread?', 'Yes. Bread is open source under AGPL-3.0. The GitHub repository includes the source code and setup documentation.'],
 ];
 const galleryViews = [heroView, ...views];
@@ -113,7 +113,7 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
         <button type="button" className={styles.heroCaption} onClick={() => openGallery(0, 'hero')}><Headphones size={15} /> Bread Activity <span>Inside your voice channel</span><Expand size={14} /></button>
       </section>
 
-      <div className={styles.sourceBand}><span>Bring your music.</span><div><b>YouTube</b><b>Spotify</b><b>SoundCloud</b><b>Local audio</b></div><span>Keep your people.</span></div>
+      <div className={styles.sourceBand}><span>Bring your music.</span><div><b>YouTube</b><b>Spotify</b><b>SoundCloud</b><b>Radio</b><b>Local audio</b></div><span>Keep your people.</span></div>
 
       <section id="inside-bread" className={`${styles.section} ${styles.productSection}`}>
         <div className={styles.sectionTop}><h2>Activity and dashboard.</h2><p>Your voice channel or your browser.<br />The same music and shared queue.</p></div>
@@ -130,8 +130,11 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
           <div key={selected.id} className={styles.screenCaption}><h3>{selected.title}</h3><p>{selected.description}</p></div>
         </div>
         <div className={styles.featureNotes}>
-          <div><Radio size={20} /><h3>Autoplay with optional AI.</h3><p>Keep listening when the queue ends, with recommendations shaped by the tracks your room adds.</p></div>
-          <div><AudioLines size={20} /><h3>Live lyrics and audio filters.</h3><p>Follow synced lyrics in karaoke view, adjust the volume or change the sound with filters.</p></div>
+          <div><Sparkles size={20} /><h3>Autoplay that learns.</h3><p>Keeps the music going when the queue ends. Like or dislike tracks, reroll the pick and see what plays next.</p></div>
+          <div><Radio size={20} /><h3>Live radio.</h3><p>Tune in to thousands of stations with /radio and save your favourites for later.</p></div>
+          <div><SlidersHorizontal size={20} /><h3>Shape the sound.</h3><p>Presets, an equalizer, speed and pitch in /sound. Save a sound you like and bring it back by name.</p></div>
+          <div><MicVocal size={20} /><h3>Lyrics and karaoke.</h3><p>Follow synced lyrics line by line in the Activity, or sing along in karaoke view.</p></div>
+          <div><ChartColumn size={20} /><h3>Stats as an image.</h3><p>/stats shows top tracks, how songs were requested, busiest hours and Arcade results.</p></div>
           <div><ShieldCheck size={20} /><h3>You choose who controls it.</h3><p>Set DJ roles, vote skip and volume limits separately for each server.</p></div>
         </div>
       </section>
@@ -147,7 +150,7 @@ export function LandingPreview({ preview = false, liveSearch = false }: { previe
         <div className={styles.arcadeCopy}><h2>Bread Arcade</h2><p>Blackjack, slots, roulette and head-to-head RPS. Play with your server&apos;s Bread balance, or without a bet.</p><a href="#playground" className={styles.textLink}>Try /slots <ArrowUpRight size={17} /></a><div className={styles.gameNames}><span>Blackjack</span><span>Slots</span><span>Roulette</span><span>Coinflip</span><span>RPS</span></div></div>
       </section>
 
-      <section className={`${styles.section} ${styles.faq}`} id="questions"><h2>Questions &amp; answers.</h2><div>{faqs.map(([question, answer]) => <details key={question}><summary>{question}<Plus size={18} /></summary><p>{question === 'Is this a live connection to my server?' ? `${liveSearch ? 'Search returns real YouTube and SoundCloud metadata.' : 'The demo uses a small sample catalogue.'} The player is silent and its queue stays in this browser tab. It does not connect to Discord or change any server. Screenshots and Arcade rounds use sample data.` : answer}</p></details>)}</div></section>
+      <section className={`${styles.section} ${styles.faq}`} id="questions"><h2>Questions &amp; answers.</h2><div>{faqs.map(([question, answer]) => <details key={question}><summary>{question}<Plus size={18} /></summary><p>{question === 'Is this a live connection to my server?' ? `${liveSearch ? 'Search returns real YouTube and SoundCloud metadata.' : 'The demo uses a small sample catalogue.'} The player is silent and its queue stays in this browser tab. It does not connect to Discord or change any server. Screenshots, stats images and Arcade rounds use sample data.` : answer}</p></details>)}</div></section>
 
       <section className={styles.closing}><img src="/assets/breadicon.png" alt="" width={64} height={64} loading="lazy" /><h2>Bring Bread to your server.</h2><div><button type="button" className={styles.primary} onClick={() => setModal('invite')}><Plus size={18} />Add to Discord</button><a className={styles.textLink} href="https://github.com/al3ksh/BreadMusic" target="_blank" rel="noreferrer"><Github size={17} />Explore the source <ArrowUpRight size={14} /></a></div></section>
 
