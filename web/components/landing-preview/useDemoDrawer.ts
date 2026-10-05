@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 
-type Panel = 'queue' | 'search' | 'lyrics';
+type Panel = 'queue' | 'search' | 'lyrics' | 'sound';
 
 export function useDemoDrawer() {
   const [panel, setPanel] = useState<Panel | null>(null);

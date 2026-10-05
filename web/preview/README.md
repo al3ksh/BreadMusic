@@ -41,8 +41,10 @@ at a closed local port. Preview routes require `BREAD_LANDING_PREVIEW=1`.
   portal into a same-origin iframe keeps the actual CSS, fonts and
   viewport breakpoints separate from landing styles, with the same shared state.
   The iframe is CSS isolation, not a security boundary; its fixed document and
-  React content do not run provider HTML or scripts. Autoplay and upload remain
-  visible but disabled. Live lyrics and karaoke use
+  React content do not run provider HTML or scripts. Autoplay works on the
+  sample pool (badge, like/dislike, the up-next card and reroll), Add music has
+  a Radio tab with the demo stations and the volume popover opens the Sound
+  panel. Upload stays visible but disabled. Live lyrics and karaoke use
   LRCLIB with the bot's title normalization and LRC parser. Real auth is untouched.
 - Slash autocomplete searches after 450 ms of idle typing, discards stale
   responses, shows real tracks, and tokenizes the command/argument. Choosing a
@@ -113,7 +115,9 @@ node web/preview/carousel-assets.cjs
 ```
 
 `capture.mjs` retains the real Activity/dashboard screenshot capture with mocked
-API/SDK data. Run it from `web` with a local web dev server on port 3180.
+API/SDK data, including the karaoke `lyrics*.png` shots. Run it from `web`
+with a local web dev server on port 3180: once plain, then with
+`--activity-hero-only` (2x hero) and `--activity-mobile-only` (3x phone shots).
 Self-hosted Manrope includes its OFL license. Starter cover art is from album
 metadata: [Not Like Us](https://music.apple.com/pl/album/not-like-us/1781353928?i=1781353929)
 and [BUBBLETEA](https://music.apple.com/pl/album/bubbletea/1633288384?i=1633289330).

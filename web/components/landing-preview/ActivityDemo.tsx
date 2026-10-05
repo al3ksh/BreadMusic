@@ -8,14 +8,28 @@ import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
 import { ActivityHistoryPanel } from '@/components/activity/ActivityHistoryPanel';
 import { ActivityLyricsPanel } from '@/components/activity/ActivityLyricsPanel';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
-import type { HistoryPage, PlayerStatus, QueueTrack } from '@/lib/api';
-import { artwork, type DemoTrack } from './demo';
-import { duration, time, type DemoAction, type DemoState } from './demo-state';
+import { ActivityAutoplayBadge } from '@/components/activity/ActivityAutoplayBadge';
+import { ActivityRadioPanel } from '@/components/activity/ActivityRadioPanel';
+import { ActivitySoundPanel, DEFAULT_SOUND, type SavedSound } from '@/components/activity/ActivitySoundPanel';
+import type { RadioStation } from '@/components/activity/ActivityLibraryPanel';
+import type { HistoryPage, PlayerStatus, QueueTrack, SoundState } from '@/lib/api';
+import { artwork, demoStations, soundPresets, type DemoTrack } from './demo';
+import { autoplayNext, duration, time, type DemoAction, type DemoState } from './demo-state';
 import { usePreviewSearch, type SearchResult } from './usePreviewSearch';
 import { usePreviewLyrics } from './usePreviewLyrics';
 import { useDemoDrawer } from './useDemoDrawer';
 import styles from './preview.module.css';
 
+// Station details in the shape the real radio panel lists them.
+const STATION_DETAILS: Record<string, Pick<RadioStation, 'country' | 'place' | 'tags' | 'codec' | 'bitrate'>> = {
+  lofi: { country: '', place: '', tags: ['lofi', 'chill', 'study'], codec: 'MP3', bitrate: 128 },
+  jazz: { country: 'The United States', place: 'New Orleans', tags: ['jazz', 'soul'], codec: 'AAC', bitrate: 192 },
+  synth: { country: '', place: '', tags: ['synthwave', 'retro'], codec: 'MP3', bitrate: 128 },
+  indie: { country: 'Poland', place: 'Warsaw', tags: ['indie', 'alternative'], codec: 'MP3', bitrate: 320 },
+};
+const radioStations: RadioStation[] = demoStations.map(station => ({ id: station.id, source: 'radio-browser', name: station.name, homepage: '', favicon: station.artwork, ...STATION_DETAILS[station.id] }));
+const searchStations = async (query: string) => { const wanted = query.toLowerCase(); return radioStations.filter(station => !wanted || `${station.name} ${station.tags.join(' ')} ${station.place} ${station.country}`.toLowerCase().includes(wanted)); };
+const presetSound = (preset: string): SoundState => ({ ...DEFAULT_SOUND, preset: preset === 'off' ? null : preset });
 const asQueueTrack = (track: DemoTrack): QueueTrack => ({ title: track.title, author: track.artist, uri: track.uri || `https://www.youtube.com/results?search_query=${encodeURIComponent(`${track.artist} ${track.title}`)}`, duration: duration(track) * 1000, artwork: artwork(track), requester: 'You', seekable: track.seekable !== false, source: track.source || 'youtube' });
 
 export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: DemoState; dispatch: Dispatch<DemoAction>; reset: () => void; lyricsRequest?: number }) {
@@ -42,7 +56,35 @@ export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: De
   const scrollFrame = useRef<number | null>(null);
   const scrollSpeed = useRef(0);
   const stopScroll = useCallback(() => { if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current); scrollFrame.current = null; scrollSpeed.current = 0; }, []);
-  const togglePanel = (next: 'queue' | 'search' | 'lyrics') => { setVolumeOpen(false); stopScroll(); toggleDrawer(next); };
+  const togglePanel = (next: 'queue' | 'search' | 'lyrics' | 'sound') => { setVolumeOpen(false); stopScroll(); toggleDrawer(next); };
+
+  const [addView, setAddView] = useState<'music' | 'radio'>('music');
+  const [sound, setSound] = useState<SoundState>(() => presetSound(state.preset));
+  // A /sound preset picked in the slash demo replaces whatever was dialled in here.
+  useEffect(() => { setSound(current => (current.preset ?? 'off') === state.preset ? current : presetSound(state.preset)); }, [state.preset]);
+  const savedStations = useRef(state.savedStations);
+  useEffect(() => { savedStations.current = state.savedStations; }, [state.savedStations]);
+  const savedSounds = useRef<SavedSound[]>([]);
+  // The landing demo has no account: saves go to a fixed playlist, stations live in the shared demo state and sounds stay in this tab.
+  const libraryRequest = useCallback(<T,>(path: string, body?: Record<string, unknown>): Promise<T> => {
+    const stations = (ids: string[]) => radioStations.filter(station => ids.includes(station.id));
+    if (path === '') return Promise.resolve({ liked: [], playlists: [{ id: 'demo', name: 'Demo mix', trackCount: 3, duration: 600_000 }], stations: stations(savedStations.current), sounds: savedSounds.current } as T);
+    if (path === '/stations/add' || path === '/stations/remove') {
+      const id = String(body?.stationId ?? body?.id);
+      const next = savedStations.current.includes(id) ? savedStations.current.filter(entry => entry !== id) : [...savedStations.current, id];
+      savedStations.current = next;
+      dispatch({ type: 'saveStation', id });
+      return Promise.resolve({ stations: stations(next) } as T);
+    }
+    if (path === '/sounds/save') {
+      const name = String(body?.name), replaced = savedSounds.current.some(entry => entry.name === name);
+      savedSounds.current = [...savedSounds.current.filter(entry => entry.name !== name), { id: name, name, sound: body?.sound as SoundState, createdAt: Date.now() }];
+      return Promise.resolve({ sounds: savedSounds.current, replaced } as T);
+    }
+    if (path === '/sounds/remove') { savedSounds.current = savedSounds.current.filter(entry => entry.id !== body?.id); return Promise.resolve({ sounds: savedSounds.current } as T); }
+    return Promise.resolve({ title: 'this track', added: 1 } as T);
+  }, [dispatch]);
+  const notify = useCallback((message: string) => setNotice(message), []);
 
   const [sync, setSync] = useState(false);
   const [karaoke, setKaraoke] = useState(false);
@@ -77,24 +119,33 @@ export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: De
   const canSeek = hasTrack && state.current?.seekable !== false && currentDuration > 0;
   const percent = currentDuration ? Math.min(100, position / currentDuration * 100) : 0;
   const command = (value: string) => dispatch({ type: 'command', value, random: Math.random() });
+  const live = Boolean(state.current?.live);
+  const upNext = state.autoplay && hasTrack && !live && !state.queue.length ? autoplayNext(state) : null;
   const control = (action: string) => {
-    if (action === 'autoplay') return;
-    if (action === 'toggle') command(state.paused ? '/resume' : '/pause');
+    if (action === 'autoplay') { command('/autoplay toggle'); setNotice(state.autoplay ? 'Autoplay off.' : 'Autoplay on. Bread keeps the music going when the queue ends.'); }
+    else if (action === 'autoplay_like') { command('/autoplay like'); setNotice(`Liked ${state.current?.title}. Autoplay will pick more like it.`); }
+    else if (action === 'autoplay_dislike') { command('/autoplay dislike'); setNotice(`Disliked ${state.current?.title}. Autoplay will avoid it.`); }
+    else if (action === 'autoplay_reroll') command('/autoplay next');
+    else if (action === 'toggle') command(state.paused ? '/resume' : '/pause');
     else if (action === 'loop') command(`/loop ${state.loop === 'off' ? 'track' : state.loop === 'track' ? 'queue' : 'off'}`);
     else command(`/${action}`);
   };
-  const status: PlayerStatus = { connected: hasTrack, playing: hasTrack && !state.paused, paused: state.paused, voiceChannelId: 'preview', voiceChannelName: 'listening room', currentTrack: state.current ? { ...asQueueTrack(state.current), position: state.position * 1000, seekable: state.current.seekable !== false } : null, queueLength: state.queue.length, repeatMode: state.loop, volume: state.volume, filters: null, autoplay: false, voteSkip: null, sessionHistory: state.previous.map(asQueueTrack) };
+  const status: PlayerStatus = { connected: hasTrack, playing: hasTrack && !state.paused, paused: state.paused, voiceChannelId: 'preview', voiceChannelName: 'listening room', currentTrack: state.current ? { ...asQueueTrack(state.current), position: state.position * 1000, seekable: state.current.seekable !== false } : null, queueLength: state.queue.length, repeatMode: state.loop, volume: state.volume, filters: null, autoplay: state.autoplay, autoplayNext: upNext && { title: upNext.title, author: upNext.artist, uri: asQueueTrack(upNext).uri, duration: duration(upNext) * 1000, artwork: artwork(upNext), source: 'youtube' }, autoplayRateable: hasTrack && !live, autoplayFeedback: state.current && state.liked.includes(state.current.title) ? 'like' : null, sound, voteSkip: null, sessionHistory: state.previous.map(asQueueTrack) };
+  const soundCustomized = Boolean(sound.preset || sound.speed !== 1 || sound.pitch !== 1 || sound.eq.some(gain => gain !== 0));
+  const changeSound = async (next: SoundState) => { setSound(next); const preset = next.preset ?? 'off'; if (soundPresets.some(entry => entry.id === preset) && preset !== state.preset) dispatch({ type: 'preset', preset }); return true; };
+  const playStation = async (station: RadioStation) => { command(`/radio ${station.id}`); setNotice(`Tuned in to ${station.name}.`); return true; };
+  const badgeProps = { status, hasTrack, actionBusy: null, controlFeedback: null, runControlAction: control };
   const commitSeek = (value: number) => { if (canSeek) dispatch({ type: 'seek', position: value }); setSeekDraft(null); };
   const playResult = (tracks: DemoTrack[], mode: 'now' | 'queue' = 'queue') => {
     if (state.queue.length + tracks.length > 50) { setNotice('Preview queue is full (50 tracks).'); return; }
     dispatch({ type: 'resolved', tracks, mode }); setNotice(mode === 'now' || !hasTrack ? 'Playback started.' : `${tracks.length === 1 ? tracks[0].title : `${tracks.length} tracks`} added to queue.`);
   };
   const submitSearch = async () => { const value = query.trim(); if (!value || searching) return; setResult({ tracks: [], playlist: null }); setCompleted(''); const found = await search(value); if (found) { setResult(found); setCompleted(value); } };
-  const history = useMemo(() => [...state.previous].reverse().map((track, index) => ({ id: String(index), playedAt: Date.now() - (index + 1) * 60000, autoplay: false, track: { ...asQueueTrack(track), artwork: artwork(track), source: track.source || 'youtube' }, requester: { userId: 'preview', username: 'You', displayName: 'You', avatar: null } })), [state.previous]);
+  const history = useMemo(() => [...state.previous].reverse().map((track, index) => ({ id: String(index), playedAt: Date.now() - (index + 1) * 60000, autoplay: Boolean(track.autoplay), track: { ...asQueueTrack(track), artwork: artwork(track), source: track.source || 'youtube' }, requester: { userId: 'preview', username: 'You', displayName: 'You', avatar: null } })), [state.previous]);
   const fetchHistory = useCallback(async (page: number): Promise<HistoryPage> => ({ items: history.slice(page * 20, page * 20 + 20), total: history.length, page, limit: 20, totalPages: Math.max(1, Math.ceil(history.length / 20)) }), [history]);
   const replay = (uri: string, mode: 'now' | 'queue') => { const track = state.previous.find(item => asQueueTrack(item).uri === uri); if (track) playResult([track], mode); };
   const loopLabel = state.loop === 'track' ? 'Loop track' : 'Loop queue';
-  const renderControls = () => <ActivityPlayerControls iconOnly autoplayDisabled status={status} queueTotal={state.queue.length} canDj hasTrack={hasTrack} actionBusy={null} controlFeedback={null} loopActive={state.loop !== 'off'} runControlAction={control} playerAction={control} volumeOpen={volumeOpen} setVolumeOpen={setVolumeOpen} volumeControlRef={volumeControlRef} displayedVolume={volumeDraft ?? state.volume} volumeLimit={100} volumeCommitTimerRef={volumeCommitTimerRef} volumeDraggingRef={volumeDraggingRef} volumePendingRef={volumePendingRef} volumeDraft={volumeDraft} setVolumeDraft={setVolumeDraft} commitVolume={value => { command(`/volume ${value}`); volumeDraggingRef.current = false; volumePendingRef.current = null; setVolumeDraft(null); }} />;
+  const renderControls = () => <ActivityPlayerControls iconOnly status={status} queueTotal={state.queue.length} canDj hasTrack={hasTrack} actionBusy={null} controlFeedback={null} loopActive={state.loop !== 'off'} runControlAction={control} playerAction={control} volumeOpen={volumeOpen} setVolumeOpen={setVolumeOpen} volumeControlRef={volumeControlRef} displayedVolume={volumeDraft ?? state.volume} volumeLimit={100} volumeCommitTimerRef={volumeCommitTimerRef} volumeDraggingRef={volumeDraggingRef} volumePendingRef={volumePendingRef} volumeDraft={volumeDraft} setVolumeDraft={setVolumeDraft} commitVolume={value => { command(`/volume ${value}`); volumeDraggingRef.current = false; volumePendingRef.current = null; setVolumeDraft(null); }} soundOpen={panel === 'sound'} soundActive={soundCustomized} onToggleSound={() => togglePanel('sound')} />;
   const renderSeek = (variant = 'player') => !hasTrack ? null : <div className={`activity-seek-group activity-seek-group-${variant}`}>
     <div className="activity-seek" onPointerMove={event => {
       if (!canSeek) return; const rect = event.currentTarget.getBoundingClientRect();
@@ -117,27 +168,25 @@ export function ActivityDemo({ state, dispatch, lyricsRequest = 0 }: { state: De
         <div className="activity-karaoke-lines" aria-live="polite" aria-atomic="true">{lyricsLoading ? <div className="activity-karaoke-empty"><ActivitySpinner /> Loading lyrics</div> : lyricsError ? <div className="activity-karaoke-empty">{lyricsError}</div> : <><p key={`previous-${activeLyricIndex}`} className="is-previous">{lines[activeLyricIndex - 1]?.text || ''}</p><strong key={`current-${activeLyricIndex}`} className="is-current">{lines[activeLyricIndex]?.text || 'Instrumental'}</strong><p key={`next-${activeLyricIndex}`} className="is-next">{lines[activeLyricIndex + 1]?.text || ''}</p></>}</div>
         <div className="activity-karaoke-player">{renderSeek('karaoke')}{renderControls()}</div>
       </section> : <>
-        <section className={`activity-compact-player ${state.paused ? 'is-paused' : 'is-playing'}`}><div className="activity-compact-track"><div className="activity-compact-art"><ActivityArtwork src={status.currentTrack?.artwork} />{hasTrack && <span className={`activity-playing-indicator ${state.paused ? 'paused' : ''}`} />}</div><div className="activity-compact-copy"><div className="activity-compact-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{state.paused ? 'Paused' : 'Playing'}</span></div><h1>{titleLink ? <a href={titleLink} target="_blank" rel="noreferrer">{trackTitle}</a> : trackTitle}</h1><p>{status.currentTrack?.author || 'Bread'}</p></div></div><div className="activity-compact-progress" aria-label={`${time(position)} of ${time(currentDuration)}`}><span><i style={{ transform: `scaleX(${percent / 100})` }} /></span></div><div className="activity-compact-badges" aria-label="Playback status"><span className={hasTrack && state.paused ? 'paused' : ''}>{hasTrack ? state.paused ? 'Paused' : 'Now playing' : 'Player offline'}</span><span>Autoplay off</span><span className={state.loop !== 'off' ? 'active' : ''}>{state.loop === 'off' ? 'Loop off' : loopLabel}</span></div></section>
+        <section className={`activity-compact-player ${state.paused ? 'is-paused' : 'is-playing'}`}><div className="activity-compact-track"><div className="activity-compact-art"><ActivityArtwork src={status.currentTrack?.artwork} />{hasTrack && <span className={`activity-playing-indicator ${state.paused ? 'paused' : ''}`} />}</div><div className="activity-compact-copy"><div className="activity-compact-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{state.paused ? 'Paused' : 'Playing'}</span></div><h1>{titleLink ? <a href={titleLink} target="_blank" rel="noreferrer">{trackTitle}</a> : trackTitle}</h1><p>{status.currentTrack?.author || 'Bread'}</p></div></div><div className="activity-compact-progress" aria-label={`${time(position)} of ${time(currentDuration)}`}><span><i style={{ transform: `scaleX(${percent / 100})` }} /></span></div><div className="activity-compact-badges" aria-label="Playback status"><span className={hasTrack && state.paused ? 'paused' : ''}>{hasTrack ? state.paused ? 'Paused' : 'Now playing' : 'Player offline'}</span><ActivityAutoplayBadge label={`Autoplay ${state.autoplay ? 'on' : 'off'}`} className={state.autoplay ? 'active' : ''} {...badgeProps} /><span className={state.loop !== 'off' ? 'active' : ''}>{state.loop === 'off' ? 'Loop off' : loopLabel}</span></div></section>
         <section className={`activity-player-stage ${state.paused ? 'is-paused' : 'is-playing'}`}>
           <div className="activity-track-art"><ActivityArtwork src={status.currentTrack?.artwork} large />{hasTrack && <span className={`activity-playing-indicator ${state.paused ? 'paused' : ''}`} />}</div>
-          <div className="activity-player-main"><div className="activity-track-copy"><div className="activity-mini-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{state.paused ? 'Paused' : 'Playing'}</span></div><div className="activity-playback-state"><span className={hasTrack && state.paused ? 'paused' : ''}>{hasTrack ? state.paused ? 'Paused' : 'Now playing' : 'Player offline'}</span>{state.loop !== 'off' && <span className="loop">{loopLabel}</span>}</div><h1>{titleLink ? <a href={titleLink} target="_blank" rel="noreferrer">{trackTitle}</a> : trackTitle}</h1><p>{status.currentTrack?.author || 'Open Add music to start playback.'}</p>{hasTrack && <small className="activity-track-requester">Requested by <strong>You</strong></small>}{hasTrack && <div className="activity-mini-progress" aria-hidden="true"><span><i style={{ transform: `scaleX(${percent / 100})` }} /></span><time>{time(position)} / {time(currentDuration)}</time></div>}{renderSeek()}</div>{hasTrack && renderControls()}</div>
+          <div className="activity-player-main"><div className="activity-track-copy"><div className="activity-mini-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{state.paused ? 'Paused' : 'Playing'}</span></div><div className="activity-playback-state"><span className={hasTrack && state.paused ? 'paused' : ''}>{hasTrack ? state.paused ? 'Paused' : 'Now playing' : 'Player offline'}</span>{state.autoplay && <ActivityAutoplayBadge label="Autoplay" {...badgeProps} />}{state.loop !== 'off' && <span className="loop">{loopLabel}</span>}</div><h1>{titleLink ? <a href={titleLink} target="_blank" rel="noreferrer">{trackTitle}</a> : trackTitle}</h1><p>{status.currentTrack?.author || 'Open Add music to start playback.'}</p>{hasTrack && <small className="activity-track-requester">Requested by <strong>You</strong></small>}{hasTrack && <div className="activity-mini-progress" aria-hidden="true"><span><i style={{ transform: `scaleX(${percent / 100})` }} /></span><time>{time(position)} / {time(currentDuration)}</time></div>}{renderSeek()}</div>{hasTrack && renderControls()}</div>
         </section>
       </>}
-      <ActivityPanelNav activePanel={panel} queueTotal={state.queue.length} canQueue hasTrack={hasTrack} togglePanel={togglePanel} />
+      <ActivityPanelNav<'queue' | 'search' | 'lyrics'> activePanel={panel} queueTotal={state.queue.length} canQueue hasTrack={hasTrack} togglePanel={togglePanel} />
       {panel && <><button type="button" className={`activity-drawer-backdrop ${closing ? 'is-closing' : ''}`} onClick={closePanel} aria-label="Close panel" /><aside ref={drawerRef} className={`activity-drawer ${closing ? 'is-closing' : ''}`} aria-label={`${panel} panel`}>
-        <div className="activity-drawer-header" {...gestureHandlers}><div><strong>{panel === 'queue' ? 'Queue' : panel === 'search' ? 'Add music' : 'Live lyrics'}</strong><span>{panel === 'queue' ? `${state.queue.length} tracks` : panel === 'search' ? 'Search or upload audio' : trackTitle}</span></div><button type="button" onClick={closePanel} aria-label="Close panel"><X size={18} /></button></div>
+        <div className="activity-drawer-header" {...gestureHandlers}><div><strong>{panel === 'queue' ? 'Queue' : panel === 'search' ? 'Add music' : panel === 'sound' ? 'Sound' : 'Live lyrics'}</strong><span>{panel === 'queue' ? `${state.queue.length} tracks` : panel === 'search' ? addView === 'radio' ? 'Live stations from around the world' : 'Search or upload audio' : panel === 'sound' ? 'Presets, EQ, speed and pitch' : trackTitle}</span></div><button type="button" onClick={closePanel} aria-label="Close panel"><X size={18} /></button></div>
         <div className="activity-drawer-body" ref={scrollRef} onDragOver={event => { if (dragIndex === null) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); scrollSpeed.current = event.clientY < bounds.top + 55 ? -9 : event.clientY > bounds.bottom - 55 ? 9 : 0; if (scrollFrame.current === null) { const step = () => { if (scrollRef.current) scrollRef.current.scrollTop += scrollSpeed.current; scrollFrame.current = requestAnimationFrame(step); }; scrollFrame.current = requestAnimationFrame(step); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) stopScroll(); }}>
-          {panel === 'queue' && <><div className="activity-queue-switch" role="tablist" aria-label="Queue panel view">{(['queue', 'history'] as const).map(view => <button type="button" key={view} role="tab" aria-selected={queueView === view} className={queueView === view ? 'active' : ''} onClick={() => setQueueView(view)}>{view === 'queue' ? 'Queue' : 'History'}</button>)}</div>{queueView === 'history' ? <ActivityHistoryPanel canDj actionBusy={null} fetchHistoryPage={fetchHistory} onRequeue={uri => replay(uri, 'queue')} onPlayNow={uri => replay(uri, 'now')} canQueue libraryRequest={demoLibraryRequest} onLibraryChange={() => undefined} notify={() => undefined} /> : <ActivityQueuePanel queue={{ tracks: state.queue.slice(0, loaded).map(asQueueTrack), total: state.queue.length }} canDj queueRestore={null} dragIndex={dragIndex} dropIndex={dropIndex} queueLoadingMore={false} setDragIndex={setDragIndex} setDropIndex={setDropIndex} stopQueueAutoScroll={stopScroll} handleQueueDrop={index => { if (dragIndex !== null) dispatch({ type: 'move', from: dragIndex, to: index }); setDragIndex(null); setDropIndex(null); stopScroll(); }} handleQueueRemove={index => dispatch({ type: 'remove', index })} loadMoreQueue={() => setLoaded(loaded + 20)} />}</>}
-          {panel === 'search' && <ActivitySearchPanel canDj canQueue uploadDisabled hasTrack={hasTrack} actionBusy={null} searchQuery={query} searching={searching} searchPlaylist={result.playlist ? { key: completed, name: result.playlist.name, trackCount: result.tracks.length, totalDuration: result.tracks.reduce((total, track) => total + duration(track) * 1000, 0), artwork: result.tracks[0] ? artwork(result.tracks[0]) : null } : null} searchResults={result.tracks.map(asQueueTrack)} searchCompletedQuery={completed} uploadFile={null} uploading={false} onQueryChange={value => { cancel(); setQuery(value); setCompleted(''); setResult({ tracks: [], playlist: null }); }} submitSearch={submitSearch} handleUploadSelection={() => {}} handleUpload={() => {}} addSearchPlaylist={() => playResult(result.tracks)} playSearchResult={(track, mode) => { const found = result.tracks.find(item => asQueueTrack(item).uri === track.uri); if (found) playResult([found], mode); }} />}
+          {panel === 'queue' && <><div className="activity-queue-switch" role="tablist" aria-label="Queue panel view">{(['queue', 'history'] as const).map(view => <button type="button" key={view} role="tab" aria-selected={queueView === view} className={queueView === view ? 'active' : ''} onClick={() => setQueueView(view)}>{view === 'queue' ? 'Queue' : 'History'}</button>)}</div>{queueView === 'history' ? <ActivityHistoryPanel canDj actionBusy={null} fetchHistoryPage={fetchHistory} onRequeue={uri => replay(uri, 'queue')} onPlayNow={uri => replay(uri, 'now')} canQueue libraryRequest={libraryRequest} onLibraryChange={() => undefined} notify={() => undefined} /> : <ActivityQueuePanel queue={{ tracks: state.queue.slice(0, loaded).map(asQueueTrack), total: state.queue.length }} canDj queueRestore={null} dragIndex={dragIndex} dropIndex={dropIndex} queueLoadingMore={false} setDragIndex={setDragIndex} setDropIndex={setDropIndex} stopQueueAutoScroll={stopScroll} handleQueueDrop={index => { if (dragIndex !== null) dispatch({ type: 'move', from: dragIndex, to: index }); setDragIndex(null); setDropIndex(null); stopScroll(); }} handleQueueRemove={index => dispatch({ type: 'remove', index })} loadMoreQueue={() => setLoaded(loaded + 20)} autoplayNext={status.autoplayNext ?? null} rerollBusy={false} onReroll={hasTrack ? () => control('autoplay_reroll') : undefined} />}</>}
+          {panel === 'search' && <div className="activity-queue-switch" role="tablist" aria-label="Add music view">{(['music', 'radio'] as const).map(view => <button type="button" key={view} role="tab" aria-selected={addView === view} className={addView === view ? 'active' : ''} onClick={() => setAddView(view)}>{view === 'music' ? 'Music' : 'Radio'}</button>)}</div>}
+          {panel === 'search' && addView === 'radio' && <ActivityRadioPanel canQueue refreshKey={0} searchStations={searchStations} libraryRequest={libraryRequest} onPlay={playStation} onLibraryChange={() => undefined} notify={notify} />}
+          {panel === 'search' && addView === 'music' && <ActivitySearchPanel canDj canQueue uploadDisabled hasTrack={hasTrack} actionBusy={null} searchQuery={query} searching={searching} searchPlaylist={result.playlist ? { key: completed, name: result.playlist.name, trackCount: result.tracks.length, totalDuration: result.tracks.reduce((total, track) => total + duration(track) * 1000, 0), artwork: result.tracks[0] ? artwork(result.tracks[0]) : null } : null} searchResults={result.tracks.map(asQueueTrack)} searchCompletedQuery={completed} uploadFile={null} uploading={false} onQueryChange={value => { cancel(); setQuery(value); setCompleted(''); setResult({ tracks: [], playlist: null }); }} submitSearch={submitSearch} handleUploadSelection={() => {}} handleUpload={() => {}} addSearchPlaylist={() => playResult(result.tracks)} playSearchResult={(track, mode) => { const found = result.tracks.find(item => asQueueTrack(item).uri === track.uri); if (found) playResult([found], mode); }} />}
           {panel === 'lyrics' && <ActivityLyricsPanel lyricsSyncEnabled={sync} karaokeEnabled={karaoke} lyricsLoading={lyricsLoading} syncedLyrics={lines} lyricsError={lyricsError} plainLyrics={lyrics?.instrumental ? 'Instrumental' : lyrics?.plainLyrics} activeLyricIndex={activeLyricIndex} lyricsListRef={lyricsListRef} activeLyricRef={activeLyricRef} onToggleSync={() => setSync(!sync)} onToggleKaraoke={() => { setKaraoke(!karaoke); setSync(!karaoke); closePanel(); }} loadLyrics={loadLyrics} />}
+          {panel === 'sound' && <ActivitySoundPanel sound={sound} canEdit onChange={changeSound} libraryRequest={libraryRequest} notify={notify} />}
         </div>
       </aside></>}
     </div>
   </main>;
 }
 
-// The landing demo has no account, so library saves resolve against a fixed playlist.
-function demoLibraryRequest<T>(path: string): Promise<T> {
-  if (path === '') return Promise.resolve({ liked: [], playlists: [{ id: 'demo', name: 'Demo mix', trackCount: 3, duration: 600_000 }] } as T);
-  return Promise.resolve({ title: 'this track', added: 1 } as T);
-}

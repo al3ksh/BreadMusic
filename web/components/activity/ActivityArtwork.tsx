@@ -4,7 +4,8 @@ import { memo, useEffect, useState } from 'react';
 import { Music2 } from 'lucide-react';
 
 function activityArtworkSrc(value: string | null | undefined) {
-  if (!value || value.startsWith('/')) return value || '';
+  // Local paths and inline images need no proxy; remote artwork goes through it.
+  if (!value || value.startsWith('/') || value.startsWith('data:image/')) return value || '';
   return `/api/activity/artwork?url=${encodeURIComponent(value)}`;
 }
 

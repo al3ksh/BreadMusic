@@ -66,6 +66,8 @@ test('sample queue and native Activity keep working when live search is unavaila
   const api: string[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/')) api.push(request.url()); });
   await page.goto('/');
+  // Smooth page scrolling keeps drawer controls inside the iframe moving while Playwright scrolls them into view.
+  await page.addStyleTag({ content: 'html { scroll-behavior: auto !important; }' });
   await page.getByRole('button', { name: 'Queue BUBBLETEA', exact: true }).click();
   await expect(page.getByRole('log')).toContainText('BUBBLETEA');
   await page.getByRole('tablist', { name: 'Playground mode' }).getByRole('tab', { name: 'Activity', exact: true }).click();
@@ -73,9 +75,21 @@ test('sample queue and native Activity keep working when live search is unavaila
   await expect(activity.getByRole('button', { name: 'Pause', exact: true })).toBeEnabled();
   await activity.getByRole('button', { name: 'Pause', exact: true }).click();
   await expect(activity.getByRole('button', { name: 'Resume', exact: true })).toBeEnabled();
-  await expect(activity.getByRole('button', { name: 'Autoplay off', exact: true })).toBeDisabled();
+  await activity.getByRole('button', { name: 'Autoplay off', exact: true }).click();
+  await expect(activity.getByRole('button', { name: 'Autoplay on', exact: true })).toBeVisible();
   await activity.getByRole('button', { name: /^Queue/ }).click();
   await expect(activity.getByRole('complementary', { name: 'queue panel' })).toContainText('BUBBLETEA');
+  await activity.getByRole('button', { name: /^Add music/ }).click();
+  // Playwright only scrolls inside the iframe, so bring the whole preview into the page viewport first.
+  await page.locator('iframe[title="Bread Activity preview"]').evaluate(frame => frame.scrollIntoView({ block: 'center' }));
+  await activity.getByRole('tablist', { name: 'Add music view' }).getByRole('tab', { name: 'Radio' }).click();
+  await activity.getByRole('button', { name: 'Play Midnight Jazz', exact: true }).click();
+  await expect(activity.locator('.activity-player-stage h1')).toHaveText('Midnight Jazz');
+  await page.keyboard.press('Escape');
+  await expect(activity.getByRole('complementary')).toHaveCount(0);
+  await activity.getByRole('button', { name: /^Volume \d+%/ }).click();
+  await activity.getByRole('button', { name: 'Sound', exact: true }).click();
+  await expect(activity.getByRole('complementary', { name: 'sound panel' })).toContainText('Presets, EQ, speed and pitch');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
   expect(api).toEqual([]);
 });

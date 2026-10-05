@@ -41,7 +41,11 @@ const tracks = songs.map(([id, , title, author, duration], index) => ({
   source: 'youtube', seekable: true, isStream: false, requester: index ? 'mika' : 'alex',
 }));
 const status = { connected: true, playing: true, paused: false, voiceChannelId: 'voice-1', voiceChannelName: 'listening room',
-  currentTrack: tracks[0], queueLength: 2, repeatMode: 'off', volume: 60, filters: null, autoplay: true, voteSkip: null, sessionHistory: [], };
+  currentTrack: tracks[0], queueLength: 2, repeatMode: 'off', volume: 60, filters: null, autoplay: true, autoplayRateable: true, autoplayFeedback: 'like', autoplayNext: null,
+  sound: { preset: 'bassboost', eq: [4, 3, 1, 0, 0, 0], speed: 1, pitch: 1 }, voteSkip: null, sessionHistory: [], };
+// Made-up lines timed around the sample position so karaoke has something to follow.
+const syncedLyrics = ['[01:12.00] Turn the room into a chorus', '[01:20.00] Bread keeps everyone in sync', '[01:29.00] Let the next track find us', '[01:37.00] Pass the aux around the circle', '[01:45.00] Every voice gets a line'].join('\n');
+const lyrics = { id: 1, title: 'Instant Crush', artist: 'Daft Punk', album: null, duration: 337, instrumental: false, plainLyrics: syncedLyrics.replace(/\[[^\]]+\] /g, ''), syncedLyrics };
 const queue = { current: tracks[0], tracks: tracks.slice(1), total: 2, page: 0, totalPages: 1, revision: 'demo' };
 const guildId = '123456789012345678';
 const browser = await chromium.launch();
@@ -83,6 +87,7 @@ try {
     if (p.endsWith('/health')) return send({ api: { ok: true }, discord: { ok: true, ping: 26 }, lavalink: { ok: true }, player: { exists: true, connected: true } });
     if (p.endsWith('/roles')) return send([{ id: 'role-dj', name: 'DJ', color: '#b7a9eb' }, { id: 'role-mod', name: 'Moderator', color: '#61d59b' }]);
     if (p.endsWith('/channels')) return send([]);
+    if (p.endsWith('/lyrics')) return send(lyrics);
     if (p.endsWith('/player/filters')) return send({ presets: [] });
     return send({ success: true });
   });
@@ -126,6 +131,16 @@ try {
   await page.setViewportSize({ width: 360, height: 260 });
   await page.waitForTimeout(400);
   await activity.locator('.activity-compact-player').screenshot({ path: path.join(assets, 'activity-compact.png') });
+  await page.setViewportSize({ width: 1000, height: 560 });
+  await page.waitForTimeout(400);
+  await activity.getByRole('button', { name: 'Lyrics', exact: true }).click();
+  await activity.getByRole('button', { name: 'Karaoke', exact: true }).click();
+  await activity.getByText('Bread keeps everyone in sync').first().waitFor();
+  await page.waitForTimeout(800);
+  if (!activityMobileOnly) await page.screenshot({ path: path.join(assets, 'lyrics.png') });
+  await page.setViewportSize({ width: 360, height: 600 });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: path.join(assets, 'lyrics-phone.png') });
   console.log('Captured actual Bread UI with illustrative data. No backend or Discord connection.');
   }
   }
