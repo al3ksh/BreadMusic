@@ -97,6 +97,8 @@ test('Activity demo drawers reverse interrupted exits and preserve touch button 
   await expect.poll(() => drawer.evaluate(el => el.getAnimations().some(a => a.playState === 'running'))).toBe(false);
   await expect(drawer).toBeVisible();
   if (isMobile) {
+    // Touch input uses page coordinates, so the whole preview has to be inside the page viewport.
+    await page.locator('iframe[title="Bread Activity preview"]').evaluate(element => element.scrollIntoView({ block: 'center' }));
     const header = drawer.locator('.activity-drawer-header');
     await swipe(header, 0, 35, true);
     await expect(drawer).toBeVisible();

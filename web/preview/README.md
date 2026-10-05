@@ -36,16 +36,15 @@ at a closed local port. Preview routes require `BREAD_LANDING_PREVIEW=1`.
 - Slash commands and Activity share a browser-tab-local reducer: current track,
   queue, previous tracks, pause, seek, volume and loop. Switching tabs retains
   the session. Refresh/reset restores illustrative starter tracks. No audio.
-- Activity reuses the existing player controls, navigation, history, queue,
-  search, lyrics and artwork components in the native Activity markup. A React
-  portal into a same-origin iframe keeps the actual CSS, fonts and
-  viewport breakpoints separate from landing styles, with the same shared state.
-  The iframe is CSS isolation, not a security boundary; its fixed document and
-  React content do not run provider HTML or scripts. Autoplay works on the
-  sample pool (badge, like/dislike, the up-next card and reroll), Add music has
-  a Radio tab with the demo stations and the volume popover opens the Sound
-  panel. Upload stays visible but disabled. Live lyrics and karaoke use
-  LRCLIB with the bot's title normalization and LRC parser. Real auth is untouched.
+- The Activity tab is the real Activity: the same `ActivityApp` the Discord
+  Activity renders, loaded in an iframe at `/activity/demo` with an in-browser
+  fake backend instead of the Discord SDK and `/api`. Library, karaoke, the
+  view-transition morph, drawers, autoplay, Radio and the Sound panel are the
+  production components, not copies. The backend answers Activity requests from
+  the shared reducer, so slash commands and the Activity stay in sync (`/lyrics`
+  opens the lyrics panel). Search and lyrics go through `/demo/api`; nothing is
+  sent to `/api` or Discord, and upload stays disabled. The page is noindex,
+  and real Activity auth is untouched.
 - Slash autocomplete searches after 450 ms of idle typing, discards stale
   responses, shows real tracks, and tokenizes the command/argument. Choosing a
   result fills the argument; Enter submits. Selected results are reused without

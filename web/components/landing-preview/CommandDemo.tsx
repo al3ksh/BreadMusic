@@ -6,8 +6,7 @@ import { artwork, asset, commands, demoTracks, quickCommands, soundPresets, stat
 import { autoplayNext, demoReducer, initialState, queueEmbed, soundEmbed, trackEmbed, type DemoAction, type DemoState, type Embed, type Message, type Playback } from './demo-state';
 import contract from './bot-contract.json';
 import styles from './preview.module.css';
-import { ActivityDemo } from './ActivityDemo';
-import { ActivityFrame } from './ActivityFrame';
+import type { DemoHost } from './demo-backend';
 import { usePreviewSearch } from './usePreviewSearch';
 
 function Text({ value }: { value: string }) {
@@ -102,6 +101,29 @@ export function CommandDemo() {
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const scrollTo = useRef<'latest' | 'player'>('latest');
+  // The Activity iframe runs the real Activity against this state through window.__BREAD_ACTIVITY_DEMO_HOST__.
+  const stateRef = useRef(state);
+  const lyricsRef = useRef(0);
+  const epochRef = useRef(0);
+  const listeners = useRef(new Set<() => void>());
+  // The iframe only mounts once the host exists, otherwise it could start on its own local state.
+  const [hostReady, setHostReady] = useState(false);
+  useEffect(() => {
+    const host: DemoHost = {
+      getState: () => stateRef.current,
+      dispatch: action => { stateRef.current = demoReducer(stateRef.current, action); dispatch(action); },
+      subscribe: listener => { listeners.current.add(listener); return () => { listeners.current.delete(listener); }; },
+      lyricsRequest: () => lyricsRef.current,
+      epoch: () => epochRef.current,
+    };
+    window.__BREAD_ACTIVITY_DEMO_HOST__ = host;
+    setHostReady(true);
+    return () => { if (window.__BREAD_ACTIVITY_DEMO_HOST__ === host) delete window.__BREAD_ACTIVITY_DEMO_HOST__; };
+  }, []);
+  useEffect(() => {
+    stateRef.current = state; lyricsRef.current = lyricsRequest;
+    listeners.current.forEach(listener => listener());
+  }, [state, lyricsRequest]);
   const isPlay = /^\/play\s/i.test(input);
   const query = input.replace(/^\/play\s+(query:\s*)?/i, '').trim();
   const activeCommand = commands.find(command => command.option && input.startsWith(`${command.name} `));
@@ -155,7 +177,7 @@ export function CommandDemo() {
     cancel();
     autocomplete.cancel(); setSelectedTrack(null);
     if (timer.current) clearTimeout(timer.current);
-    scrollTo.current = 'latest'; dispatch({ type: 'reset' }); setInput(''); setBusy(''); setStatus('Demo reset');
+    epochRef.current += 1; scrollTo.current = 'latest'; dispatch({ type: 'reset' }); setInput(''); setBusy(''); setStatus('Demo reset');
   };
   const fill = (value: string) => { setSelectedTrack(null); setInput(value); setSuggestion(0); setFocused(true); inputRef.current?.focus(); };
   type Suggestion = { name: string; detail: string; value: string; image?: string; track?: DemoTrack; option?: string };
@@ -176,7 +198,7 @@ export function CommandDemo() {
       event.preventDefault(); const next = event.key === 'Home' ? 'commands' : event.key === 'End' ? 'activity' : mode === 'commands' ? 'activity' : 'commands';
       scrollTo.current = 'player'; setMode(next); document.getElementById(`demo-tab-${next}`)?.focus();
     }}>{item === 'commands' ? <Hash size={16} /> : <Headphones size={16} />}{item === 'commands' ? 'Slash commands' : 'Activity'}</button>)}</div><span>One session · No audio</span></div>
-    <div hidden={mode !== 'activity'} role="tabpanel" id="demo-panel-activity" aria-labelledby="demo-tab-activity"><ActivityFrame><ActivityDemo state={state} dispatch={dispatch} reset={reset} lyricsRequest={lyricsRequest} /></ActivityFrame></div>
+    <div hidden={mode !== 'activity'} role="tabpanel" id="demo-panel-activity" aria-labelledby="demo-tab-activity">{hostReady ? <iframe title="Bread Activity preview" src="/activity/demo" className={styles.activityFrame} data-testid="activity-demo" /> : <div className={styles.activityFrame} />}</div>
     <div hidden={mode !== 'commands'} role="tabpanel" id="demo-panel-commands" aria-labelledby="demo-tab-commands"><div className={styles.commandLayout}>
     <div className={styles.mobileLibrary} aria-label="Sample tracks">{demoTracks.map(track => <button type="button" key={track.title} disabled={Boolean(busy)} onClick={() => run(`/play ${track.artist} - ${track.title}`, track)} aria-label={`Queue ${track.title}`}><img src={asset(`${track.cover}.jpg`)} alt="" width={32} height={32} /><span>{track.title}</span><Plus size={16} /></button>)}</div>
     <div className={styles.chat}>

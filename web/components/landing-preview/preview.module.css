@@ -577,8 +577,6 @@
 .navLinks .mobileDashboard { display: none; }
 .demoModeBar { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:18px; }
 .mobileLibrary, .mobileCommands { display: none; }
-.activityDemo :global(.activity-drawer) { animation: none; will-change: transform; }
-.activityDemo :global(.activity-drawer-body) { overscroll-behavior: contain; }
 .demoModeBar > span { color:#b5b4c2; font-size:12px; }
 .demoError { color:#ffb1bb; font-size:13px; padding:10px 16px; background:#3a242b; }
 .activityFrame { display:block; width:100%; height:min(660px,calc(100svh - 240px)); min-height:460px; border:1px solid #303036; border-radius:8px; background:#0b0b0c; }
@@ -646,14 +644,14 @@
   .mobileCommands { display: flex; overflow-x: auto; justify-content: space-between; gap: 4px; margin: -4px 0 4px; scrollbar-width: thin; }
   .mobileCommands button { flex-shrink: 0; min-height: 44px; min-width: 44px; font-family: monospace; font-size: 12px; color: #d8cbed; }
   .activityFrame { height: var(--demo-height); min-height: 440px; }
-  .activityDemo :global(input[type='text']), .activityDemo :global(input[type='search']) { font-size: 16px; }
+
   .suggestions [role=listbox] { max-height: min(240px, 30dvh); overscroll-behavior: contain; }
 }
 @media (max-width: 380px) {
   .tabs button { font-size: 11px; padding: 8px 4px; gap: 4px; }
   .footer { padding-left: 16px; padding-right: 16px; }
 }
-@media (prefers-reduced-motion:reduce) { .arcadeSlides img { transition:none; } .activityDemoDrawer { animation:none; } }
+@media (prefers-reduced-motion:reduce) { .arcadeSlides img { transition:none; } }
 
 /* A short playback-style entrance; the rest of the page stays immediately readable. */
 @media (prefers-reduced-motion: no-preference) {

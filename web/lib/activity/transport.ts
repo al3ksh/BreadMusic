@@ -2,7 +2,7 @@ export class ActivityRequestError extends Error {
   status?: number;
 }
 
-export async function activityRequest<T>(path: string, token: string | null, options: RequestInit = {}): Promise<T> {
+export async function activityRequest<T>(path: string, token: string | null, options: RequestInit = {}, fetchImpl: typeof fetch = fetch): Promise<T> {
   if (!token) throw new Error('Activity authentication is not ready');
 
   const controller = new AbortController();
@@ -11,7 +11,7 @@ export async function activityRequest<T>(path: string, token: string | null, opt
   options.signal?.addEventListener('abort', forwardAbort, { once: true });
 
   try {
-    const response = await fetch(path, {
+    const response = await fetchImpl(path, {
       ...options,
       signal: controller.signal,
       headers: {

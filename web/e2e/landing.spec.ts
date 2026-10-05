@@ -94,6 +94,49 @@ test('sample queue and native Activity keep working when live search is unavaila
   expect(api).toEqual([]);
 });
 
+test('the Activity demo is the real Activity: library, karaoke and /lyrics share the chat session', async ({ page }) => {
+  // Karaoke closes itself without synced lyrics, so give the demo lyrics endpoint a short song.
+  await page.route('**/demo/api/lyrics', route => route.fulfill({ json: { lyrics: { plainLyrics: 'First line\nSecond line', lines: [{ time: 0, text: 'First line' }, { time: 600_000, text: 'Second line' }], instrumental: false, provider: 'lrclib' } } }));
+  const api: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/')) api.push(request.url()); });
+  await page.goto('/');
+  await page.addStyleTag({ content: 'html { scroll-behavior: auto !important; }' });
+  await page.getByRole('button', { name: 'Queue BUBBLETEA', exact: true }).click();
+  await expect(page.getByRole('log')).toContainText('BUBBLETEA');
+  await page.getByRole('tablist', { name: 'Playground mode' }).getByRole('tab', { name: 'Activity', exact: true }).click();
+  const frame = page.locator('iframe[title="Bread Activity preview"]');
+  // Playwright only scrolls inside the iframe, so keep the whole preview in the page viewport.
+  const center = () => frame.evaluate(element => element.scrollIntoView({ block: 'center' }));
+  await center();
+  const activity = page.frameLocator('iframe[title="Bread Activity preview"]');
+  await expect(activity.locator('.activity-player-stage h1')).toHaveText('Instant Crush');
+
+  await activity.getByRole('button', { name: 'Library', exact: true }).click();
+  const library = activity.getByRole('complementary', { name: 'library panel' });
+  await library.getByRole('textbox', { name: 'New playlist name' }).fill('Tonight');
+  await center();
+  await library.getByRole('button', { name: 'Save queue' }).click();
+  await center();
+  await library.getByRole('button', { name: 'Open Tonight' }).click();
+  await expect(library.getByText('BUBBLETEA').first()).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(activity.getByRole('complementary')).toHaveCount(0);
+
+  await center();
+  await activity.getByRole('button', { name: 'Open karaoke' }).click();
+  await expect(activity.getByRole('button', { name: 'Exit karaoke' })).toBeVisible();
+  await activity.getByRole('button', { name: 'Exit karaoke' }).click();
+  await expect(activity.getByRole('button', { name: 'Open karaoke' })).toBeVisible();
+
+  await page.getByRole('tablist', { name: 'Playground mode' }).getByRole('tab', { name: 'Slash commands' }).click();
+  await page.getByRole('combobox', { name: 'Try a Bread command' }).fill('/lyrics');
+  // The first Enter picks the suggestion, the second sends it.
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect(activity.getByRole('complementary', { name: 'lyrics panel' })).toBeVisible();
+  expect(api).toEqual([]);
+});
+
 test('root Activity handoff remains separate from marketing', async ({ page }) => {
   await page.route('**/api/**', route => route.fulfill({ json: { enabled: false } }));
   await page.goto('/?frame_id=test&instance_id=test&platform=desktop');
