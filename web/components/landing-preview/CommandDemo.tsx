@@ -108,6 +108,9 @@ export function CommandDemo() {
   const listeners = useRef(new Set<() => void>());
   // The iframe only mounts once the host exists, otherwise it could start on its own local state.
   const [hostReady, setHostReady] = useState(false);
+  // The Activity is a whole app, so it loads on first visit and then stays mounted to keep its session.
+  const [activityLoaded, setActivityLoaded] = useState(false);
+  useEffect(() => { if (mode === 'activity') setActivityLoaded(true); }, [mode]);
   useEffect(() => {
     const host: DemoHost = {
       getState: () => stateRef.current,
@@ -198,7 +201,7 @@ export function CommandDemo() {
       event.preventDefault(); const next = event.key === 'Home' ? 'commands' : event.key === 'End' ? 'activity' : mode === 'commands' ? 'activity' : 'commands';
       scrollTo.current = 'player'; setMode(next); document.getElementById(`demo-tab-${next}`)?.focus();
     }}>{item === 'commands' ? <Hash size={16} /> : <Headphones size={16} />}{item === 'commands' ? 'Slash commands' : 'Activity'}</button>)}</div><span>One session · No audio</span></div>
-    <div hidden={mode !== 'activity'} role="tabpanel" id="demo-panel-activity" aria-labelledby="demo-tab-activity">{hostReady ? <iframe title="Bread Activity preview" src="/activity/demo" className={styles.activityFrame} data-testid="activity-demo" /> : <div className={styles.activityFrame} />}</div>
+    <div hidden={mode !== 'activity'} role="tabpanel" id="demo-panel-activity" aria-labelledby="demo-tab-activity">{hostReady && activityLoaded ? <iframe title="Bread Activity preview" src="/activity/demo" className={styles.activityFrame} data-testid="activity-demo" /> : <div className={styles.activityFrame} />}</div>
     <div hidden={mode !== 'commands'} role="tabpanel" id="demo-panel-commands" aria-labelledby="demo-tab-commands"><div className={styles.commandLayout}>
     <div className={styles.mobileLibrary} aria-label="Sample tracks">{demoTracks.map(track => <button type="button" key={track.title} disabled={Boolean(busy)} onClick={() => run(`/play ${track.artist} - ${track.title}`, track)} aria-label={`Queue ${track.title}`}><img src={asset(`${track.cover}.jpg`)} alt="" width={32} height={32} /><span>{track.title}</span><Plus size={16} /></button>)}</div>
     <div className={styles.chat}>

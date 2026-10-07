@@ -133,7 +133,8 @@ export function createDemoBackend(host: DemoHost, originalFetch: typeof fetch = 
       register(state.current);
     }
     lastCurrent = state.current;
-    if (host.lyricsRequest() > lyricsSeen) {
+    // Wait for the Activity to subscribe, so /lyrics sent before it loads still opens the panel.
+    if (panelListeners.size && host.lyricsRequest() > lyricsSeen) {
       lyricsSeen = host.lyricsRequest();
       panelListeners.forEach((open) => open('lyrics'));
     }

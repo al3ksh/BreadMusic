@@ -137,6 +137,20 @@ test('the Activity demo is the real Activity: library, karaoke and /lyrics share
   expect(api).toEqual([]);
 });
 
+test('the Activity iframe loads on first use and /lyrics before that still opens the panel', async ({ page }) => {
+  const frames: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/activity/demo')) frames.push(request.url()); });
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  expect(frames).toEqual([]);
+  await page.getByRole('combobox', { name: 'Try a Bread command' }).fill('/lyrics');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  const activity = page.frameLocator('iframe[title="Bread Activity preview"]');
+  await expect(activity.getByRole('complementary', { name: 'lyrics panel' })).toBeVisible();
+  expect(frames.length).toBeGreaterThan(0);
+});
+
 test('root Activity handoff remains separate from marketing', async ({ page }) => {
   await page.route('**/api/**', route => route.fulfill({ json: { enabled: false } }));
   await page.goto('/?frame_id=test&instance_id=test&platform=desktop');
