@@ -4,10 +4,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { AtSign, Bold, Code2, Hash, Italic, MessageSquare, Mic, Paperclip, Terminal, X } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { Section, Skeleton, Spinner } from '@/components/dashboard/DashboardPrimitives';
+import { Section, Skeleton } from '@/components/dashboard/DashboardPrimitives';
+import { Select } from '@/components/dashboard/DashboardSelect';
 
 const inputClass = 'w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]';
-const selectClass = 'rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors font-[inherit]';
 
 export interface DiscordRole {
   id: string;
@@ -253,11 +253,18 @@ export function DashboardControl({ guildId }: { guildId: string }) {
   };
 
   if (loading) return (
-    <div className="space-y-5 w-full max-w-6xl mx-auto">
-      <div className="bg-bg-card rounded-lg border border-border p-5">
-        <Skeleton className="h-5 w-1/3 mb-4" />
-        <Skeleton className="h-24 w-full" />
-      </div>
+    <div className="grid grid-cols-1 gap-4 w-full max-w-6xl mx-auto lg:grid-cols-2 lg:gap-6">
+      {[0, 1].map(i => (
+        <div key={i} className="bg-bg-card rounded-lg border border-border overflow-hidden">
+          <div className="bg-bg-secondary px-5 py-3.5 border-b border-border"><Skeleton className="h-4 w-36" /></div>
+          <div className="space-y-4 p-5">
+            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="h-[38px] w-full" />
+            <Skeleton className={i === 0 ? 'h-32 w-full' : 'h-20 w-full'} />
+            <Skeleton className="h-10 w-32" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 
@@ -316,13 +323,14 @@ export function DashboardControl({ guildId }: { guildId: string }) {
           <div className="flex min-h-0 flex-col gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">Destination Channel</label>
-            <select
+            <Select
+              ariaLabel="Destination Channel"
               value={selectedTextId}
-              onChange={(e) => setSelectedTextId(e.target.value)}
-              className={selectClass + " w-full"}
-            >
-              {textChannels.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
-            </select>
+              onChange={setSelectedTextId}
+              options={textChannels.map(c => ({ value: c.id, label: `#${c.name}` }))}
+              placeholder="No text channels"
+              className="w-full"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">Message Content</label>
@@ -546,13 +554,14 @@ export function DashboardControl({ guildId }: { guildId: string }) {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">Voice Channel</label>
-            <select
+            <Select
+              ariaLabel="Voice Channel"
               value={selectedVoiceId}
-              onChange={(e) => setSelectedVoiceId(e.target.value)}
-              className={selectClass + " w-full"}
-            >
-              {voiceChannels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+              onChange={setSelectedVoiceId}
+              options={voiceChannels.map(c => ({ value: c.id, label: c.name }))}
+              placeholder="No voice channels"
+              className="w-full"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
              <button

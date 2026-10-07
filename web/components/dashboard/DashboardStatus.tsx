@@ -4,7 +4,7 @@ import { ArtworkImage } from '@/components/ArtworkImage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, type GuildHealth, type GuildInsights, type GuildInsightsRange, type PlayerStatus, formatDuration } from '@/lib/api';
 import { Play } from 'lucide-react';
-import { Skeleton } from '@/components/dashboard/DashboardPrimitives';
+import { SectionSkeleton, Skeleton } from '@/components/dashboard/DashboardPrimitives';
 
 export function DashboardStatus({ guildId }: { guildId: string }) {
   const [status, setStatus] = useState<PlayerStatus | null>(null);
@@ -40,13 +40,20 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
   }, [fetchStatus]);
 
   if (loading) return (
-    <div className="space-y-5 w-full max-w-5xl mx-auto">
-      <div className="bg-bg-card rounded-lg border border-border p-5">
-        <Skeleton className="h-5 w-1/3 mb-4" />
-        <div className="space-y-4 pt-2 border-t border-border/50">
-          <Skeleton className="h-6 w-full" />
-          <Skeleton className="h-6 w-full" />
-          <Skeleton className="h-6 w-full" />
+    <div className="w-full max-w-6xl mx-auto space-y-5 xl:grid xl:grid-cols-3 xl:gap-5 xl:space-y-0">
+      <div className="space-y-5 xl:col-span-2">
+        <SectionSkeleton rows={4} />
+        <SectionSkeleton rows={3} />
+      </div>
+      <div className="bg-bg-card rounded-lg border border-border overflow-hidden xl:self-start">
+        <div className="bg-bg-secondary px-5 py-3.5 border-b border-border"><Skeleton className="h-4 w-28" /></div>
+        <div className="flex gap-4 p-5">
+          <Skeleton className="h-20 w-20 shrink-0 rounded-lg" />
+          <div className="flex-1 space-y-2.5 pt-1">
+            <Skeleton className="h-4 w-4/5" />
+            <Skeleton className="h-3 w-1/2 opacity-60" />
+            <Skeleton className="mt-4 h-1.5 w-full" />
+          </div>
         </div>
       </div>
     </div>

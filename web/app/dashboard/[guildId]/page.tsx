@@ -4,9 +4,10 @@ import { ArtworkImage } from '@/components/ArtworkImage';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { apiFetch, type GuildConfig, type PlayerStatus, type QueueTrack, type GuildHealth, type GuildInsights, type GuildInsightsRange, type FilterPreset, type EconomyLeaderboardEntry, type EconomyMember, type DashboardCapabilities, type HistoryPage, type LyricsResult, formatDuration } from '@/lib/api';
-import { Settings, Play, Search, ChevronLeft, ChevronRight, ArrowLeft, Terminal, MessageSquare, Mic, Paperclip, X, Coins, Upload, FileAudio, Bold, Italic, Code2, AtSign, Hash, History, BookOpenText, Clock3 } from 'lucide-react';
+import { Search, ArrowLeft, X, Upload, FileAudio } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { CtrlBtn, Row, Section, Skeleton, Spinner, ToggleSwitch } from '@/components/dashboard/DashboardPrimitives';
+import { CtrlBtn, Row, Section, SectionSkeleton, Skeleton, Spinner, ToggleSwitch } from '@/components/dashboard/DashboardPrimitives';
+import { dashboardViews, isDashboardView, type DashboardView } from '@/components/dashboard/dashboardViews';
 import { DashboardPlayerControls } from '@/components/dashboard/DashboardPlayerControls';
 import { DashboardQueue } from '@/components/dashboard/DashboardQueue';
 import { DashboardSettings } from '@/components/dashboard/DashboardSettings';
@@ -18,7 +19,7 @@ import { DashboardControl } from '@/components/dashboard/DashboardControl';
 import { AutoplayRating } from '@/components/dashboard/DashboardAutoplay';
 import { DashboardRadio } from '@/components/dashboard/DashboardRadio';
 
-type Tab = 'settings' | 'status' | 'player' | 'history' | 'lyrics' | 'economy' | 'control';
+type Tab = DashboardView;
 
 export default function GuildPage() {
   const params = useParams();
@@ -41,8 +42,7 @@ export default function GuildPage() {
       toast.error('Replay failed', error instanceof Error ? error.message : 'Request failed.');
     }
   }, [guildId, toast]);
-  const validTabs: Tab[] = ['settings', 'status', 'player', 'history', 'lyrics', 'economy', 'control'];
-  const invalidView = rawView && !validTabs.includes(rawView as Tab) ? rawView : null;
+  const invalidView = rawView && !isDashboardView(rawView) ? rawView : null;
   const defaultTab: Tab = capabilities?.canManageConfig ? 'settings' : 'player';
   const activeTab = invalidView ? defaultTab : ((rawView as Tab) || defaultTab);
   const restrictedView = (
@@ -66,7 +66,17 @@ export default function GuildPage() {
   }, [accessLoading, capabilities, restrictedView, router, guildId]);
 
   if (accessLoading) {
-    return <div className="flex justify-center py-24"><Spinner /></div>;
+    // Show the header straight away; the default view is only known once access has loaded.
+    const pendingView = isDashboardView(rawView) ? rawView : null;
+    return (
+      <div>
+        <ViewHeader view={pendingView} onBack={() => router.push('/dashboard')} />
+        <div className="w-full max-w-5xl mx-auto space-y-5">
+          <SectionSkeleton rows={3} />
+          <SectionSkeleton rows={2} />
+        </div>
+      </div>
+    );
   }
 
   if (!capabilities?.canAccess) {
@@ -74,84 +84,96 @@ export default function GuildPage() {
   }
 
   return (
-    <div className="animate-fade-up">
-      {/* Page header */}
-      <div className="bg-bg-secondary border-b border-border -mx-4 -mt-16 mb-5 px-4 py-4 pl-16 md:-m-8 md:mb-8 md:px-8 md:py-5">
-        <div className="flex items-center justify-between">
-          <div className="flex min-w-0 items-center gap-3">
-            <Settings size={22} className="hidden shrink-0 text-text-secondary sm:block" />
-            <div>
-              <h2 className="truncate text-[18px] font-medium sm:text-[22px]">
-                {invalidView && 'View Not Found'}
-                {activeTab === 'settings' && 'Server Settings'}
-                {activeTab === 'status' && 'Server Status'}
-                {activeTab === 'player' && 'Music Player'}
-                {activeTab === 'history' && 'Listening History'}
-                {activeTab === 'lyrics' && 'Lyrics'}
-                {activeTab === 'economy' && 'Economy'}
-                {activeTab === 'control' && 'Remote Control'}
-              </h2>
-              <p className="mt-1 truncate text-[12px] text-text-secondary sm:text-[13px]">
-                {invalidView
-                  ? `The view "${invalidView}" does not exist in dashboard.`
-                  : 'Manage bot configuration and playback'}
-              </p>
+    <div>
+      <ViewHeader
+        view={invalidView ? null : activeTab}
+        missing={invalidView}
+        onBack={() => router.push('/dashboard')}
+      />
+
+      <div key={invalidView ?? activeTab} className="animate-view-in">
+        {!invalidView && !restrictedView && activeTab === 'settings' && <DashboardSettings guildId={guildId} />}
+        {!invalidView && activeTab === 'status' && <DashboardStatus guildId={guildId} />}
+        {!invalidView && activeTab === 'player' && <PlayerTab guildId={guildId} capabilities={capabilities} />}
+        {!invalidView && activeTab === 'history' && (
+          <DashboardHistory
+            guildId={guildId}
+            canQueue={capabilities?.canControlPlayer === true}
+            onRequeue={requeueFromHistory}
+          />
+        )}
+        {!invalidView && activeTab === 'lyrics' && <DashboardLyrics guildId={guildId} />}
+        {!invalidView && !restrictedView && activeTab === 'economy' && <DashboardEconomy guildId={guildId} />}
+        {!invalidView && !restrictedView && activeTab === 'control' && <DashboardControl guildId={guildId} />}
+
+        {invalidView && (
+          <div className="w-full max-w-5xl mx-auto rounded-lg border border-border bg-bg-card p-6 text-center">
+            <p className="text-sm text-text-secondary">
+              Requested view <span className="font-mono text-text-primary">{invalidView}</span> is not available.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => router.replace(`/dashboard/${guildId}?view=settings`)}
+                className="inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover transition-colors cursor-pointer"
+              >
+                Go to Settings
+              </button>
+              <button
+                type="button"
+                onClick={() => router.replace(`/dashboard/${guildId}?view=status`)}
+                className="inline-flex items-center justify-center rounded-lg border border-border px-4 py-2 text-sm font-semibold text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
+              >
+                Go to Status
+              </button>
             </div>
           </div>
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="hidden sm:flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer px-4 py-2 rounded-lg border border-border hover:bg-bg-hover"
-          >
-            <ArrowLeft size={14} />
-            Back
-          </button>
-        </div>
+        )}
       </div>
+    </div>
+  );
+}
 
-      {!invalidView && !restrictedView && activeTab === 'settings' && <DashboardSettings guildId={guildId} />}
-      {!invalidView && activeTab === 'status' && <DashboardStatus guildId={guildId} />}
-      {!invalidView && activeTab === 'player' && <PlayerTab guildId={guildId} capabilities={capabilities} />}
-      {!invalidView && activeTab === 'history' && (
-                  <DashboardHistory
-                    guildId={guildId}
-                    canQueue={capabilities?.canControlPlayer === true}
-                    onRequeue={requeueFromHistory}
-                  />
-                )}
-      {!invalidView && activeTab === 'lyrics' && <DashboardLyrics guildId={guildId} />}
-      {!invalidView && !restrictedView && activeTab === 'economy' && <DashboardEconomy guildId={guildId} />}
-      {!invalidView && !restrictedView && activeTab === 'control' && <DashboardControl guildId={guildId} />}
-
-      {invalidView && (
-        <div className="w-full max-w-5xl mx-auto rounded-lg border border-border bg-bg-card p-6 text-center">
-          <p className="text-sm text-text-secondary">
-            Requested view <span className="font-mono text-text-primary">{invalidView}</span> is not available.
-          </p>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() => router.replace(`/dashboard/${guildId}?view=settings`)}
-              className="inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover transition-colors cursor-pointer"
-            >
-              Go to Settings
-            </button>
-            <button
-              type="button"
-              onClick={() => router.replace(`/dashboard/${guildId}?view=status`)}
-              className="inline-flex items-center justify-center rounded-lg border border-border px-4 py-2 text-sm font-semibold text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
-            >
-              Go to Status
-            </button>
+function ViewHeader({ view, missing, onBack }: { view: DashboardView | null; missing?: string | null; onBack: () => void }) {
+  const meta = view ? dashboardViews[view] : null;
+  const Icon = meta?.icon;
+  return (
+    <div className="bg-bg-secondary border-b border-border -mx-4 -mt-16 mb-5 px-4 py-4 pl-16 md:-m-8 md:mb-8 md:px-8 md:py-5">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text sm:flex">
+            {Icon ? <Icon size={20} /> : missing ? <X size={20} /> : <Skeleton className="h-5 w-5" />}
+          </div>
+          <div key={view ?? missing ?? 'pending'} className="min-w-0 animate-view-in">
+            {meta || missing ? (
+              <>
+                <h2 className="truncate text-[18px] font-medium sm:text-[22px]">{meta ? meta.title : 'View Not Found'}</h2>
+                <p className="mt-1 truncate text-[12px] text-text-secondary sm:text-[13px]">
+                  {meta ? meta.description : `The view "${missing}" does not exist in dashboard.`}
+                </p>
+              </>
+            ) : (
+              <div className="space-y-2 py-1">
+                <Skeleton className="h-5 w-44" />
+                <Skeleton className="h-3 w-64 max-w-full opacity-60" />
+              </div>
+            )}
           </div>
         </div>
-      )}
+        <button
+          onClick={onBack}
+          className="hidden sm:flex shrink-0 items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer px-4 py-2 rounded-lg border border-border hover:bg-bg-hover"
+        >
+          <ArrowLeft size={14} />
+          Back
+        </button>
+      </div>
     </div>
   );
 }
 
 const inputClass = "w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]";
 const rangeClass = "w-full min-w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent";
-const selectClass = "rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors font-[inherit]";
 const TRACK_TRANSITION_GRACE_MS = 3500;
 
 function formatFileSize(bytes: number) {

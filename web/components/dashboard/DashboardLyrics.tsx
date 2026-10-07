@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, type LyricsResult, type PlayerStatus, formatDuration } from '@/lib/api';
 import { BookOpenText, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { Spinner } from '@/components/dashboard/DashboardPrimitives';
+import { Skeleton, Spinner } from '@/components/dashboard/DashboardPrimitives';
 
 const inputClass = 'w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]';
 
@@ -212,7 +212,11 @@ export function DashboardLyrics({ guildId }: { guildId: string }) {
         </div>
         <div className={`p-5 sm:p-7 ${liveMode ? 'max-h-[60vh] overflow-y-auto scroll-smooth' : ''}`}>
           {loading ? (
-            <div className="flex justify-center py-12"><Spinner /></div>
+            <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-6" aria-label="Loading lyrics">
+              {['w-3/4', 'w-1/2', 'w-2/3', 'w-5/6', 'w-2/5', 'w-3/5', 'w-1/2'].map((width, index) => (
+                <Skeleton key={index} className={`h-4 ${width}`} />
+              ))}
+            </div>
           ) : lyrics?.instrumental ? (
             <p className="py-10 text-center text-sm text-text-secondary">This track is marked as instrumental.</p>
           ) : lyrics && liveMode && syncedLines.length ? (

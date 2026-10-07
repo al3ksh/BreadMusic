@@ -7,7 +7,49 @@ export function Spinner() {
 }
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={`animate-pulse bg-border/50 rounded-md ${className || ''}`} />;
+  return <div aria-hidden="true" className={`dashboard-skeleton rounded-md ${className || ''}`} />;
+}
+
+const SKELETON_LABEL_WIDTHS = ['w-32', 'w-40', 'w-28', 'w-36', 'w-24'];
+
+// Placeholder in the shape of a Section full of Rows, so content does not jump when it loads.
+export function SectionSkeleton({ rows = 3, className }: { rows?: number; className?: string }) {
+  return (
+    <div className={`bg-bg-card rounded-lg border border-border overflow-hidden ${className || ''}`}>
+      <div className="bg-bg-secondary px-4 py-3 border-b border-border sm:px-5 sm:py-3.5">
+        <Skeleton className="h-4 w-36" />
+      </div>
+      <div className="px-4 py-1 sm:px-5">
+        {Array.from({ length: rows }, (_, index) => (
+          <div key={index} className="flex flex-col gap-3 py-3.5 border-b border-border/50 last:border-0 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-2">
+              <Skeleton className={`h-3.5 ${SKELETON_LABEL_WIDTHS[index % SKELETON_LABEL_WIDTHS.length]}`} />
+              <Skeleton className="h-3 w-56 max-w-full opacity-60" />
+            </div>
+            <Skeleton className="h-[38px] w-full sm:w-48" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Placeholder for track lists: artwork plus a title and an artist line.
+export function ListSkeleton({ items = 6 }: { items?: number }) {
+  return (
+    <div className="space-y-1">
+      {Array.from({ length: items }, (_, index) => (
+        <div key={index} className="flex items-center gap-3 rounded-md px-3 py-2.5">
+          <Skeleton className="h-10 w-10 shrink-0" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className={`h-3.5 ${['w-2/3', 'w-1/2', 'w-3/5'][index % 3]}`} />
+            <Skeleton className="h-3 w-1/3 opacity-60" />
+          </div>
+          <Skeleton className="hidden h-3 w-10 sm:block" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function Section({ title, children, className }: { title: string; children: ReactNode; className?: string }) {

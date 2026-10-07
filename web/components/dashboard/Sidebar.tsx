@@ -6,17 +6,11 @@ import { apiFetch, type DiscordUser, type DashboardCapabilities, getUserAvatar }
 import {
   LayoutDashboard,
   LogOut,
-  Settings,
-  Activity,
-  Play,
-  Coins,
   Menu,
   X,
   Home,
-  Terminal,
-  History,
-  BookOpenText,
 } from 'lucide-react';
+import { dashboardViews, type DashboardView } from '@/components/dashboard/dashboardViews';
 
 interface SidebarProps {
   user: DiscordUser;
@@ -62,22 +56,22 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
     { href: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Servers', exact: true },
   ];
 
+  const guildViews: DashboardView[] = [
+    ...(capabilities?.canManageConfig ? ['settings' as const] : []),
+    'status', 'player', 'history', 'lyrics',
+    ...(capabilities?.canManageEconomy ? ['economy' as const] : []),
+    ...(capabilities?.canUseRemoteControl ? ['control' as const] : []),
+  ];
   const guildNavItems = currentGuildId
-    ? [
-        ...(capabilities?.canManageConfig
-          ? [{ href: `/dashboard/${currentGuildId}`, view: 'settings', icon: <Settings size={18} />, label: 'Settings', exact: true }]
-          : []),
-        { href: `/dashboard/${currentGuildId}?view=status`, view: 'status', icon: <Activity size={18} />, label: 'Status' },
-        { href: `/dashboard/${currentGuildId}?view=player`, view: 'player', icon: <Play size={18} />, label: 'Player' },
-        { href: `/dashboard/${currentGuildId}?view=history`, view: 'history', icon: <History size={18} />, label: 'History' },
-        { href: `/dashboard/${currentGuildId}?view=lyrics`, view: 'lyrics', icon: <BookOpenText size={18} />, label: 'Lyrics' },
-        ...(capabilities?.canManageEconomy
-          ? [{ href: `/dashboard/${currentGuildId}?view=economy`, view: 'economy', icon: <Coins size={18} />, label: 'Economy' }]
-          : []),
-        ...(capabilities?.canUseRemoteControl
-          ? [{ href: `/dashboard/${currentGuildId}?view=control`, view: 'control', icon: <Terminal size={18} />, label: 'Control' }]
-          : []),
-      ]
+    ? guildViews.map((view) => {
+        const { icon: Icon, label } = dashboardViews[view];
+        return {
+          href: view === 'settings' ? `/dashboard/${currentGuildId}` : `/dashboard/${currentGuildId}?view=${view}`,
+          view,
+          icon: <Icon size={18} />,
+          label,
+        };
+      })
     : [];
 
   return (

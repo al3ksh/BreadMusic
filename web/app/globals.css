@@ -219,6 +219,40 @@ a { color: inherit; text-decoration: none; }
 
 .delay-100 { animation-delay: 0.1s; }
 
+/* ---- Dashboard ---- */
+
+@keyframes dashboard-view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dashboard-select-down {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes dashboard-select-up {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-view-in { animation: dashboard-view-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-select-down { animation: dashboard-select-down 0.14s ease-out both; transform-origin: top; }
+.animate-select-up { animation: dashboard-select-up 0.14s ease-out both; transform-origin: bottom; }
+
+.dashboard-skeleton {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.035) 25%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.035) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-view-in,
+  .animate-select-down,
+  .animate-select-up,
+  .dashboard-skeleton { animation: none; }
+}
+
 /* ---- Discord Activity player ---- */
 
 .activity-shell {

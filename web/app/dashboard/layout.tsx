@@ -13,9 +13,12 @@ export default function DashboardLayout({
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-primary">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-text-muted">Loading...</span>
+        <div className="flex flex-col items-center gap-4" role="status">
+          <div className="relative">
+            <span aria-hidden="true" className="absolute -inset-3 rounded-[22px] bg-accent/20 blur-xl animate-pulse" />
+            <img src="/assets/breadicon.png?v=3" alt="" className="relative h-14 w-14 rounded-xl object-cover animate-pulse" />
+          </div>
+          <span className="text-sm text-text-muted">Loading dashboard...</span>
         </div>
       </div>
     );

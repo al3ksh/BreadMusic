@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiFetch, type GuildConfig, type LastfmStatus } from '@/lib/api';
 import { useToast } from '@/components/ui/ToastProvider';
-import { Row, Section, Skeleton, ToggleSwitch } from '@/components/dashboard/DashboardPrimitives';
+import { Row, Section, SectionSkeleton, ToggleSwitch } from '@/components/dashboard/DashboardPrimitives';
+import { Select } from '@/components/dashboard/DashboardSelect';
 
 interface DiscordRole {
   id: string;
@@ -19,7 +20,6 @@ interface DiscordChannel {
 }
 
 const rangeClass = 'w-full min-w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent';
-const selectClass = 'rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors font-[inherit]';
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 function NumberInput({
@@ -192,19 +192,14 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
 
   if (loading) return (
     <div className="space-y-5 w-full max-w-5xl mx-auto">
-      {[1, 2, 3].map(i => (
-        <div key={i} className="bg-bg-card rounded-lg border border-border p-5">
-          <Skeleton className="h-5 w-1/3 mb-4" />
-          <div className="space-y-4 pt-2 border-t border-border/50">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        </div>
-      ))}
+      <SectionSkeleton rows={4} />
+      <SectionSkeleton rows={3} />
+      <SectionSkeleton rows={2} />
     </div>
   );
   if (!config) return <p className="text-text-secondary">Failed to load config.</p>;
 
+  const roleOptions = roles.filter(r => r.name !== '@everyone').map(r => ({ value: r.id, label: r.name }));
   const playerTextChannelValue = config.playerTextChannelId === null
     ? '__default'
     : config.playerTextChannelId === 'disabled'
@@ -218,52 +213,50 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
     <div className="space-y-5 w-full max-w-5xl mx-auto">
       <Section title="DJ & Permissions">
         <Row label="Dashboard Access" desc="Who can open the dashboard. Moderators use the Mod Role below">
-          <select
+          <Select
+            ariaLabel="Dashboard Access"
             value={config.dashboardAccess}
-            onChange={(e) => setConfig({ ...config, dashboardAccess: e.target.value as GuildConfig['dashboardAccess'] })}
-            className={selectClass + ' w-full sm:w-64'}
-          >
-            <option value="admin">Administrators only</option>
-            <option value="mod">Administrators and moderators</option>
-            <option value="members">All server members</option>
-          </select>
+            onChange={(value) => setConfig({ ...config, dashboardAccess: value as GuildConfig['dashboardAccess'] })}
+            options={[
+              { value: 'admin', label: 'Administrators only' },
+              { value: 'mod', label: 'Administrators and moderators' },
+              { value: 'members', label: 'All server members' },
+            ]}
+            className="w-full sm:w-64"
+          />
         </Row>
         <Row label="Mod Role" desc={config.modRoleName || 'Not set'}>
-          <select
+          <Select
+            ariaLabel="Mod Role"
             value={config.modRoleId || ''}
-            onChange={(e) => setConfig({ ...config, modRoleId: e.target.value || null })}
-            className={selectClass + ' w-full sm:w-64'}
-          >
-            <option value="">(None)</option>
-            {roles.filter(r => r.name !== '@everyone').map(r => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
+            onChange={(value) => setConfig({ ...config, modRoleId: value || null })}
+            options={[{ value: '', label: '(None)' }, ...roleOptions]}
+            className="w-full sm:w-64"
+          />
         </Row>
         <Row label="Activity Control" desc="Who can control playback inside the Activity (must be in the bot voice channel)">
-          <select
+          <Select
+            ariaLabel="Activity Control"
             value={config.activityControl || 'inherit'}
-            onChange={(e) => setConfig({ ...config, activityControl: e.target.value as GuildConfig['activityControl'] })}
-            className={selectClass + ' w-full sm:w-64'}
-          >
-            <option value="inherit">Inherit (follow Dashboard Access)</option>
-            <option value="admin">Administrators only</option>
-            <option value="mod">Admins and moderators</option>
-            <option value="dj">Admins, moderators and DJs</option>
-            <option value="members">All members</option>
-          </select>
+            onChange={(value) => setConfig({ ...config, activityControl: value as GuildConfig['activityControl'] })}
+            options={[
+              { value: 'inherit', label: 'Inherit (follow Dashboard Access)' },
+              { value: 'admin', label: 'Administrators only' },
+              { value: 'mod', label: 'Admins and moderators' },
+              { value: 'dj', label: 'Admins, moderators and DJs' },
+              { value: 'members', label: 'All members' },
+            ]}
+            className="w-full sm:w-64"
+          />
         </Row>
         <Row label="DJ Role" desc={config.djRoleName || 'All members can DJ'}>
-          <select
+          <Select
+            ariaLabel="DJ Role"
             value={config.djRoleId || ''}
-            onChange={(e) => setConfig({ ...config, djRoleId: e.target.value || null })}
-            className={selectClass + ' w-full sm:w-64'}
-          >
-            <option value="">(None - All members can DJ)</option>
-            {roles.filter(r => r.name !== '@everyone').map(r => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
+            onChange={(value) => setConfig({ ...config, djRoleId: value || null })}
+            options={[{ value: '', label: '(None - All members can DJ)' }, ...roleOptions]}
+            className="w-full sm:w-64"
+          />
         </Row>
         <Row label="Vote Skip Threshold" desc="Percentage of listeners needed to skip">
           <div className="flex items-center gap-2">
@@ -362,32 +355,43 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
           </div>
         </Row>
         <Row label="Preferred Source">
-          <select value={config.preferredSource || ''} onChange={(e) => setConfig({ ...config, preferredSource: e.target.value || null })} className={selectClass + ' w-full sm:w-48'}>
-            <option value="">Auto</option>
-            <option value="ytsearch">YouTube</option>
-            <option value="scsearch">SoundCloud</option>
-            <option value="spsearch">Spotify</option>
-          </select>
+          <Select
+            ariaLabel="Preferred Source"
+            value={config.preferredSource || ''}
+            onChange={(value) => setConfig({ ...config, preferredSource: value || null })}
+            options={[
+              { value: '', label: 'Auto' },
+              { value: 'ytsearch', label: 'YouTube' },
+              { value: 'scsearch', label: 'SoundCloud' },
+              { value: 'spsearch', label: 'Spotify' },
+            ]}
+            className="w-full sm:w-48"
+          />
         </Row>
         <Row label="Player Text Channel" desc={playerTextChannelDescription}>
-          <select
+          <Select
+            ariaLabel="Player Text Channel"
             value={playerTextChannelValue}
-            onChange={(e) => {
-              const value = e.target.value;
-              setConfig({ ...config, playerTextChannelId: value === '__default' ? null : value === '__disabled' ? 'disabled' : value });
-            }}
-            className={selectClass + ' w-full sm:w-64'}
-          >
-            <option value="__default">Default (use command/player channel)</option>
-            <option value="__disabled">Disabled (do not send player message)</option>
-            {channels.filter(c => c.type === 0 || c.type === 5).map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
-          </select>
+            onChange={(value) => setConfig({ ...config, playerTextChannelId: value === '__default' ? null : value === '__disabled' ? 'disabled' : value })}
+            options={[
+              { value: '__default', label: 'Default (use command/player channel)' },
+              { value: '__disabled', label: 'Disabled (do not send player message)' },
+              ...channels.filter(c => c.type === 0 || c.type === 5).map(c => ({ value: c.id, label: `#${c.name}` })),
+            ]}
+            className="w-full sm:w-64"
+          />
         </Row>
         <Row label="24/7 Voice Channel" desc={config.twentyFourSevenChannelName || 'Not set'}>
-          <select value={config.twentyFourSevenChannelId || ''} onChange={(e) => setConfig({ ...config, twentyFourSevenChannelId: e.target.value || null })} className={selectClass + ' w-full sm:w-64'}>
-            <option value="">(None - Disabled)</option>
-            {channels.filter(c => c.type === 2 || c.type === 13).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <Select
+            ariaLabel="24/7 Voice Channel"
+            value={config.twentyFourSevenChannelId || ''}
+            onChange={(value) => setConfig({ ...config, twentyFourSevenChannelId: value || null })}
+            options={[
+              { value: '', label: '(None - Disabled)' },
+              ...channels.filter(c => c.type === 2 || c.type === 13).map(c => ({ value: c.id, label: c.name })),
+            ]}
+            className="w-full sm:w-64"
+          />
         </Row>
       </Section>
 

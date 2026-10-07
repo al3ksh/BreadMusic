@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, type EconomyLeaderboardEntry, type EconomyMember } from '@/lib/api';
 import { Coins } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { Section, Skeleton } from '@/components/dashboard/DashboardPrimitives';
+import { ListSkeleton, Section, SectionSkeleton, Skeleton } from '@/components/dashboard/DashboardPrimitives';
+import { Select } from '@/components/dashboard/DashboardSelect';
 
 const inputClass = 'w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]';
-const selectClass = 'rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors font-[inherit]';
 
 export function DashboardEconomy({ guildId }: { guildId: string }) {
   const toast = useToast();
@@ -73,10 +73,13 @@ export function DashboardEconomy({ guildId }: { guildId: string }) {
   if (loading) {
     return (
       <div className="space-y-5 w-full max-w-6xl mx-auto">
-        <div className="bg-bg-card rounded-lg border border-border p-5">
-          <Skeleton className="h-5 w-1/3 mb-4" />
-          <Skeleton className="h-28 w-full" />
+        <div className="bg-bg-card rounded-lg border border-border overflow-hidden">
+          <div className="bg-bg-secondary px-5 py-3.5 border-b border-border"><Skeleton className="h-4 w-44" /></div>
+          <div className="p-4 sm:p-5">
+            <ListSkeleton items={5} />
+          </div>
         </div>
+        <SectionSkeleton rows={2} />
       </div>
     );
   }
@@ -111,31 +114,26 @@ export function DashboardEconomy({ guildId }: { guildId: string }) {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">Member</label>
-            <select
+            <Select
+              ariaLabel="Member"
               value={selectedUserId}
-              onChange={(e) => setSelectedUserId(e.target.value)}
-              className={selectClass + ' w-full max-w-md'}
-            >
-              {members.map((member) => (
-                <option key={member.userId} value={member.userId}>
-                  {member.displayName} ({member.balance.toLocaleString()} bread)
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedUserId}
+              options={members.map((member) => ({ value: member.userId, label: `${member.displayName} (${member.balance.toLocaleString()} bread)` }))}
+              placeholder="No members yet"
+              className="w-full max-w-md"
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1.5">Mode</label>
-              <select
+              <Select
+                ariaLabel="Mode"
                 value={mode}
-                onChange={(e) => setMode(e.target.value as 'add' | 'remove' | 'set')}
-                className={selectClass + ' w-full'}
-              >
-                <option value="add">Add</option>
-                <option value="remove">Remove</option>
-                <option value="set">Set</option>
-              </select>
+                onChange={(value) => setMode(value as 'add' | 'remove' | 'set')}
+                options={[{ value: 'add', label: 'Add' }, { value: 'remove', label: 'Remove' }, { value: 'set', label: 'Set' }]}
+                className="w-full"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1.5">Amount</label>

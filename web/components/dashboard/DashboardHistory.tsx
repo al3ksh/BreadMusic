@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch, type HistoryPage, formatDuration } from '@/lib/api';
 import { ChevronLeft, ChevronRight, Clock3, History, ListPlus, Play } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { Spinner } from '@/components/dashboard/DashboardPrimitives';
+import { ListSkeleton } from '@/components/dashboard/DashboardPrimitives';
 
 type DashboardHistoryProps = {
   guildId: string;
@@ -46,7 +46,7 @@ export function DashboardHistory({ guildId, canQueue = false, onRequeue }: Dashb
           <p className="mt-1 text-xs text-text-muted">{history ? `${history.total} retained plays` : 'Recent server playback'}</p>
         </div>
         <div className="divide-y divide-border/60">
-          {loading && <div className="p-8 text-center text-text-muted"><Spinner /></div>}
+          {loading && <div className="p-2"><ListSkeleton items={8} /></div>}
           {!loading && history?.items.length === 0 && <div className="p-10 text-center text-sm text-text-muted">No playback history yet.</div>}
           {!loading && history?.items.map((entry) => {
             const replayable = /^https?:\/\//i.test(entry.track.uri);
