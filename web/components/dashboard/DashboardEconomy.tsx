@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, type EconomyLeaderboardEntry, type EconomyMember } from '@/lib/api';
 import { Coins } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { ListSkeleton, Section, SectionSkeleton, Skeleton } from '@/components/dashboard/DashboardPrimitives';
+import { EmptyState, ListSkeleton, Section, SectionSkeleton, Skeleton } from '@/components/dashboard/DashboardPrimitives';
 import { Select } from '@/components/dashboard/DashboardSelect';
 
 const inputClass = 'w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]';
@@ -88,7 +88,7 @@ export function DashboardEconomy({ guildId }: { guildId: string }) {
     <div className="space-y-5 w-full max-w-6xl mx-auto">
       <Section title="Economy Leaderboard">
         {leaderboard.length === 0 ? (
-          <p className="text-sm text-text-muted">No economy data for this guild yet.</p>
+          <EmptyState compact icon={Coins} title="No balances yet" description="Members earn bread by listening and chatting. The leaderboard fills in as they do." />
         ) : (
           <div className="space-y-1">
             {leaderboard.map((entry) => (

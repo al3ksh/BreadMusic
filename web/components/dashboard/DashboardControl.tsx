@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { AtSign, Bold, Code2, Hash, Italic, MessageSquare, Mic, Paperclip, Terminal, X } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { Section, Skeleton } from '@/components/dashboard/DashboardPrimitives';
+import { EmptyState, Section, Skeleton } from '@/components/dashboard/DashboardPrimitives';
 import { Select } from '@/components/dashboard/DashboardSelect';
 
 const inputClass = 'w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]';
@@ -589,7 +589,7 @@ export function DashboardControl({ guildId }: { guildId: string }) {
            <MessageSquare size={16} className="text-accent" /> Live Chat
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col-reverse">
-           {chatMessages.length === 0 ? <p className="text-text-muted text-sm text-center my-auto">No messages</p> : null}
+           {chatMessages.length === 0 ? <EmptyState compact icon={MessageSquare} title="No messages yet" description="New messages in the selected channel show up here." className="my-auto" /> : null}
            {chatMessages.map((m, i) => (
              <div key={m.id + i} className="flex gap-4">
                <img src={m.author.avatar || '/assets/breadicon.png'} className="w-9 h-9 rounded-full object-cover shrink-0 bg-black" />

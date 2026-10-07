@@ -2,9 +2,9 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, type LyricsResult, type PlayerStatus, formatDuration } from '@/lib/api';
-import { BookOpenText, Search } from 'lucide-react';
+import { BookOpenText, Play, Search, SearchX } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { Skeleton, Spinner } from '@/components/dashboard/DashboardPrimitives';
+import { EmptyState, Skeleton, Spinner } from '@/components/dashboard/DashboardPrimitives';
 
 const inputClass = 'w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]';
 
@@ -32,7 +32,7 @@ function parseSyncedLyrics(value: string): SyncedLyricLine[] {
   return lines.sort((a, b) => a.time - b.time);
 }
 
-export function DashboardLyrics({ guildId }: { guildId: string }) {
+export function DashboardLyrics({ guildId, onOpenPlayer }: { guildId: string; onOpenPlayer?: () => void }) {
   const toast = useToast();
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
   const [artist, setArtist] = useState('');
@@ -60,8 +60,8 @@ export function DashboardLyrics({ guildId }: { guildId: string }) {
       const result = await apiFetch<LyricsResult>(`/guilds/${guildId}/lyrics${params}`);
       setLyrics(result);
       if (!manual) {
-        setArtist(result.artist);
-        setTitle(result.title);
+        setArtist(result.artist ?? '');
+        setTitle(result.title ?? '');
       }
     } catch (error) {
       setLyrics(null);
@@ -240,7 +240,16 @@ export function DashboardLyrics({ guildId }: { guildId: string }) {
           ) : lyrics ? (
             <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-text-primary">{lyrics.plainLyrics || lyrics.syncedLyrics}</pre>
           ) : (
-            <p className="py-10 text-center text-sm text-text-muted">No lyrics found for the current track. Try a manual search.</p>
+            playerStatus?.currentTrack ? (
+              <EmptyState icon={SearchX} title="No lyrics found for this track" description="Fix the artist or title above and search again." />
+            ) : (
+              <EmptyState
+                icon={BookOpenText}
+                title="Nothing is playing"
+                description="Start a track to follow its lyrics live, or search for any song above."
+                action={onOpenPlayer ? { label: 'Open Player', icon: Play, onClick: onOpenPlayer } : undefined}
+              />
+            )
           )}
         </div>
         {lyrics && (

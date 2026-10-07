@@ -29,6 +29,19 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
     setMobileOpen(false);
   }, [pathname]);
 
+  // Escape closes the drawer, and the page behind it stays put while it is open.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setMobileOpen(false);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = overflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [mobileOpen]);
+
   const searchParams = useSearchParams();
   const currentView = searchParams.get('view') || (capabilities?.canManageConfig ? 'settings' : 'player');
 
@@ -50,6 +63,10 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
       .then(setCapabilities)
       .catch(() => setCapabilities(null));
   }, [currentGuildId]);
+
+  const mobileTitle = currentGuildId
+    ? dashboardViews[currentView as DashboardView]?.label ?? null
+    : pathname === '/dashboard' ? 'Servers' : null;
 
   const navItems = [
     { href: '/', icon: <Home size={18} />, label: 'Home' },
@@ -76,17 +93,32 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
 
   return (
     <>
-      {/* Mobile menu button */}
-      <button
-        onClick={() => setMobileOpen(!mobileOpen)}
-        className={`fixed top-3.5 z-[201] flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-bg-secondary text-text-primary shadow-lg transition-[left] duration-300 cursor-pointer md:hidden ${
-          mobileOpen ? 'left-4' : 'left-3.5'
-        }`}
-        style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
-        aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
-      >
-        {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-      </button>
+      {/* Mobile top bar: the menu button lives here instead of floating over the page */}
+      <header className="sticky top-0 z-[150] flex h-14 items-center gap-2 border-b border-border bg-bg-secondary/95 px-2 backdrop-blur md:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+          aria-label="Open menu"
+          aria-expanded={mobileOpen}
+          aria-controls="dashboard-sidebar"
+        >
+          <Menu size={20} />
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard')}
+          className="flex min-w-0 items-center gap-2.5 rounded-lg px-1 py-1 cursor-pointer"
+        >
+          <img src="/assets/breadicon.png?v=3" alt="" className="h-7 w-7 shrink-0 rounded-md object-cover" />
+          <span className="font-semibold tracking-wide text-text-primary">{botName}</span>
+        </button>
+        {mobileTitle && (
+          <span className="ml-auto mr-2 min-w-0 truncate rounded-full border border-border bg-bg-card px-2.5 py-1 text-xs text-text-secondary">
+            {mobileTitle}
+          </span>
+        )}
+      </header>
 
       {/* Mobile overlay */}
       {mobileOpen && (
@@ -98,20 +130,29 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
 
       {/* Sidebar */}
       <aside
+        id="dashboard-sidebar"
         className={`fixed top-0 left-0 h-screen h-dvh z-[200] w-[min(320px,calc(100vw-56px))] bg-bg-secondary border-r border-border flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] md:w-[260px] md:translate-x-0 ${
           mobileOpen ? 'translate-x-0 shadow-[4px_0_20px_rgba(0,0,0,0.5)]' : '-translate-x-full'
         }`}
       >
         {/* Header */}
-        <div className="px-5 py-5 border-b border-border md:px-5">
+        <div className="flex items-center justify-between gap-3 px-5 py-5 border-b border-border">
           <button
             onClick={() => router.push('/dashboard')}
-            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity md:pl-0 pl-12"
+            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
           >
             <div className="relative w-8 h-8 rounded-lg shadow-md overflow-hidden shrink-0">
               <img src="/assets/breadicon.png?v=3" alt="" className="w-full h-full object-cover" />
             </div>
             <h1 className="font-semibold text-xl tracking-wide text-text-primary">{botName}</h1>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileOpen(false)}
+            className="-mr-2 flex h-9 w-9 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary cursor-pointer md:hidden"
+            aria-label="Close menu"
+          >
+            <X size={18} />
           </button>
         </div>
 

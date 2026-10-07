@@ -2,11 +2,11 @@
 import { ArtworkImage } from '@/components/ArtworkImage';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiFetch, type GuildHealth, type GuildInsights, type GuildInsightsRange, type PlayerStatus, formatDuration } from '@/lib/api';
-import { Play } from 'lucide-react';
-import { SectionSkeleton, Skeleton } from '@/components/dashboard/DashboardPrimitives';
+import { apiFetch, type GuildHealth, type GuildInsights, type GuildInsightsRange, type PlayerStatus, formatDuration, formatTrackCount } from '@/lib/api';
+import { BarChart3, History, ListMusic, Play, Unplug } from 'lucide-react';
+import { EmptyState, SectionSkeleton, Skeleton } from '@/components/dashboard/DashboardPrimitives';
 
-export function DashboardStatus({ guildId }: { guildId: string }) {
+export function DashboardStatus({ guildId, onOpenPlayer }: { guildId: string; onOpenPlayer?: () => void }) {
   const [status, setStatus] = useState<PlayerStatus | null>(null);
   const [health, setHealth] = useState<GuildHealth | null>(null);
   const [insights, setInsights] = useState<GuildInsights | null>(null);
@@ -40,7 +40,7 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
   }, [fetchStatus]);
 
   if (loading) return (
-    <div className="w-full max-w-6xl mx-auto space-y-5 xl:grid xl:grid-cols-3 xl:gap-5 xl:space-y-0">
+    <div className="w-full max-w-6xl mx-auto flex flex-col gap-5 xl:grid xl:grid-cols-3">
       <div className="space-y-5 xl:col-span-2">
         <SectionSkeleton rows={4} />
         <SectionSkeleton rows={3} />
@@ -153,7 +153,7 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
   const sessionHistory = status.sessionHistory || [];
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-5 xl:grid xl:grid-cols-3 xl:gap-5 xl:space-y-0">
+    <div className="w-full max-w-6xl mx-auto flex flex-col gap-5 xl:grid xl:grid-cols-3">
       <div className="space-y-5 xl:col-span-2">
         <div className="bg-bg-card rounded-lg border border-border overflow-hidden">
           <div className="bg-bg-secondary px-5 py-3.5 border-b border-border flex items-center justify-between">
@@ -189,11 +189,11 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
                 <InfoRow label="Volume" value={`${status.volume}%`} />
                 <InfoRow label="Loop" value={status.repeatMode.charAt(0).toUpperCase() + status.repeatMode.slice(1)} />
                 <InfoRow label="Autoplay" value={status.autoplay ? 'Enabled' : 'Disabled'} />
-                <InfoRow label="Queue" value={`${status.queueLength} tracks`} />
+                <InfoRow label="Queue" value={formatTrackCount(status.queueLength)} />
                 {status.filters && <InfoRow label="Filter" value={status.filters.charAt(0).toUpperCase() + status.filters.slice(1)} />}
               </div>
             ) : (
-              <p className="text-sm text-text-muted py-4 text-center">Bot is not connected to a voice channel.</p>
+              <EmptyState compact icon={Unplug} title="Not in a voice channel" description="Bread joins when someone uses /play in Discord." />
             )}
           </div>
         </div>
@@ -241,7 +241,7 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
               </div>
 
               {trend14d.length === 0 || trendMax === 0 ? (
-                <p className="text-sm text-text-muted py-2">No trend data yet.</p>
+                <EmptyState compact icon={BarChart3} title="No plays in the last 14 days" className="rounded-md border border-dashed border-border" />
               ) : (
                 <>
                   <div className="h-24 rounded-md border border-border/60 bg-bg-secondary/30 px-2 py-2 flex items-end gap-1">
@@ -271,7 +271,7 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
               <div>
                 <p className="text-xs uppercase tracking-wider text-text-muted mb-2">Top Tracks ({rangeLabel})</p>
                 {topTracks.length === 0 ? (
-                  <p className="text-sm text-text-muted py-2">No track data yet.</p>
+                  <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">No tracks played in this range.</p>
                 ) : (
                   <div className="space-y-1.5">
                     {topTracks.map((track) => (
@@ -298,7 +298,7 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
               <div>
                 <p className="text-xs uppercase tracking-wider text-text-muted mb-2">Top Users ({rangeLabel})</p>
                 {topUsers.length === 0 ? (
-                  <p className="text-sm text-text-muted py-2">No user data yet.</p>
+                  <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">No listeners in this range.</p>
                 ) : (
                   <div className="space-y-1.5">
                     {topUsers.map((user) => (
@@ -326,8 +326,9 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
         </div>
       </div>
 
-      <div className="xl:col-span-1 xl:self-start xl:sticky xl:top-6">
-        <div className="bg-bg-card rounded-lg border border-border overflow-hidden">
+      {/* On phones the column dissolves so Now Playing can lead the page and Session History can close it. */}
+      <div className="contents xl:block xl:col-span-1 xl:self-start xl:sticky xl:top-6">
+        <div className="order-first bg-bg-card rounded-lg border border-border overflow-hidden xl:order-none">
           <div className="bg-bg-secondary px-5 py-3.5 border-b border-border">
             <h3 className="text-[15px] font-medium">Now Playing</h3>
           </div>
@@ -359,42 +360,27 @@ export function DashboardStatus({ guildId }: { guildId: string }) {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="flex gap-4">
-                  <div className="w-20 h-20 rounded-lg bg-bg-hover/80 border border-border/70 flex items-center justify-center shrink-0">
-                    <Music2 size={28} className="text-text-muted" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-text-primary">
-                      {status.connected ? 'Nothing is playing right now.' : 'Bot is not connected.'}
-                    </p>
-                    <p className="text-xs text-text-muted mt-1">
-                      {status.connected
-                        ? 'Queue a track to see live details in this panel.'
-                        : 'Connect the bot and start playback to populate this panel.'}
-                    </p>
-                    <div className="mt-3 space-y-2">
-                      <Skeleton className="h-1.5 w-full" />
-                      <div className="flex justify-between">
-                        <Skeleton className="h-3 w-10" />
-                        <Skeleton className="h-3 w-10" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <EmptyState
+                compact
+                icon={status.connected ? ListMusic : Unplug}
+                title={status.connected ? 'Nothing is playing right now' : 'Bot is not connected'}
+                description={status.connected
+                  ? 'Queue a track and it shows up here with live progress.'
+                  : 'Use /play in Discord, then queue music from the Player.'}
+                action={onOpenPlayer ? { label: 'Open Player', icon: Play, onClick: onOpenPlayer } : undefined}
+              />
             )}
           </div>
         </div>
 
-        <div className="mt-5 bg-bg-card rounded-lg border border-border overflow-hidden">
+        <div className="bg-bg-card rounded-lg border border-border overflow-hidden xl:mt-5">
           <div className="bg-bg-secondary px-5 py-3.5 border-b border-border">
             <h3 className="text-[15px] font-medium">Session History</h3>
           </div>
 
           <div className="p-4">
             {sessionHistory.length === 0 ? (
-              <p className="text-sm text-text-muted py-2">No tracks in bot session yet.</p>
+              <EmptyState compact icon={History} title="No tracks this session" description="Everything Bread plays until it leaves the channel is listed here." />
             ) : (
               <div className="space-y-2">
                 {sessionHistory.map((track, index) => (

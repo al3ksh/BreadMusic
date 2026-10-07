@@ -1,5 +1,5 @@
 import { Activity, Pause, Play, Repeat, Shuffle, SkipBack, SkipForward, Square, SlidersHorizontal, Volume2, X } from 'lucide-react';
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import type { PlayerStatus } from '@/lib/api';
 import { CtrlBtn } from '@/components/dashboard/DashboardPrimitives';
 import { Select } from '@/components/dashboard/DashboardSelect';
@@ -60,57 +60,71 @@ export function DashboardPlayerControls({
         </CtrlBtn>
       </div>
 
-      <div className={`flex items-center gap-4 mt-5 px-1 ${canUsePlayerControls && canUseDJControls ? '' : 'opacity-45 pointer-events-none'}`}>
-        <Volume2 size={18} className="text-text-muted shrink-0" />
-        <div className="flex-1 flex justify-center items-center">
-          <SegmentedVolume value={volume} onChange={onVolumeChange} onCommit={onVolumeCommit} />
+      <div className="mt-6 flex flex-col gap-3 border-t border-border pt-5 lg:flex-row lg:items-center">
+        <div className={`flex items-center gap-3 rounded-lg border border-border bg-bg-input px-3 py-2 lg:w-[260px] lg:shrink-0 ${canUsePlayerControls && canUseDJControls ? '' : 'opacity-45 pointer-events-none'}`}>
+          <Volume2 size={17} className="text-text-muted shrink-0" aria-hidden="true" />
+          <SegmentedVolume
+            value={volume}
+            onChange={onVolumeChange}
+            onCommit={onVolumeCommit}
+            disabled={!canUsePlayerControls || !canUseDJControls}
+          />
+          <span className="w-11 shrink-0 text-right text-xs font-medium tabular-nums text-text-secondary" aria-hidden="true">{volume}%</span>
         </div>
-        <span className="text-xs font-medium text-text-secondary w-12 shrink-0 text-center tabular-nums bg-bg-hover px-1.5 py-1 rounded-md">{volume}%</span>
-      </div>
 
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
         <button
+          type="button"
           onClick={() => onAction('autoplay', { enabled: !status.autoplay })}
           disabled={!canUseDJControls || !canUsePlayerControls}
-          className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${status.autoplay ? 'bg-success/15 text-success border border-success/30 hover:bg-success/20' : 'bg-bg-input text-text-secondary border border-border hover:text-text-primary hover:border-accent/30'}`}
+          aria-pressed={status.autoplay}
+          className={`inline-flex h-[42px] shrink-0 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${status.autoplay ? 'border-success/30 bg-success/15 text-success hover:bg-success/20' : 'border-border bg-bg-input text-text-secondary hover:border-accent/30 hover:text-text-primary'}`}
         >
           <Activity size={15} />
-          Autoplay: {status.autoplay ? 'ON' : 'OFF'}
+          Autoplay
+          <span className={`rounded px-1.5 py-px text-[10px] font-semibold tracking-wider ${status.autoplay ? 'bg-success/20' : 'bg-bg-hover text-text-muted'}`}>
+            {status.autoplay ? 'ON' : 'OFF'}
+          </span>
         </button>
 
-        <div className="flex gap-2">
+        <div className="flex min-w-0 flex-1 gap-2">
           <Select
-            ariaLabel="Filter preset"
+            ariaLabel="Audio filter"
             value={selectedFilter}
             onChange={onFilterChange}
             options={filterOptions}
+            placeholder={status.filters ? `Active: ${status.filters}` : 'Audio filter'}
             disabled={!canUseDJControls || !canUsePlayerControls}
-            className="flex-1"
+            className="min-w-0 flex-1"
           />
           <button
+            type="button"
             onClick={onApplyFilter}
             disabled={applyingFilter || !selectedFilter || !canUseDJControls || !canUsePlayerControls}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-input border border-border text-text-secondary hover:text-text-primary hover:border-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-secondary transition-colors hover:border-accent/30 hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             title="Apply filter preset"
           >
             <SlidersHorizontal size={14} />
             Apply
           </button>
-          <button
-            onClick={() => onAction('filter', { preset: 'clear' })}
-            disabled={!canUseDJControls || !canUsePlayerControls}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-danger/10 border border-danger/25 text-danger hover:bg-danger/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            title="Clear filter"
-          >
-            <X size={14} />
-          </button>
+          {status.filters && (
+            <button
+              type="button"
+              onClick={() => onAction('filter', { preset: 'clear' })}
+              disabled={!canUseDJControls || !canUsePlayerControls}
+              aria-label="Clear filter"
+              title="Clear filter"
+              className="inline-flex shrink-0 items-center rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-danger transition-colors hover:bg-danger/15 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/50"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
     </>
   );
 }
 
-function SegmentedVolume({ value, onChange, onCommit }: { value: number; onChange: (value: number) => void; onCommit: (value: number) => void }) {
+function SegmentedVolume({ value, onChange, onCommit, disabled }: { value: number; onChange: (value: number) => void; onCommit: (value: number) => void; disabled?: boolean }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [tooltipLeft, setTooltipLeft] = useState(0);
   const max = 150;
@@ -133,9 +147,35 @@ function SegmentedVolume({ value, onChange, onCommit }: { value: number; onChang
     if (isDragging.current && value !== nextValue) onChange(nextValue);
   };
 
+  // Arrow keys move one segment, Page keys two, Home and End jump to the ends.
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = max / segments;
+    const keys: Record<string, number> = {
+      ArrowRight: value + step, ArrowUp: value + step,
+      ArrowLeft: value - step, ArrowDown: value - step,
+      PageUp: value + step * 2, PageDown: value - step * 2,
+      Home: 0, End: max,
+    };
+    if (!(event.key in keys)) return;
+    event.preventDefault();
+    const next = Math.max(0, Math.min(max, Math.round(keys[event.key] / step) * step));
+    if (next === value) return;
+    onChange(next);
+    onCommit(next);
+  };
+
   return (
     <div
-      className="relative flex items-end justify-between h-6 w-36 gap-[3px] cursor-pointer group py-1"
+      role="slider"
+      tabIndex={disabled ? -1 : 0}
+      aria-label="Volume"
+      aria-valuemin={0}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      aria-valuetext={`${value}%`}
+      aria-disabled={disabled || undefined}
+      onKeyDown={onKeyDown}
+      className="relative flex h-7 min-w-0 flex-1 items-end justify-between gap-[3px] cursor-pointer group py-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-4 focus-visible:ring-offset-bg-input"
       style={{ touchAction: 'none' }}
       onPointerLeave={() => setHoverIdx(null)}
       onPointerUp={(event) => {

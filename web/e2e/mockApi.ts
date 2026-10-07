@@ -95,7 +95,7 @@ export async function mockApi(page: Page, options: { canControlPlayer?: boolean;
     if (path.endsWith('/channels') || path.endsWith('/roles')) return json(route, []);
     if (path === '/api/activity/config') return json(route, { enabled: true, clientId: 'test-client-id' });
     if (path === '/api/activity/token') return json(route, { access_token: 'test-activity-token' });
-    if (path.endsWith('/config')) return json(route, { dashboardAccess: 'admin', djRoleId: null, maxVolume: 100, defaultVolume: 80, autoplay: true, persistentQueue: false, preferredSource: null, playerTextChannelId: null, playerTextChannelName: null, voteSkipPercent: 50, stayInChannel: false, afkTimeout: 300, twentyFourSevenChannelId: null, twentyFourSevenChannelName: null, voiceChannelStatus: false });
+    if (path.endsWith('/config')) return json(route, { dashboardAccess: 'admin', djRoleId: null, maxVolume: 100, defaultVolume: 80, autoplay: true, persistentQueue: false, preferredSource: null, playerTextChannelId: null, playerTextChannelName: null, voteSkipPercent: 0.5, stayInChannel: false, afkTimeout: 300_000, twentyFourSevenChannelId: null, twentyFourSevenChannelName: null, voiceChannelStatus: false });
     if (request.method() === 'POST' || request.method() === 'PUT' || request.method() === 'PATCH' || request.method() === 'DELETE') return json(route, { ok: true, success: true, message: 'Action applied' });
 
     return json(route, {});

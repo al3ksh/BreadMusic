@@ -19,7 +19,7 @@ interface DiscordChannel {
   type: number;
 }
 
-const rangeClass = 'w-full min-w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent';
+const rangeClass = 'w-full min-w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card';
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 function NumberInput({
@@ -262,6 +262,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
           <div className="flex items-center gap-2">
             <input
               type="range" min={10} max={100} step={5}
+              aria-label="Vote skip threshold"
               value={config.voteSkipPercent * 100}
               onChange={(e) => setConfig({ ...config, voteSkipPercent: Number(e.target.value) / 100 })}
               className={rangeClass}
@@ -283,7 +284,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
       <Section title="Volume">
         <Row label="Default Volume">
           <div className="flex items-center gap-2">
-            <input type="range" min={0} max={100} value={config.defaultVolume} onChange={(e) => setConfig({ ...config, defaultVolume: Number(e.target.value) })} className={rangeClass} />
+            <input type="range" aria-label="Default volume" min={0} max={100} value={config.defaultVolume} onChange={(e) => setConfig({ ...config, defaultVolume: Number(e.target.value) })} className={rangeClass} />
             <NumberInput
               value={config.defaultVolume}
               min={0}
@@ -298,7 +299,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
         </Row>
         <Row label="Maximum Volume">
           <div className="flex items-center gap-2">
-            <input type="range" min={10} max={500} value={config.maxVolume} onChange={(e) => setConfig({ ...config, maxVolume: Number(e.target.value) })} className={rangeClass} />
+            <input type="range" aria-label="Maximum volume" min={10} max={500} value={config.maxVolume} onChange={(e) => setConfig({ ...config, maxVolume: Number(e.target.value) })} className={rangeClass} />
             <NumberInput
               value={config.maxVolume}
               min={10}
@@ -315,7 +316,7 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
 
       <Section title="Behavior">
         <Row label="Autoplay" desc="Play similar tracks when queue ends">
-          <ToggleSwitch checked={config.autoplay} onChange={(v) => setConfig({ ...config, autoplay: v })} />
+          <ToggleSwitch label="Autoplay" checked={config.autoplay} onChange={(v) => setConfig({ ...config, autoplay: v })} />
         </Row>
         <Row label="Rebuild Autoplay" desc="Drifted off? Re-seed autoplay from what people queued here recently and from the liked tracks of people listening now">
           <button
@@ -331,17 +332,17 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
           <LastfmBadge status={config.lastfm} />
         </Row>
         <Row label="Stay in Channel (24/7)" desc="Bot stays connected even when idle">
-          <ToggleSwitch checked={config.stayInChannel} onChange={(v) => setConfig({ ...config, stayInChannel: v })} />
+          <ToggleSwitch label="Stay in Channel (24/7)" checked={config.stayInChannel} onChange={(v) => setConfig({ ...config, stayInChannel: v })} />
         </Row>
         <Row label="Persistent Queue" desc="Save queue between bot restarts">
-          <ToggleSwitch checked={config.persistentQueue} onChange={(v) => setConfig({ ...config, persistentQueue: v })} />
+          <ToggleSwitch label="Persistent Queue" checked={config.persistentQueue} onChange={(v) => setConfig({ ...config, persistentQueue: v })} />
         </Row>
         <Row label="Voice Channel Status" desc="Show the current track below the voice channel name">
-          <ToggleSwitch checked={config.voiceChannelStatus} onChange={(v) => setConfig({ ...config, voiceChannelStatus: v })} />
+          <ToggleSwitch label="Voice Channel Status" checked={config.voiceChannelStatus} onChange={(v) => setConfig({ ...config, voiceChannelStatus: v })} />
         </Row>
         <Row label="AFK Timeout">
           <div className="flex items-center gap-2">
-            <input type="range" min={0.5} max={30} step={0.5} value={config.afkTimeout / 60000} onChange={(e) => setConfig({ ...config, afkTimeout: Number(e.target.value) * 60000 })} className={rangeClass} />
+            <input type="range" aria-label="AFK timeout in minutes" min={0.5} max={30} step={0.5} value={config.afkTimeout / 60000} onChange={(e) => setConfig({ ...config, afkTimeout: Number(e.target.value) * 60000 })} className={rangeClass} />
             <NumberInput
               value={Number((config.afkTimeout / 60000).toFixed(1))}
               min={0.5}

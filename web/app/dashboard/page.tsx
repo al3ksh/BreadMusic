@@ -56,7 +56,7 @@ export default function DashboardPage() {
   return (
     <div className="animate-fade-up">
       {/* Page header */}
-      <div className="bg-bg-secondary border-b border-border -mx-4 -mt-16 mb-6 px-4 py-4 pl-16 md:-m-8 md:mb-8 md:px-8 md:py-5">
+      <div className="bg-bg-secondary border-b border-border -mx-4 mb-6 px-4 py-4 md:-m-8 md:mb-8 md:px-8 md:py-5">
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3.5">
             <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text sm:flex">
@@ -64,7 +64,7 @@ export default function DashboardPage() {
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-[18px] font-medium sm:text-[22px]">Your Servers</h1>
-              <p className="mt-1 truncate text-[12px] text-text-secondary sm:text-[13px]">
+              <p className="mt-1 line-clamp-2 text-[12px] text-text-secondary sm:truncate sm:text-[13px]">
                 {loading || error
                   ? 'Select a server to manage settings and playback.'
                   : `${manageable.length} ${manageable.length === 1 ? 'server' : 'servers'} with Bread · pick one to manage settings and playback`}

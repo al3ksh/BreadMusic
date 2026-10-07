@@ -120,13 +120,15 @@ export function DashboardRadio({ guildId, onPlay }: { guildId: string; onPlay: (
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => event.key === 'Enter' && search()}
-            placeholder="Station, genre or country (empty = popular)"
-            className="flex-1 rounded-md border border-border bg-bg-input text-text-primary px-4 py-2.5 text-sm outline-none placeholder:text-text-muted focus:border-accent transition-colors font-[inherit]"
+            placeholder="Station, genre or country"
+            aria-label="Search radio stations. Leave empty for popular stations"
+            className="min-w-0 flex-1 rounded-md border border-border bg-bg-input text-text-primary px-4 py-2.5 text-sm outline-none placeholder:text-text-muted focus:border-accent transition-colors font-[inherit]"
           />
           <button
             type="button"
             onClick={search}
             disabled={searching}
+            aria-label="Search stations"
             className="px-4 py-2.5 rounded-md bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 cursor-pointer"
           >
             {searching ? <Spinner /> : <Search size={16} />}

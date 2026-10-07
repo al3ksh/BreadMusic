@@ -4,9 +4,9 @@ import { ArtworkImage } from '@/components/ArtworkImage';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { apiFetch, type GuildConfig, type PlayerStatus, type QueueTrack, type GuildHealth, type GuildInsights, type GuildInsightsRange, type FilterPreset, type EconomyLeaderboardEntry, type EconomyMember, type DashboardCapabilities, type HistoryPage, type LyricsResult, formatDuration } from '@/lib/api';
-import { Search, ArrowLeft, X, Upload, FileAudio } from 'lucide-react';
+import { Search, ArrowLeft, X, Upload, FileAudio, Unplug } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { CtrlBtn, Row, Section, SectionSkeleton, Skeleton, Spinner, ToggleSwitch } from '@/components/dashboard/DashboardPrimitives';
+import { CtrlBtn, EmptyState, Row, Section, SectionSkeleton, Skeleton, Spinner, ToggleSwitch } from '@/components/dashboard/DashboardPrimitives';
 import { dashboardViews, isDashboardView, type DashboardView } from '@/components/dashboard/dashboardViews';
 import { DashboardPlayerControls } from '@/components/dashboard/DashboardPlayerControls';
 import { DashboardQueue } from '@/components/dashboard/DashboardQueue';
@@ -42,6 +42,7 @@ export default function GuildPage() {
       toast.error('Replay failed', error instanceof Error ? error.message : 'Request failed.');
     }
   }, [guildId, toast]);
+  const openView = useCallback((view: DashboardView) => router.push(`/dashboard/${guildId}?view=${view}`), [router, guildId]);
   const invalidView = rawView && !isDashboardView(rawView) ? rawView : null;
   const defaultTab: Tab = capabilities?.canManageConfig ? 'settings' : 'player';
   const activeTab = invalidView ? defaultTab : ((rawView as Tab) || defaultTab);
@@ -93,16 +94,17 @@ export default function GuildPage() {
 
       <div key={invalidView ?? activeTab} className="animate-view-in">
         {!invalidView && !restrictedView && activeTab === 'settings' && <DashboardSettings guildId={guildId} />}
-        {!invalidView && activeTab === 'status' && <DashboardStatus guildId={guildId} />}
+        {!invalidView && activeTab === 'status' && <DashboardStatus guildId={guildId} onOpenPlayer={() => openView('player')} />}
         {!invalidView && activeTab === 'player' && <PlayerTab guildId={guildId} capabilities={capabilities} />}
         {!invalidView && activeTab === 'history' && (
           <DashboardHistory
             guildId={guildId}
             canQueue={capabilities?.canControlPlayer === true}
             onRequeue={requeueFromHistory}
+            onOpenPlayer={() => openView('player')}
           />
         )}
-        {!invalidView && activeTab === 'lyrics' && <DashboardLyrics guildId={guildId} />}
+        {!invalidView && activeTab === 'lyrics' && <DashboardLyrics guildId={guildId} onOpenPlayer={() => openView('player')} />}
         {!invalidView && !restrictedView && activeTab === 'economy' && <DashboardEconomy guildId={guildId} />}
         {!invalidView && !restrictedView && activeTab === 'control' && <DashboardControl guildId={guildId} />}
 
@@ -138,7 +140,7 @@ function ViewHeader({ view, missing, onBack }: { view: DashboardView | null; mis
   const meta = view ? dashboardViews[view] : null;
   const Icon = meta?.icon;
   return (
-    <div className="bg-bg-secondary border-b border-border -mx-4 -mt-16 mb-5 px-4 py-4 pl-16 md:-m-8 md:mb-8 md:px-8 md:py-5">
+    <div className="bg-bg-secondary border-b border-border -mx-4 mb-5 px-4 py-4 md:-m-8 md:mb-8 md:px-8 md:py-5">
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3.5">
           <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-accent/25 bg-accent/10 text-accent-text sm:flex">
@@ -148,7 +150,7 @@ function ViewHeader({ view, missing, onBack }: { view: DashboardView | null; mis
             {meta || missing ? (
               <>
                 <h2 className="truncate text-[18px] font-medium sm:text-[22px]">{meta ? meta.title : 'View Not Found'}</h2>
-                <p className="mt-1 truncate text-[12px] text-text-secondary sm:text-[13px]">
+                <p className="mt-1 line-clamp-2 text-[12px] text-text-secondary sm:truncate sm:text-[13px]">
                   {meta ? meta.description : `The view "${missing}" does not exist in dashboard.`}
                 </p>
               </>
@@ -161,6 +163,8 @@ function ViewHeader({ view, missing, onBack }: { view: DashboardView | null; mis
           </div>
         </div>
         <button
+          type="button"
+          aria-label="Back to servers"
           onClick={onBack}
           className="hidden sm:flex shrink-0 items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer px-4 py-2 rounded-lg border border-border hover:bg-bg-hover"
         >
@@ -172,8 +176,6 @@ function ViewHeader({ view, missing, onBack }: { view: DashboardView | null; mis
   );
 }
 
-const inputClass = "w-48 rounded-md border border-border bg-bg-input text-text-primary px-3 py-2 text-sm outline-none focus:border-accent transition-colors placeholder:text-text-muted font-[inherit]";
-const rangeClass = "w-full min-w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-border accent-accent";
 const TRACK_TRANSITION_GRACE_MS = 3500;
 
 function formatFileSize(bytes: number) {
@@ -702,24 +704,27 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     setDropTargetIdx(idx);
   };
 
-  const handleDrop = async (e: React.DragEvent, targetIdx: number) => {
+  const handleDrop = (e: React.DragEvent, targetIdx: number) => {
     e.preventDefault();
-    if (!queue || draggedIdx === null || draggedIdx === targetIdx) {
-      resetDragState();
-      return;
-    }
+    const from = draggedIdx;
+    resetDragState();
+    if (from !== null) moveQueueTrack(from, targetIdx);
+  };
+
+  // Shared by drag and drop and the keyboard handle; indexes are within the current page.
+  const moveQueueTrack = async (fromIdx: number, targetIdx: number) => {
+    if (!queue || fromIdx === targetIdx || targetIdx < 0 || targetIdx >= queue.tracks.length) return;
 
     const previousQueue = queue;
     const newQueue = [...queue.tracks];
-    const item = newQueue.splice(draggedIdx, 1)[0];
+    const item = newQueue.splice(fromIdx, 1)[0];
     newQueue.splice(targetIdx, 0, item);
     setQueue({ ...queue, tracks: newQueue });
-    resetDragState();
 
     try {
       await apiFetch(`/guilds/${guildId}/player/move`, {
         method: 'POST',
-        body: JSON.stringify({ from: queuePage * 20 + draggedIdx, to: queuePage * 20 + targetIdx }),
+        body: JSON.stringify({ from: queuePage * 20 + fromIdx, to: queuePage * 20 + targetIdx }),
       });
       toast.success('Action applied', 'Queue order updated.');
       fetchData();
@@ -776,15 +781,28 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     });
   };
 
+  if (!status.connected) return (
+    <div className="w-full max-w-6xl mx-auto">
+      <div className="rounded-lg border border-border bg-bg-card">
+        <EmptyState
+          icon={Unplug}
+          title="Bread is not in a voice channel"
+          description="Join a voice channel and use /play in Discord. The player, search and queue show up here as soon as Bread connects."
+          className="py-14"
+        />
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-5 w-full max-w-6xl mx-auto">
       <div className="bg-bg-card rounded-lg border border-border overflow-hidden">
         <div className="p-5">
-          <div className="flex gap-5">
+          <div className="flex gap-4 sm:gap-5">
             {status.currentTrack?.artwork ? (
-              <ArtworkImage src={status.currentTrack.artwork} className="w-24 h-24 rounded-lg shrink-0 object-cover shadow-xl" />
+              <ArtworkImage src={status.currentTrack.artwork} className="w-20 h-20 sm:w-24 sm:h-24 rounded-lg shrink-0 object-cover shadow-xl" />
             ) : (
-              <div className="w-24 h-24 rounded-lg bg-bg-hover flex items-center justify-center border border-border/70">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-lg bg-bg-hover flex items-center justify-center border border-border/70">
                 <Music2 size={32} className="text-text-muted" />
               </div>
             )}
@@ -837,7 +855,9 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                           if (localSeek !== null) handleSeekCommit(Number(e.currentTarget.value));
                         }}
                         disabled={!canSeekTrack}
-                        className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-border transition-all duration-200 hover:h-2 disabled:cursor-not-allowed disabled:opacity-60
+                        aria-label="Seek"
+                        aria-valuetext={`${formatDuration(currentPos)} of ${formatDuration(currentDuration)}`}
+                        className="w-full h-1.5 outline-none focus-visible:[&::-webkit-slider-thumb]:opacity-100 focus-visible:[&::-moz-range-thumb]:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-full appearance-none cursor-pointer bg-border transition-all duration-200 hover:h-2 disabled:cursor-not-allowed disabled:opacity-60
                           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(90,84,148,0.6)] [&::-webkit-slider-thumb]:opacity-0 hover:[&::-webkit-slider-thumb]:opacity-100 [&::-webkit-slider-thumb]:transition-opacity
                           [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:shadow-[0_0_10px_rgba(90,84,148,0.6)] [&::-moz-range-thumb]:opacity-0 hover:[&::-moz-range-thumb]:opacity-100"
                         style={{ background: `linear-gradient(to right, #5a5494 ${currentDuration > 0 ? (currentPos / currentDuration) * 100 : 0}%, rgba(255,255,255,0.05) 0)` }}
@@ -850,23 +870,12 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                   </div>
                 </>
               ) : (
-                <>
-                  <p className="font-medium text-base">
-                    {status.connected ? 'Nothing is playing right now.' : 'Bot is not connected.'}
-                  </p>
+                <div className="flex h-full flex-col justify-center">
+                  <p className="font-medium text-base">Nothing is playing right now</p>
                   <p className="text-sm text-text-secondary mt-0.5">
-                    {status.connected
-                      ? 'Use Play / Search below to queue a track.'
-                      : 'Use /play in Discord to connect and start playback.'}
+                    Search below, paste a link or pick a radio station to start.
                   </p>
-                  <div className="mt-4 space-y-2">
-                    <Skeleton className="h-1.5 w-full" />
-                    <div className="flex justify-between">
-                      <Skeleton className="h-3 w-10" />
-                      <Skeleton className="h-3 w-10" />
-                    </div>
-                  </div>
-                </>
+                </div>
               )}
             </div>
           </div>
@@ -892,7 +901,8 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
 
       {status.connected && (
         <div className="bg-bg-card rounded-lg border border-border overflow-hidden">
-          <div className="bg-bg-secondary px-5 py-3.5 border-b border-border">
+          <div className="flex items-center gap-2.5 bg-bg-secondary px-5 py-3.5 border-b border-border">
+            <Search size={16} className="text-accent-text" aria-hidden="true" />
             <h3 className="text-[15px] font-medium">Play / Search</h3>
           </div>
           <div className="p-5">
@@ -902,12 +912,15 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleInputSubmit()}
                 placeholder="Paste link or search title..."
-                className="flex-1 rounded-md border border-border bg-bg-input text-text-primary px-4 py-2.5 text-sm outline-none placeholder:text-text-muted focus:border-accent transition-colors font-[inherit]"
+                aria-label="Paste a link or search for a track"
+                className="min-w-0 flex-1 rounded-md border border-border bg-bg-input text-text-primary px-4 py-2.5 text-sm outline-none placeholder:text-text-muted focus:border-accent transition-colors font-[inherit]"
               />
               <button
+                type="button"
                 onClick={handleInputSubmit}
                 disabled={searching}
-                className="px-4 py-2.5 rounded-md bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 cursor-pointer"
+                aria-label="Search"
+                className="px-4 py-2.5 rounded-md bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card"
               >
                 {searching ? <Spinner /> : <Search size={16} />}
               </button>
@@ -1019,6 +1032,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onDragEnd={resetDragState}
+          onMove={moveQueueTrack}
           onRemove={(index) => playerAction('remove', { start: queuePage * 20 + index })}
           autoplayNext={status.autoplay ? status.autoplayNext ?? null : null}
           onAction={playerAction}

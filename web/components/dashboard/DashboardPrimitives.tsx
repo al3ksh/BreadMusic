@@ -1,9 +1,41 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 
 export function Spinner() {
-  return <span className="inline-block h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" />;
+  return <span role="status" aria-label="Loading" className="inline-block h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" />;
+}
+
+// Shared look for "nothing here yet": an icon, one line saying why, and an optional next step.
+export function EmptyState({ icon: Icon, title, description, action, compact, className }: {
+  icon: LucideIcon;
+  title: string;
+  description?: ReactNode;
+  action?: { label: string; onClick: () => void; icon?: LucideIcon };
+  compact?: boolean;
+  className?: string;
+}) {
+  const ActionIcon = action?.icon;
+  return (
+    <div className={`flex flex-col items-center text-center ${compact ? 'px-4 py-6' : 'px-6 py-10'} ${className || ''}`}>
+      <div className={`flex items-center justify-center rounded-full border border-border-light bg-bg-hover text-text-muted ${compact ? 'mb-3 h-10 w-10' : 'mb-4 h-12 w-12'}`}>
+        <Icon size={compact ? 18 : 22} aria-hidden="true" />
+      </div>
+      <p className="text-sm font-medium text-text-primary">{title}</p>
+      {description && <p className="mt-1 max-w-sm text-xs leading-relaxed text-text-muted">{description}</p>}
+      {action && (
+        <button
+          type="button"
+          onClick={action.onClick}
+          className="mt-4 inline-flex items-center gap-2 rounded-md border border-accent/35 bg-accent/10 px-3.5 py-2 text-xs font-medium text-accent-text transition-colors hover:bg-accent/20 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+        >
+          {ActionIcon && <ActionIcon size={14} aria-hidden="true" />}
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function Skeleton({ className }: { className?: string }) {
@@ -75,11 +107,15 @@ export function Row({ label, desc, children }: { label: string; desc?: string; c
   );
 }
 
-export function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+export function ToggleSwitch({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label?: string }) {
   return (
     <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${checked ? 'bg-accent' : 'bg-border'}`}
+      className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card ${checked ? 'bg-accent' : 'bg-border'}`}
     >
       <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
     </button>
@@ -96,10 +132,12 @@ export function CtrlBtn({ onClick, title, primary, badge, disabled, children }: 
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
+      aria-label={title}
       disabled={disabled}
-      className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+      className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card ${
         disabled
           ? 'opacity-35 cursor-not-allowed'
           : primary
@@ -109,7 +147,7 @@ export function CtrlBtn({ onClick, title, primary, badge, disabled, children }: 
     >
       {children}
       {badge && (
-        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-accent text-[9px] text-white flex items-center justify-center font-bold leading-none">
+        <span aria-hidden="true" className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-accent text-[9px] text-white flex items-center justify-center font-bold leading-none">
           {badge}
         </span>
       )}

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { guildId, json, mockApi } from './mockApi';
+import { guildId, json, mockApi, status, track } from './mockApi';
 
 function guild(id: string, name: string, extra: Record<string, unknown> = {}) {
   return { id, name, icon: null, permissions: 8, member_count: 12, bot_present: true, access_level: 'admin', dashboard_access: 'admin', can_access: true, can_invite: false, ...extra };
@@ -138,12 +138,12 @@ test.describe('server list', () => {
 
   test('shows a skeleton while loading and recovers from an error with Retry', async ({ page }) => {
     await mockApi(page);
-    let calls = 0;
+    // Dev mode runs effects twice, so every request made before the release fails, not just the first.
+    let released = false;
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const gate = new Promise<void>((resolve) => { release = () => { released = true; resolve(); }; });
     await mockGuilds(page, async () => {
-      calls += 1;
-      if (calls === 1) {
+      if (!released) {
         await gate;
         throw new Error('first load fails');
       }
@@ -166,4 +166,123 @@ test.describe('server list', () => {
     await expect(page.getByRole('button', { name: /Test Guild/ })).toBeVisible();
     await expect(page.getByRole('searchbox', { name: 'Filter servers' })).toHaveCount(0);
   });
+});
+
+const twoTrackQueue = {
+  current: track,
+  tracks: [{ ...track, title: 'First up', uri: 'https://example.com/1' }, { ...track, title: 'Second up', uri: 'https://example.com/2' }],
+  total: 2,
+  page: 0,
+  totalPages: 1,
+  revision: 'two',
+};
+
+async function mockPlayer(page: Page, playerStatus: Record<string, unknown>, queue: Record<string, unknown>) {
+  const actions: { action: string; body: unknown }[] = [];
+  await page.route('**/api/guilds/*/player/events?*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/event-stream',
+    body: `event: snapshot\ndata: ${JSON.stringify({ status: playerStatus, queue })}\n\n`,
+  }));
+  await page.route('**/api/guilds/*/status', (route) => json(route, playerStatus));
+  await page.route('**/api/guilds/*/queue**', (route) => json(route, queue));
+  await page.route('**/api/guilds/*/player/*', (route) => {
+    const request = route.request();
+    if (request.method() !== 'POST') return route.fallback();
+    const action = new URL(request.url()).pathname.split('/').pop()!;
+    const body = request.postDataJSON();
+    actions.push({ action, body });
+    // Keep the mocked queue in step so the refetch after a move agrees with the UI.
+    const tracks = queue.tracks as unknown[] | undefined;
+    if (action === 'move' && tracks) tracks.splice(body.to, 0, tracks.splice(body.from, 1)[0]);
+    return json(route, { ok: true, success: true });
+  });
+  return actions;
+}
+
+test.describe('player accessibility', () => {
+  test('volume, autoplay and seek are usable from the keyboard', async ({ page }) => {
+    await mockApi(page);
+    const actions = await mockPlayer(page, status, twoTrackQueue);
+    await page.goto(`/dashboard/${guildId}?view=player`);
+
+    await expect(page.getByRole('slider', { name: 'Seek' })).toHaveAttribute('aria-valuetext', /of 3:00$/);
+    const volume = page.getByRole('slider', { name: 'Volume' });
+    await expect(volume).toHaveAttribute('aria-valuenow', '80');
+    await volume.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(volume).toHaveAttribute('aria-valuenow', '90');
+    await page.keyboard.press('Home');
+    await expect(volume).toHaveAttribute('aria-valuetext', '0%');
+    await expect.poll(() => actions.filter((a) => a.action === 'volume').map((a) => (a.body as { volume: number }).volume)).toEqual([90, 0]);
+
+    await expect(page.getByRole('button', { name: /^Autoplay/ })).toHaveAttribute('aria-pressed', 'true');
+    // No filter is active, so there is nothing to clear.
+    await expect(page.getByRole('button', { name: 'Clear filter' })).toHaveCount(0);
+    await expect(page.getByRole('combobox', { name: 'Audio filter' })).toHaveText('Audio filter');
+  });
+
+  test('queue rows can be reordered and removed from the keyboard', async ({ page }) => {
+    await mockApi(page);
+    const actions = await mockPlayer(page, status, structuredClone(twoTrackQueue));
+    await page.goto(`/dashboard/${guildId}?view=player`);
+
+    await expect(page.getByText('2 tracks', { exact: true })).toBeVisible();
+    const handle = page.getByRole('button', { name: 'Reorder First up' });
+    await handle.focus();
+    await page.keyboard.press('ArrowDown');
+    const rows = page.getByRole('list', { name: 'Queued tracks' }).getByRole('listitem');
+    await expect(rows.first()).toContainText('Second up');
+    await expect(page.getByRole('button', { name: 'Reorder First up' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Remove Second up' })).toBeVisible();
+    await expect.poll(() => actions.find((a) => a.action === 'move')?.body).toEqual({ from: 0, to: 1 });
+  });
+
+  test('a disconnected bot gets an explanation instead of dead controls', async ({ page }) => {
+    await mockApi(page);
+    await mockPlayer(page, { ...status, connected: false, playing: false, currentTrack: null }, { current: null, tracks: [], total: 0, page: 0, totalPages: 0, revision: 'empty' });
+    await page.goto(`/dashboard/${guildId}?view=player`);
+    await expect(page.getByText('Bread is not in a voice channel')).toBeVisible();
+    await expect(page.getByRole('slider', { name: 'Volume' })).toHaveCount(0);
+  });
+});
+
+test('empty views point back to the player', async ({ page }) => {
+  await mockApi(page);
+  await page.route('**/api/guilds/*/history**', (route) => json(route, { items: [], page: 1, limit: 25, total: 0, totalPages: 0 }));
+  await page.goto(`/dashboard/${guildId}?view=history`);
+  await expect(page.getByText('No playback history yet')).toBeVisible();
+  await page.getByRole('button', { name: 'Open Player' }).click();
+  await expect(page).toHaveURL(/view=player/);
+});
+
+test('settings toggles and sliders are labelled', async ({ page }) => {
+  await mockApi(page);
+  await page.goto(`/dashboard/${guildId}`);
+  await expect(page.getByRole('switch', { name: 'Autoplay' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('slider', { name: 'Vote skip threshold' })).toBeVisible();
+});
+
+test('phones get a top bar with a menu that opens and closes', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'The top bar only exists on phones');
+  await mockApi(page);
+  await page.route('**/api/guilds/*/history**', (route) => json(route, { items: [], page: 1, limit: 25, total: 0, totalPages: 0 }));
+  await page.goto(`/dashboard/${guildId}?view=history`);
+
+  const open = page.getByRole('button', { name: 'Open menu' });
+  await expect(open).toHaveAttribute('aria-expanded', 'false');
+  // The page header sits below the bar instead of under a floating button.
+  const bar = await page.getByRole('banner').boundingBox();
+  const heading = await page.getByRole('heading', { name: 'Listening History', level: 2 }).boundingBox();
+  expect(heading!.y).toBeGreaterThanOrEqual(bar!.y + bar!.height);
+
+  await open.click();
+  await expect(open).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Close menu' })).toBeInViewport();
+  await page.keyboard.press('Escape');
+  await expect(open).toHaveAttribute('aria-expanded', 'false');
+
+  await open.click();
+  await page.getByRole('button', { name: 'Close menu' }).click();
+  await expect(open).toHaveAttribute('aria-expanded', 'false');
 });

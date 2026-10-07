@@ -5,15 +5,16 @@ import { useEffect, useState } from 'react';
 import { apiFetch, type HistoryPage, formatDuration } from '@/lib/api';
 import { ChevronLeft, ChevronRight, Clock3, History, ListPlus, Play } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
-import { ListSkeleton } from '@/components/dashboard/DashboardPrimitives';
+import { EmptyState, ListSkeleton } from '@/components/dashboard/DashboardPrimitives';
 
 type DashboardHistoryProps = {
   guildId: string;
   canQueue?: boolean;
   onRequeue?: (uri: string, mode: 'queue' | 'now') => void | Promise<unknown>;
+  onOpenPlayer?: () => void;
 };
 
-export function DashboardHistory({ guildId, canQueue = false, onRequeue }: DashboardHistoryProps) {
+export function DashboardHistory({ guildId, canQueue = false, onRequeue, onOpenPlayer }: DashboardHistoryProps) {
   const toast = useToast();
   const [history, setHistory] = useState<HistoryPage | null>(null);
   const [page, setPage] = useState(0);
@@ -47,7 +48,14 @@ export function DashboardHistory({ guildId, canQueue = false, onRequeue }: Dashb
         </div>
         <div className="divide-y divide-border/60">
           {loading && <div className="p-2"><ListSkeleton items={8} /></div>}
-          {!loading && history?.items.length === 0 && <div className="p-10 text-center text-sm text-text-muted">No playback history yet.</div>}
+          {!loading && history?.items.length === 0 && (
+            <EmptyState
+              icon={History}
+              title="No playback history yet"
+              description="Tracks played on this server land here, ready to queue again."
+              action={onOpenPlayer ? { label: 'Open Player', icon: Play, onClick: onOpenPlayer } : undefined}
+            />
+          )}
           {!loading && history?.items.map((entry) => {
             const replayable = /^https?:\/\//i.test(entry.track.uri);
             const busy = busyUri === entry.track.uri;
