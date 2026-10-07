@@ -4,8 +4,8 @@ import { ToastProvider } from '@/components/ui/ToastProvider';
 import { CookieNotice } from '@/components/legal/CookieNotice';
 
 export const metadata: Metadata = {
-  title: 'Bread — Discord Music Bot',
-  description: 'Music playback, audio filters, games, and economy — all in one Discord bot. Manage everything from the dashboard.',
+  title: 'Bread - Discord Music Bot',
+  description: 'Music playback, audio filters, games and economy, all in one Discord bot. Manage everything from the dashboard.',
   icons: [
     { rel: 'icon', url: '/assets/breadiconpng.png?v=3', type: 'image/png', sizes: 'any' },
     { rel: 'apple-touch-icon', url: '/assets/breadicon.png?v=3' }

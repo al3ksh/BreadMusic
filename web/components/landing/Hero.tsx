@@ -50,7 +50,7 @@ export function Hero() {
 
         {/* Subtitle */}
         <p className="text-base sm:text-xl text-text-secondary max-w-2xl mx-auto mb-6 sm:mb-10 leading-relaxed animate-fade-up delay-300">
-          Music playback, audio filters, games, and economy — all in one bot.
+          Music playback, audio filters, games and economy, all in one bot.
           Manage everything from your dashboard.
         </p>
 

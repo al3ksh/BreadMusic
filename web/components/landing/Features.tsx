@@ -24,7 +24,7 @@ const features = [
   {
     icon: <Users size={22} />,
     title: 'Per-Server Config',
-    description: 'DJ roles, volume limits, 24/7 mode, AFK timeouts — each server, your rules.',
+    description: 'DJ roles, volume limits, 24/7 mode, AFK timeouts. Each server, your rules.',
   },
   {
     icon: <Shuffle size={22} />,
