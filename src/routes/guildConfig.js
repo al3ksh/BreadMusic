@@ -191,6 +191,7 @@ function createGuildConfigRouter({
       voiceChannelStatus: config.voiceChannelStatus,
       openWithoutDJ: config.openWithoutDJ,
       fairQueue: config.fairQueue,
+      maxQueuedPerUser: config.maxQueuedPerUser,
       dashboardAccess: config.dashboardAccess,
     });
   });
@@ -232,6 +233,7 @@ function createGuildConfigRouter({
     if (typeof body.voiceChannelStatus === 'boolean') updates.voiceChannelStatus = body.voiceChannelStatus;
     if (typeof body.openWithoutDJ === 'boolean') updates.openWithoutDJ = body.openWithoutDJ;
     if (typeof body.fairQueue === 'boolean') updates.fairQueue = body.fairQueue;
+    if (Number.isFinite(body.maxQueuedPerUser)) updates.maxQueuedPerUser = body.maxQueuedPerUser;
     if (typeof body.defaultVolume === 'number') updates.defaultVolume = Math.max(0, Math.min(100, body.defaultVolume));
 
     let updated = setConfig(guildId, updates);

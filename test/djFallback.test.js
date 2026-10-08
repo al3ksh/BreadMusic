@@ -12,12 +12,12 @@ function createGuild() {
   return { guild, botChannel };
 }
 
-function createMember(guild, id, { channel = null, dj = false } = {}) {
+function createMember(guild, id, { channel = null, dj = false, deaf = false } = {}) {
   const member = {
     id,
     guild,
     user: { id, bot: false },
-    voice: { channelId: channel?.id ?? null, channel },
+    voice: { channelId: channel?.id ?? null, channel, deaf },
     roles: { cache: { has: (roleId) => dj && roleId === 'dj-role' } },
     permissions: { has: () => false },
   };
@@ -45,6 +45,13 @@ test('a DJ in the bot channel takes the controls back', () => {
   assert.equal(canActAsDJ(alice, config), false);
   assert.equal(canActAsDJ(dj, config), true);
   assert.throws(() => assertDJ({ member: alice }, config), /A DJ is listening/);
+});
+
+test('a deafened DJ does not hold the controls', () => {
+  const { guild, botChannel } = createGuild();
+  const alice = createMember(guild, 'alice', { channel: botChannel });
+  createMember(guild, 'dj', { channel: botChannel, dj: true, deaf: true });
+  assert.equal(canActAsDJ(alice, config), true);
 });
 
 test('the fallback needs the member in the bot channel and can be turned off', () => {

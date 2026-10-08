@@ -1,4 +1,8 @@
-const { getConfig } = require('../state/guildConfig');
+const { getConfig, hasDJPermissions } = require('../state/guildConfig');
+const { CommandError } = require('../utils/commandError');
+
+const DUPLICATE_WARNING_MS = 60_000;
+const duplicateWarnings = new Map();
 
 function requesterKey(track) {
   return track?.requester?.id ?? 'unknown';
@@ -42,4 +46,60 @@ async function queueRequestedTracks(player, input, { fair = getConfig(player.gui
   }
 }
 
-module.exports = { queueRequestedTracks, fairIndex };
+// Per-person limit: trims what someone adds to the room they have left and refuses once they
+// have nothing left. Tracks already waiting count; the one playing and autoplay picks do not.
+function fitQueueLimit(player, tracks, { userId, member, config = getConfig(player.guildId) }) {
+  const limit = config.maxQueuedPerUser || 0;
+  if (limit <= 0 || hasDJPermissions(member, config)) return { tracks, skipped: 0 };
+  const waiting = player.queue.tracks.filter((track) => !track.isAutoplay && track.requester?.id === userId).length;
+  const room = Math.max(0, limit - waiting);
+  if (room === 0) {
+    throw new CommandError(`You already have ${limit} ${limit === 1 ? 'track' : 'tracks'} waiting. Let one play first.`);
+  }
+  return { tracks: tracks.slice(0, room), skipped: Math.max(0, tracks.length - room) };
+}
+
+function sameTrack(a, b) {
+  if (!a?.info || !b?.info) return false;
+  if (a.encoded && a.encoded === b.encoded) return true;
+  if (a.info.uri && a.info.uri === b.info.uri) return true;
+  return Boolean(a.info.identifier && a.info.identifier === b.info.identifier
+    && a.info.sourceName === b.info.sourceName);
+}
+
+// Where a track already waits: 0 while it plays, 1-based queue position otherwise, null if it is not there.
+function findQueuedCopy(player, track) {
+  if (sameTrack(player.queue.current, track)) return 0;
+  const index = player.queue.tracks.findIndex((entry) => !entry.isAutoplay && sameTrack(entry, track));
+  return index === -1 ? null : index + 1;
+}
+
+function describeQueuedCopy(track, position) {
+  const title = track.info?.title ?? 'This track';
+  return position === 0 ? `**${title}** is playing right now.` : `**${title}** is already in the queue at #${position}.`;
+}
+
+// For clients without a confirm button: the first add of a copy is turned away with a warning,
+// and asking again for the same track within a minute queues it anyway.
+function takeDuplicateWarning(player, track, userId) {
+  const position = findQueuedCopy(player, track);
+  if (position === null) return null;
+  const now = Date.now();
+  for (const [key, expiresAt] of duplicateWarnings) if (expiresAt <= now) duplicateWarnings.delete(key);
+  const key = `${player.guildId}:${userId}:${track.info?.uri || track.info?.identifier || track.encoded}`;
+  if (duplicateWarnings.has(key)) {
+    duplicateWarnings.delete(key);
+    return null;
+  }
+  duplicateWarnings.set(key, now + DUPLICATE_WARNING_MS);
+  return `${describeQueuedCopy(track, position)} Add it again to queue a second copy.`.replace(/\*\*/g, '');
+}
+
+module.exports = {
+  queueRequestedTracks,
+  fairIndex,
+  fitQueueLimit,
+  findQueuedCopy,
+  describeQueuedCopy,
+  takeDuplicateWarning,
+};

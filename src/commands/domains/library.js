@@ -1,5 +1,5 @@
 const { tagOrigin } = require('../../music/trackOrigin');
-const { queueRequestedTracks } = require('../../music/queueInsert');
+const { queueRequestedTracks, fitQueueLimit } = require('../../music/queueInsert');
 const library = require('../../music/library');
 
 const CREATE_FAILURES = {
@@ -38,9 +38,13 @@ const createLibraryCommands = (context) => {
   // Queues saved entries before any autoplay suggestions, like /play does.
   async function queueEntries(interaction, name, entries, shuffle) {
     if (entries.length === 0) throw new CommandError(`**${name}** is empty.`);
-    const { player, voiceChannelId } = await ensureVoice(interaction, { requireSameChannel: true, createPlayer: true });
+    const { player, voiceChannelId, config } = await ensureVoice(interaction, { requireSameChannel: true, createPlayer: true });
     const ordered = shuffle ? library.shuffled(entries) : entries;
-    const tracks = tagOrigin(ordered.map((entry) => library.entryToTrack(entry, interaction.user)), 'library');
+    const { tracks, skipped } = fitQueueLimit(
+      player,
+      tagOrigin(ordered.map((entry) => library.entryToTrack(entry, interaction.user)), 'library'),
+      { userId: interaction.user.id, member: interaction.member, config },
+    );
     tracks.forEach((track) => addManualSeed(player.guildId, track, { invalidatePrefetch: false }));
     await queueRequestedTracks(player, tracks);
     if (!player.playing && !player.paused) await player.play();
@@ -55,6 +59,7 @@ const createLibraryCommands = (context) => {
       )
       .setColor(BRAND_COLORS.primary)
       .setTimestamp();
+    if (skipped > 0) embed.setFooter({ text: `${skipped} more left out: the limit is ${config.maxQueuedPerUser} waiting tracks per person.` });
     await interaction.editReply({ embeds: [embed] });
   }
 

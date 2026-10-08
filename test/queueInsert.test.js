@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { queueRequestedTracks } = require('../src/music/queueInsert');
+const { queueRequestedTracks, fitQueueLimit, takeDuplicateWarning } = require('../src/music/queueInsert');
 
 function track(requester, title, extra = {}) {
   return { info: { title }, requester: { id: requester }, ...extra };
@@ -48,4 +48,34 @@ test('the fair queue keeps arrival order within a turn and stays ahead of autopl
   await queueRequestedTracks(player, track('a', 'a2'), { fair: true });
   await queueRequestedTracks(player, track('c', 'c1'), { fair: true });
   assert.deepEqual(titles(player), ['a1', 'b1', 'c1', 'a2', 'auto']);
+});
+
+const listener = { permissions: { has: () => false }, roles: { cache: { has: () => false } } };
+const admin = { permissions: { has: () => true }, roles: { cache: { has: () => false } } };
+
+test('the per-person limit is off by default and trims to the room left', () => {
+  const player = createPlayer(track('a', 'now'), [track('a', 'a1'), track('bot', 'auto', { isAutoplay: true })]);
+  const adding = [track('a', 'a2'), track('a', 'a3'), track('a', 'a4')];
+  assert.equal(fitQueueLimit(player, adding, { userId: 'a', member: listener, config: { maxQueuedPerUser: 0 } }).tracks.length, 3);
+
+  // The playing track and autoplay picks do not count, so a1 leaves room for two more.
+  const fitted = fitQueueLimit(player, adding, { userId: 'a', member: listener, config: { maxQueuedPerUser: 3 } });
+  assert.deepEqual(fitted.tracks.map((entry) => entry.info.title), ['a2', 'a3']);
+  assert.equal(fitted.skipped, 1);
+});
+
+test('the per-person limit refuses when full and never applies to DJs', () => {
+  const player = createPlayer(null, [track('a', 'a1'), track('a', 'a2')]);
+  const config = { maxQueuedPerUser: 2, djRoleId: null };
+  assert.throws(() => fitQueueLimit(player, [track('a', 'a3')], { userId: 'a', member: listener, config }), /already have 2 tracks waiting/);
+  assert.equal(fitQueueLimit(player, [track('b', 'b1')], { userId: 'b', member: listener, config }).tracks.length, 1);
+  assert.equal(fitQueueLimit(player, [track('a', 'a3')], { userId: 'a', member: admin, config }).tracks.length, 1);
+});
+
+test('a copy already in the queue is flagged once, then allowed', () => {
+  const song = (requester) => track(requester, 'Song', { info: { title: 'Song', uri: 'https://example.com/song' } });
+  const player = createPlayer(track('a', 'now'), [track('a', 'other'), song('a')]);
+  assert.equal(takeDuplicateWarning(player, song('b'), 'b'), 'Song is already in the queue at #2. Add it again to queue a second copy.');
+  assert.equal(takeDuplicateWarning(player, song('b'), 'b'), null);
+  assert.equal(takeDuplicateWarning(player, track('b', 'fresh', { info: { title: 'fresh', uri: 'https://example.com/fresh' } }), 'b'), null);
 });

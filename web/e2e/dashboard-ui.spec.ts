@@ -272,6 +272,7 @@ test('take turns toggles and the DJ fallback only shows with a DJ role', async (
   await expect(turns).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText('You have unsaved changes')).toBeVisible();
   await expect(page.getByRole('switch', { name: 'Open Controls Without a DJ' })).toHaveCount(0);
+  await expect(page.getByLabel('Tracks per person')).toHaveValue('0');
 });
 
 test('phones get a top bar with a menu that opens and closes', async ({ page, isMobile }) => {

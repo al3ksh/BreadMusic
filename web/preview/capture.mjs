@@ -83,7 +83,7 @@ try {
     if (p === '/api/guilds') return send([{ id: guildId, name: 'The listening room', icon: null, permissions: 8, bot_present: true, access_level: 'admin', can_access: true }]);
     if (p === '/api/activity/config') return send({ enabled: true, clientId: 'demo' });
     if (p === '/api/activity/token') return send({ access_token: 'demo' });
-    if (p.endsWith('/config')) return send({ defaultVolume: 60, maxVolume: 100, autoplay: true, autoplayMode: 'ai_assisted', dashboardAccess: 'admin', activityControl: 'dj', djRoleId: 'role-dj', djRoleName: 'DJ', modRoleId: 'role-mod', modRoleName: 'Moderator', voteSkipPercent: 0.5, afkTimeout: 300000, persistentQueue: true, voiceChannelStatus: true, openWithoutDJ: true, fairQueue: false });
+    if (p.endsWith('/config')) return send({ defaultVolume: 60, maxVolume: 100, autoplay: true, autoplayMode: 'ai_assisted', dashboardAccess: 'admin', activityControl: 'dj', djRoleId: 'role-dj', djRoleName: 'DJ', modRoleId: 'role-mod', modRoleName: 'Moderator', voteSkipPercent: 0.5, afkTimeout: 300000, persistentQueue: true, voiceChannelStatus: true, openWithoutDJ: true, fairQueue: false, maxQueuedPerUser: 0 });
     if (p.endsWith('/health')) return send({ api: { ok: true }, discord: { ok: true, ping: 26 }, lavalink: { ok: true }, player: { exists: true, connected: true } });
     if (p.endsWith('/roles')) return send([{ id: 'role-dj', name: 'DJ', color: '#b7a9eb' }, { id: 'role-mod', name: 'Moderator', color: '#61d59b' }]);
     if (p.endsWith('/channels')) return send([]);

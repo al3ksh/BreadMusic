@@ -133,6 +133,13 @@ const createConfigCommands = (context) => {
           .addBooleanOption((option) =>
             option.setName('fair_queue').setDescription('Alternate queued tracks between the people who asked for them?'),
           )
+          .addIntegerOption((option) =>
+            option
+              .setName('max_queued_per_user')
+              .setDescription('Tracks one person can have waiting (0 = no limit, DJs exempt).')
+              .setMinValue(0)
+              .setMaxValue(50),
+          )
           .addStringOption((option) =>
             option
               .setName('dashboard_access')
@@ -230,6 +237,8 @@ const createConfigCommands = (context) => {
       if (openWithoutDJ !== null) updates.openWithoutDJ = openWithoutDJ;
       const fairQueue = interaction.options.getBoolean('fair_queue');
       if (fairQueue !== null) updates.fairQueue = fairQueue;
+      const maxQueued = interaction.options.getInteger('max_queued_per_user');
+      if (maxQueued !== null) updates.maxQueuedPerUser = maxQueued;
       const dashboardAccess = interaction.options.getString('dashboard_access');
       if (dashboardAccess) updates.dashboardAccess = dashboardAccess;
       const prefSource = interaction.options.getString('preferred_source');

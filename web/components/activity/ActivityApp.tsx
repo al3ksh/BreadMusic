@@ -848,7 +848,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
 
     setActionBusy(action);
     try {
-      const result = await activityFetch<{ message?: string; liked?: boolean; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
+      const result = await activityFetch<{ message?: string; liked?: boolean; count?: number; skipped?: number; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -861,7 +861,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
         setLibraryRefreshKey((key) => key + 1);
       }
       if (action === 'autoplay_dislike' && !result.voteSkip) notify('Disliked: autoplay will avoid this track', 'success');
-      return true;
+      return result;
     } catch (error) {
       if ((error as Error & { status?: number }).status === 403) {
         await refreshCapabilities();
@@ -881,7 +881,9 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
           setVolumeDraft(null);
         }
       }
-      notify(error instanceof Error ? error.message : 'Player action failed', 'error');
+      // 409 means a queue rule said no (a copy already waiting, the per-person limit), not a failure.
+      const tone = (error as Error & { status?: number }).status === 409 ? 'info' : 'error';
+      notify(error instanceof Error ? error.message : 'Player action failed', tone);
       return false;
     } finally {
       setActionBusy(null);
@@ -936,15 +938,17 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
   const playLibrary = useCallback(async (playlistId: string, shuffle: boolean) => {
     if (!guildId) return false;
     try {
-      const result = await activityFetch<{ title?: string; count?: number }>(`/api/guilds/${guildId}/player/library`, {
+      const result = await activityFetch<{ title?: string; count?: number; skipped?: number }>(`/api/guilds/${guildId}/player/library`, {
         method: 'POST',
         body: JSON.stringify({ playlistId, shuffle }),
       });
-      notify(`${shuffle ? 'Shuffled in' : 'Queued'} ${result.count ?? 0} tracks from ${result.title || 'your library'}`, 'success');
+      const leftOut = result.skipped ? `, ${result.skipped} left out by the per-person limit` : '';
+      notify(`${shuffle ? 'Shuffled in' : 'Queued'} ${result.count ?? 0} tracks from ${result.title || 'your library'}${leftOut}`, 'success');
       return true;
     } catch (error) {
-      if ((error as Error & { status?: number }).status === 403) await refreshCapabilities();
-      notify(error instanceof Error ? error.message : 'Could not queue that playlist', 'error');
+      const status = (error as Error & { status?: number }).status;
+      if (status === 403) await refreshCapabilities();
+      notify(error instanceof Error ? error.message : 'Could not queue that playlist', status === 409 ? 'info' : 'error');
       return false;
     }
   }, [activityFetch, guildId, notify, refreshCapabilities]);
@@ -957,7 +961,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
   const playRadioStation = useCallback(async (station: RadioStation) => {
     const applied = await playerAction('radio', { stationId: station.id, channelId });
     if (applied) notify(`Tuned in to ${station.name}`, 'success');
-    return applied;
+    return Boolean(applied);
   }, [channelId, notify, playerAction]);
 
   const fetchHistoryPage = useCallback((page: number) => {
@@ -1274,8 +1278,9 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
       channelId,
     });
     if (!added) return;
+    const leftOut = added.skipped ? `, ${added.skipped} left out by the per-person limit` : '';
     notify(
-      `${status.currentTrack ? 'Added to queue' : 'Playing'}: ${searchPlaylist.name} (${searchPlaylist.trackCount} tracks)`,
+      `${status.currentTrack ? 'Added to queue' : 'Playing'}: ${searchPlaylist.name} (${added.count ?? searchPlaylist.trackCount} tracks${leftOut})`,
       'success',
     );
     setSearchResults([]);

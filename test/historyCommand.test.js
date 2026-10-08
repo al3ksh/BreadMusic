@@ -77,6 +77,7 @@ test('/history paging and queue again', async () => {
     guildId: 'g1',
     customId: 'history:g1:play:0',
     values: [String(1_700_000_000_000 - 3 * 60_000)],
+    user: { id: 'u1' },
     deferReply: async () => {},
     editReply: async (value) => { reply = value; },
   });

@@ -10,7 +10,8 @@ const { applySound, getSoundState, normalizePreset, resetSound } = require('../m
 const { isStreamTrack } = require('../music/autoplay/normalize');
 const defaultRadio = require('../music/radio');
 const { playStation } = require('../music/radioPlayback');
-const { queueRequestedTracks } = require('../music/queueInsert');
+const { queueRequestedTracks, fitQueueLimit, takeDuplicateWarning } = require('../music/queueInsert');
+const { CommandError } = require('../utils/commandError');
 
 // Anyone listening in the bot's voice channel may vote to skip and give autoplay feedback.
 const listenerActions = new Set(['skip', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
@@ -200,6 +201,9 @@ function createPlayerRouter({
           return channelId;
         };
         if (!resolveUploadChannel()) return;
+        // Refuse before a long upload when the person has no room left in the queue.
+        const limitOptions = { userId: getDashboardRequester(req, client).id, member: req.guildMember, config: guildConfig };
+        if (player) fitQueueLimit(player, [null], limitOptions);
 
         const originalName = sanitizeUploadName(decodeUploadHeader(req.get('x-file-name')) || 'upload');
         const ext = path.extname(originalName).toLowerCase();
@@ -366,6 +370,7 @@ function createPlayerRouter({
           }
         }
 
+        fitQueueLimit(player, [queuedTrack], limitOptions);
         const startedFromIdle = !player.queue.current || (!player.playing && !player.paused);
         await addManualTrackToQueue(player, queuedTrack);
 
@@ -387,7 +392,9 @@ function createPlayerRouter({
       } catch (err) {
         console.error('Player upload error:', err);
         await safeDeleteFile(uploadTempPath);
-        if (!res.headersSent) {
+        if (!res.headersSent && err instanceof CommandError) {
+          res.status(409).json({ error: err.message });
+        } else if (!res.headersSent) {
           const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : err.code === 'ECONNABORTED' ? 400 : 500;
           res.status(status).json({ error: `Upload failed: ${err.message}` });
         }
@@ -667,7 +674,11 @@ function createPlayerRouter({
           }
 
           const requester = getDashboardRequester(req, client);
-          const tracksToAdd = playlistTracks.map((track) => ({ ...track, requester, origin: cachedSearch.origin ?? 'link' }));
+          const { tracks: tracksToAdd, skipped } = fitQueueLimit(
+            player,
+            playlistTracks.map((track) => ({ ...track, requester, origin: cachedSearch.origin ?? 'link' })),
+            { userId: requester.id, member, config: guildConfig },
+          );
           tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
           clearAutoplayPrefetch(guildId);
           await queueRequestedTracks(player, tracksToAdd, { fair: guildConfig.fairQueue });
@@ -675,7 +686,7 @@ function createPlayerRouter({
           await client.musicUI?.refresh(player).catch(() => {});
           await savePlayerState(player).catch(() => {});
           playerSearchCache.delete(cacheKey);
-          return res.json({ success: true, title: cachedSearch.playlist.name, count: tracksToAdd.length, mode: 'queue', truncated: cachedSearch.playlist.truncated });
+          return res.json({ success: true, title: cachedSearch.playlist.name, count: tracksToAdd.length, skipped, mode: 'queue', truncated: cachedSearch.playlist.truncated });
         }
 
         // Plays the requester's Liked list or one of their saved playlists.
@@ -689,14 +700,18 @@ function createPlayerRouter({
 
           const requester = getDashboardRequester(req, client);
           const entries = req.body?.shuffle === true ? library.shuffled(playable.tracks) : playable.tracks;
-          const tracksToAdd = tagOrigin(entries.map((entry) => library.entryToTrack(entry, requester)), 'library');
+          const { tracks: tracksToAdd, skipped } = fitQueueLimit(
+            player,
+            tagOrigin(entries.map((entry) => library.entryToTrack(entry, requester)), 'library'),
+            { userId: requester.id, member, config: guildConfig },
+          );
           tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
           clearAutoplayPrefetch(guildId);
           await queueRequestedTracks(player, tracksToAdd, { fair: guildConfig.fairQueue });
           if (!player.queue.current && !player.playing && !player.paused) await player.play();
           await client.musicUI?.refresh(player).catch(() => {});
           await savePlayerState(player).catch(() => {});
-          return res.json({ success: true, title: playable.name, count: tracksToAdd.length, mode: 'queue' });
+          return res.json({ success: true, title: playable.name, count: tracksToAdd.length, skipped, mode: 'queue' });
         }
 
         // Plays a station picked in the Activity radio tab (a search result or a saved station).
@@ -814,6 +829,10 @@ function createPlayerRouter({
           const requester = getDashboardRequester(req, client);
           // The client names the origin for history replays and search picks.
           const requestedOrigin = [req.body?.origin, metadata?.origin].find(isOrigin) ?? null;
+          const limitOptions = { userId: requester.id, member, config: guildConfig };
+          // Play now skips straight to the track, so it neither waits in line nor asks about copies.
+          const checkRoom = (track) => { if (!playImmediately) fitQueueLimit(player, [track], limitOptions); };
+          const duplicateWarning = (track) => (playImmediately ? null : takeDuplicateWarning(player, track, requester.id));
           if (encoded) {
             const track = {
               encoded,
@@ -830,6 +849,9 @@ function createPlayerRouter({
               requester,
               origin: requestedOrigin ?? 'search',
             };
+            checkRoom(track);
+            const warning = duplicateWarning(track);
+            if (warning) return res.status(409).json({ error: warning, code: 'duplicate' });
             addManualSeed(guildId, track);
             await addRequestedTrackToQueue(player, track, playImmediately);
             if (playImmediately && player.queue.current) await player.skip();
@@ -839,6 +861,7 @@ function createPlayerRouter({
             return res.json({ success: true, mode: playImmediately ? 'now' : 'queue' });
           }
           if (query) {
+            checkRoom(query);
             const searchNode = getUsableNode(client);
             if (!searchNode) return res.status(503).json({ error: 'No Lavalink node available' });
             const defaultSource = client.lavalink?.options?.playerOptions?.defaultSearchPlatform || 'ytsearch';
@@ -857,6 +880,8 @@ function createPlayerRouter({
               return res.status(status).json({ error: failure.description, code: failure.code });
             }
             tagOrigin(track, requestedOrigin ?? classifyQuery(query));
+            const warning = duplicateWarning(track);
+            if (warning) return res.status(409).json({ error: warning, code: 'duplicate' });
             addManualSeed(guildId, track);
             await addRequestedTrackToQueue(player, track, playImmediately);
             if (playImmediately && player.queue.current) await player.skip();
@@ -941,6 +966,10 @@ function createPlayerRouter({
       await savePlayerState(player).catch(() => {});
       res.json({ success: true });
     } catch (err) {
+      if (err instanceof CommandError) {
+        if (!res.headersSent) res.status(409).json({ error: err.message });
+        return;
+      }
       console.error(`Player action ${action} error:`, err);
       if (!res.headersSent) res.status(500).json({ error: `Action failed: ${err.message}` });
     } finally {

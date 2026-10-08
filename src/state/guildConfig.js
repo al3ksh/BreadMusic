@@ -22,6 +22,8 @@ const DEFAULT_CONFIG = {
   openWithoutDJ: true,
   // Requested tracks take turns between the people who queued them.
   fairQueue: false,
+  // How many tracks one person may have waiting in the queue at once. 0 means no limit; DJs are never limited.
+  maxQueuedPerUser: 0,
 };
 
 const DASHBOARD_ACCESS_LEVELS = new Set(['admin', 'mod', 'members']);
@@ -54,6 +56,7 @@ function normalizeVolumeConfig(config) {
   if (!ACTIVITY_CONTROL_MODES.has(normalized.activityControl)) {
     normalized.activityControl = DEFAULT_CONFIG.activityControl;
   }
+  normalized.maxQueuedPerUser = Math.max(0, Math.min(50, Math.trunc(Number(normalized.maxQueuedPerUser) || 0)));
   return normalized;
 }
 
@@ -102,8 +105,11 @@ function hasDJPermissions(member, guildConfig) {
   return false;
 }
 
+// A deafened DJ is not listening, so an admin parked in the channel does not hold the room.
 function isDJListening(voiceChannel, guildConfig) {
-  return Boolean(voiceChannel?.members?.some?.((member) => !member.user?.bot && hasDJPermissions(member, guildConfig)));
+  return Boolean(voiceChannel?.members?.some?.((member) => !member.user?.bot
+    && !member.voice?.deaf
+    && hasDJPermissions(member, guildConfig)));
 }
 
 // The DJ role only holds back the room while a DJ is in it. When nobody with DJ permissions
@@ -134,6 +140,7 @@ function formatConfig(config) {
     `voteSkipPercent: ${(config.voteSkipPercent * 100).toFixed(0)}%`,
     `openWithoutDJ: ${config.openWithoutDJ === false ? 'no' : 'yes'}`,
     `fairQueue: ${config.fairQueue ? 'yes' : 'no'}`,
+    `maxQueuedPerUser: ${config.maxQueuedPerUser ? config.maxQueuedPerUser : 'no limit'}`,
     `stayInChannel (24/7): ${config.stayInChannel ? 'yes' : 'no'}`,
     `afkTimeout: ${(config.afkTimeout / 60000).toFixed(1)} min`,
     `persistentQueue: ${config.persistentQueue ? 'yes' : 'no'}`,

@@ -25,7 +25,7 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed: ${res.status}`);
+    throw Object.assign(new Error(body.error || `Request failed: ${res.status}`), { status: res.status });
   }
 
   return res.json();
@@ -88,6 +88,7 @@ export interface GuildConfig {
   voiceChannelStatus: boolean;
   openWithoutDJ: boolean;
   fairQueue: boolean;
+  maxQueuedPerUser: number;
   dashboardAccess: 'admin' | 'mod' | 'members';
 }
 

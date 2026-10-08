@@ -1,5 +1,8 @@
 const { classifyQuery, tagOrigin } = require('../../music/trackOrigin');
-const { queueRequestedTracks } = require('../../music/queueInsert');
+const { queueRequestedTracks, fitQueueLimit, findQueuedCopy, describeQueuedCopy } = require('../../music/queueInsert');
+const { createSelection } = require('../../state/searchCache');
+
+const DUPLICATE_PREFIX = 'play:dup:';
 const createMusicCommands = (context) => {
   const {
     SlashCommandBuilder,
@@ -171,6 +174,22 @@ const createMusicCommands = (context) => {
 
       // Autocomplete picks come from a text search; otherwise the query tells link from search.
       tagOrigin(tracksToAdd, resolvedTrack ? 'search' : classifyQuery(rawQuery));
+
+      // A single track that is already waiting gets a question instead of a second copy.
+      const copyPosition = isPlaylist ? null : findQueuedCopy(player, tracksToAdd[0]);
+      if (copyPosition !== null) {
+        const selectionId = createSelection(tracksToAdd, interaction.user.id, interaction.guildId, 120_000);
+        await interaction.editReply({
+          content: describeQueuedCopy(tracksToAdd[0], copyPosition),
+          components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`${DUPLICATE_PREFIX}${selectionId}`).setLabel('Add anyway').setStyle(ButtonStyle.Secondary),
+          )],
+        });
+        return;
+      }
+
+      const fitted = fitQueueLimit(player, tracksToAdd, { userId: interaction.user.id, member: interaction.member, config });
+      tracksToAdd = fitted.tracks;
       tracksToAdd.forEach((track) => addManualSeed(player.guildId, track));
 
       await queueRequestedTracks(player, isPlaylist ? tracksToAdd : tracksToAdd[0], { fair: config.fairQueue });
@@ -190,11 +209,36 @@ const createMusicCommands = (context) => {
           )
           .setColor(BRAND_COLORS.primary)
           .setTimestamp();
+        if (fitted.skipped > 0) {
+          playlistEmbed.setFooter({ text: `${fitted.skipped} more left out: the limit is ${config.maxQueuedPerUser} waiting tracks per person.` });
+        }
         await interaction.editReply({ embeds: [playlistEmbed] });
       } else {
         const embed = buildTrackEmbed(tracksToAdd[0], interaction.user, voiceChannelId);
         await interaction.editReply({ embeds: [embed] });
       }
+    },
+    componentPrefix: DUPLICATE_PREFIX,
+    // "Add anyway" on the duplicate question queues the copy after all.
+    async handleComponent(interaction) {
+      const selectionId = interaction.customId.slice(DUPLICATE_PREFIX.length);
+      const selection = getSelection(selectionId);
+      if (!selection || selection.guildId !== interaction.guildId) {
+        await interaction.update({ content: 'That question expired. Run /play again to add it.', components: [] });
+        return;
+      }
+      if (selection.userId !== interaction.user.id) {
+        await interaction.reply({ content: 'Only the person who asked for this track can add it.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const { player, voiceChannelId, config } = await ensureVoice(interaction, { requireSameChannel: true, createPlayer: true });
+      const { tracks } = fitQueueLimit(player, selection.tracks, { userId: interaction.user.id, member: interaction.member, config });
+      deleteSelection(selectionId);
+      tracks.forEach((track) => addManualSeed(player.guildId, track));
+      await queueRequestedTracks(player, tracks[0], { fair: config.fairQueue });
+      if (!player.playing && !player.paused) await player.play();
+      await queuePersist(player);
+      await interaction.update({ content: '', embeds: [buildTrackEmbed(tracks[0], interaction.user, voiceChannelId)], components: [] });
     },
   },
   {

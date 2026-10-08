@@ -1,5 +1,5 @@
 const { tagOrigin } = require('../../music/trackOrigin');
-const { queueRequestedTracks } = require('../../music/queueInsert');
+const { queueRequestedTracks, fitQueueLimit } = require('../../music/queueInsert');
 const { getGuildHistory } = require('../../state/analyticsStore');
 
 const COMPONENT_PREFIX = 'history:';
@@ -92,7 +92,8 @@ const createHistoryCommands = (context) => {
     if (!item?.track.uri) throw new CommandError('That play is no longer in the history.');
 
     await interaction.deferReply();
-    const { player, voiceChannelId } = await ensureVoice(interaction, { requireSameChannel: true, createPlayer: true });
+    const { player, voiceChannelId, config } = await ensureVoice(interaction, { requireSameChannel: true, createPlayer: true });
+    fitQueueLimit(player, [item], { userId: interaction.user.id, member: interaction.member, config });
     let track;
     try {
       const result = await player.search(item.track.uri, interaction.user);

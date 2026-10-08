@@ -39,7 +39,9 @@ export default function GuildPage() {
       });
       toast.success(mode === 'now' ? 'Playing from history' : 'Added to queue from history');
     } catch (error) {
-      toast.error('Replay failed', error instanceof Error ? error.message : 'Request failed.');
+      const message = error instanceof Error ? error.message : 'Request failed.';
+      if ((error as { status?: number }).status === 409) toast.info('Not added', message);
+      else toast.error('Replay failed', message);
     }
   }, [guildId, toast]);
   const openView = useCallback((view: DashboardView) => router.push(`/dashboard/${guildId}?view=${view}`), [router, guildId]);
@@ -512,7 +514,9 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     } catch (err) {
       console.error('Player action failed:', err);
       const errorText = err instanceof Error ? err.message : 'Unknown player action error.';
-      toast.error('Player action failed', errorText);
+      // 409 is a queue rule saying no (a copy already waiting, the per-person limit), not a failure.
+      if ((err as { status?: number }).status === 409) toast.info('Not added', errorText);
+      else toast.error('Player action failed', errorText);
       await fetchData(); // revert on fail
       return false;
     }
