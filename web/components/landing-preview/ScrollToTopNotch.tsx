@@ -12,13 +12,21 @@ export function ScrollToTopNotch({ hidden = false }: { hidden?: boolean }) {
 
   useEffect(() => {
     let frame = 0;
+    let lastY = window.scrollY;
+    let scrollingUp = false;
     const update = () => {
       frame = 0;
       const root = document.documentElement;
       const maxScroll = Math.max(1, root.scrollHeight - root.clientHeight);
       notchRef.current?.style.setProperty('--scroll-progress', String(Math.min(1, window.scrollY / maxScroll)));
+      // Stay out of the way while reading: only offer the way back when heading up or at the end.
+      if (Math.abs(window.scrollY - lastY) > 4) {
+        scrollingUp = window.scrollY < lastY;
+        lastY = window.scrollY;
+      }
+      const nearEnd = maxScroll - window.scrollY < 160;
       const hero = document.getElementById('main-content');
-      const nextVisible = Boolean(hero && hero.getBoundingClientRect().bottom <= 0);
+      const nextVisible = Boolean(hero && hero.getBoundingClientRect().bottom <= 0) && (scrollingUp || nearEnd);
       if (visibleRef.current !== nextVisible) {
         visibleRef.current = nextVisible;
         setVisible(nextVisible);

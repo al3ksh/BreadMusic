@@ -52,6 +52,10 @@ test('product showcase starts with Dashboard, exposes lyrics and the edge notch 
     window.scrollTo(0, hero ? window.scrollY + hero.getBoundingClientRect().bottom + 1 : innerHeight);
   });
   await expect.poll(() => page.locator('#main-content').evaluate(hero => hero.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+  await page.evaluate(() => window.scrollBy(0, 400));
+  // Reading down the page keeps the notch out of the way; it comes back once the reader heads up.
+  await expect(notch).toHaveAttribute('data-visible', 'false');
+  await page.evaluate(() => window.scrollBy(0, -120));
   await expect(notch).toHaveAttribute('data-visible', 'true');
   await expect(notch).toHaveAttribute('aria-hidden', 'false');
   await notch.hover();

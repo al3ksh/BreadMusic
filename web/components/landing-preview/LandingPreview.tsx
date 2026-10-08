@@ -14,7 +14,7 @@ import styles from './preview.module.css';
 
 const heroView = { id: 'activity', label: 'Activity', file: 'activity.png', mobile: 'activity-phone.png', title: 'Music, together in Discord.', description: 'Find tracks, follow live lyrics and control playback from your voice channel.' };
 const views = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, file: 'dashboard.png', mobile: 'dashboard-phone.png', title: 'Server settings and permissions.', description: 'Choose DJ roles, Activity permissions, vote skip thresholds and volume limits for your server.' },
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, file: 'dashboard.png', mobile: 'dashboard-phone.png', title: 'Settings without commands.', description: 'Sign in with Discord and adjust Bread for every server you manage.' },
   { id: 'queue', label: 'Shared queue', icon: ListMusic, file: 'activity-queue.png', mobile: 'activity-queue-phone.png', title: 'A queue everyone can shape.', description: 'Add tracks together, drag them into order and vote to skip. DJ permissions stay in your hands.' },
   { id: 'lyrics', label: 'Live lyrics', icon: BookOpenText, file: 'lyrics.png', mobile: 'lyrics-phone.png', title: 'Lyrics that stay with the room.', description: 'Follow synced lines in the drawer or switch to a focused karaoke view without leaving Activity.' },
 ];

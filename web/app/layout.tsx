@@ -5,7 +5,7 @@ import { CookieNotice } from '@/components/legal/CookieNotice';
 
 export const metadata: Metadata = {
   title: 'Bread - Discord Music Bot',
-  description: 'Music playback, audio filters, games and economy, all in one Discord bot. Manage everything from the dashboard.',
+  description: 'A Discord music bot with a shared player, live lyrics, radio and autoplay that learns.',
   icons: [
     { rel: 'icon', url: '/assets/breadiconpng.png?v=3', type: 'image/png', sizes: 'any' },
     { rel: 'apple-touch-icon', url: '/assets/breadicon.png?v=3' }
