@@ -189,6 +189,8 @@ function createGuildConfigRouter({
       lastfm: getLastfmStatus(),
       activityControl: config.activityControl,
       voiceChannelStatus: config.voiceChannelStatus,
+      openWithoutDJ: config.openWithoutDJ,
+      fairQueue: config.fairQueue,
       dashboardAccess: config.dashboardAccess,
     });
   });
@@ -228,6 +230,8 @@ function createGuildConfigRouter({
       updates.dashboardAccess = body.dashboardAccess === 'dj' ? 'mod' : body.dashboardAccess;
     }
     if (typeof body.voiceChannelStatus === 'boolean') updates.voiceChannelStatus = body.voiceChannelStatus;
+    if (typeof body.openWithoutDJ === 'boolean') updates.openWithoutDJ = body.openWithoutDJ;
+    if (typeof body.fairQueue === 'boolean') updates.fairQueue = body.fairQueue;
     if (typeof body.defaultVolume === 'number') updates.defaultVolume = Math.max(0, Math.min(100, body.defaultVolume));
 
     let updated = setConfig(guildId, updates);

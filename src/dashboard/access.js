@@ -93,6 +93,15 @@ function resolveActivityCapabilities(member, config, voiceContext = {}) {
     canControlPlayer = memberMeetsActivityPolicy(member, config, raw);
   }
 
+  // Same rule as the slash commands: wherever control comes down to the DJ role, the listeners
+  // in the bot's channel act as DJ while no DJ is in there with them.
+  const djDecides = raw === 'dj'
+    || (raw === 'inherit' && normalizeDashboardAccess(config?.dashboardAccess) === 'members');
+  if (!canControlPlayer && djDecides && config?.openWithoutDJ !== false
+    && voiceContext.botVoiceChannelId && voiceContext.djListening === false) {
+    canControlPlayer = true;
+  }
+
   // Control is tied to listening along in the same voice channel.
   // When the caller supplies voice context, members who left the channel
   // (or never joined it) keep a read-only view.

@@ -6,7 +6,7 @@ const {
   EmbedBuilder,
 } = require('discord.js');
 const { registerVote, resetVotes, getVoteState } = require('./voteManager');
-const { hasDJPermissions } = require('../state/guildConfig');
+const { canActAsDJ } = require('../state/guildConfig');
 const { CommandError } = require('./utils');
 const { isAutoplayEnabled, recordAutoplaySkip } = require('./autoplay');
 const { BRAND_COLORS } = require('../theme');
@@ -156,8 +156,7 @@ async function handleSkipRequest(interaction, player, config, client) {
 
   const currentTrack = player.queue.current;
   const currentTitle = currentTrack?.info?.title || 'the track';
-  const requiresDjRole = Boolean(config.djRoleId);
-  if (!requiresDjRole || hasDJPermissions(member, config) || isRequester(interaction.user.id, currentTrack)) {
+  if (canActAsDJ(member, config) || isRequester(interaction.user.id, currentTrack)) {
     if (isLastTrack) {
       const currentTrack = player.queue.current;
       recordAutoplaySkip(player.guildId, currentTrack, { position: player.position });

@@ -18,6 +18,10 @@ const DEFAULT_CONFIG = {
   activityControl: 'inherit',
   voiceChannelStatus: true,
   dashboardAccess: 'admin',
+  // With no DJ in the bot's voice channel, the people listening there can control playback.
+  openWithoutDJ: true,
+  // Requested tracks take turns between the people who queued them.
+  fairQueue: false,
 };
 
 const DASHBOARD_ACCESS_LEVELS = new Set(['admin', 'mod', 'members']);
@@ -98,10 +102,26 @@ function hasDJPermissions(member, guildConfig) {
   return false;
 }
 
+function isDJListening(voiceChannel, guildConfig) {
+  return Boolean(voiceChannel?.members?.some?.((member) => !member.user?.bot && hasDJPermissions(member, guildConfig)));
+}
+
+// The DJ role only holds back the room while a DJ is in it. When nobody with DJ permissions
+// listens in the bot's voice channel, everyone listening there may act as one.
+function canActAsDJ(member, guildConfig) {
+  if (!guildConfig?.djRoleId) return true;
+  if (hasDJPermissions(member, guildConfig)) return true;
+  if (guildConfig.openWithoutDJ === false) return false;
+  const botChannel = member?.guild?.members?.me?.voice?.channel;
+  if (!botChannel || member.voice?.channelId !== botChannel.id) return false;
+  return !isDJListening(botChannel, guildConfig);
+}
+
 function assertDJ(interaction, guildConfig) {
-  if (!guildConfig?.djRoleId) return;
-  if (hasDJPermissions(interaction.member, guildConfig)) return;
-  throw new CommandError('This command requires the DJ role or Manage Guild permission.');
+  if (canActAsDJ(interaction.member, guildConfig)) return;
+  throw new CommandError(guildConfig.openWithoutDJ === false
+    ? 'This command requires the DJ role or Manage Guild permission.'
+    : 'A DJ is listening, so this needs the DJ role or Manage Guild permission.');
 }
 
 function formatConfig(config) {
@@ -112,6 +132,8 @@ function formatConfig(config) {
     `playerTextChannelId: ${config.playerTextChannelId === 'disabled' ? 'disabled' : config.playerTextChannelId ?? 'default'}`,
     `maxVolume: ${config.maxVolume}`,
     `voteSkipPercent: ${(config.voteSkipPercent * 100).toFixed(0)}%`,
+    `openWithoutDJ: ${config.openWithoutDJ === false ? 'no' : 'yes'}`,
+    `fairQueue: ${config.fairQueue ? 'yes' : 'no'}`,
     `stayInChannel (24/7): ${config.stayInChannel ? 'yes' : 'no'}`,
     `afkTimeout: ${(config.afkTimeout / 60000).toFixed(1)} min`,
     `persistentQueue: ${config.persistentQueue ? 'yes' : 'no'}`,
@@ -133,6 +155,8 @@ module.exports = {
   setConfig,
   deleteConfig,
   hasDJPermissions,
+  isDJListening,
+  canActAsDJ,
   assertDJ,
   formatConfig,
   listConfigs,

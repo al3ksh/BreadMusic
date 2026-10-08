@@ -127,6 +127,12 @@ const createConfigCommands = (context) => {
           .addBooleanOption((option) =>
             option.setName('voice_status').setDescription('Show the current track as voice channel status?'),
           )
+          .addBooleanOption((option) =>
+            option.setName('open_without_dj').setDescription('Let listeners control playback while no DJ is in the channel?'),
+          )
+          .addBooleanOption((option) =>
+            option.setName('fair_queue').setDescription('Alternate queued tracks between the people who asked for them?'),
+          )
           .addStringOption((option) =>
             option
               .setName('dashboard_access')
@@ -220,6 +226,10 @@ const createConfigCommands = (context) => {
       if (persistent !== null) updates.persistentQueue = persistent;
       const voiceStatus = interaction.options.getBoolean('voice_status');
       if (voiceStatus !== null) updates.voiceChannelStatus = voiceStatus;
+      const openWithoutDJ = interaction.options.getBoolean('open_without_dj');
+      if (openWithoutDJ !== null) updates.openWithoutDJ = openWithoutDJ;
+      const fairQueue = interaction.options.getBoolean('fair_queue');
+      if (fairQueue !== null) updates.fairQueue = fairQueue;
       const dashboardAccess = interaction.options.getString('dashboard_access');
       if (dashboardAccess) updates.dashboardAccess = dashboardAccess;
       const prefSource = interaction.options.getString('preferred_source');

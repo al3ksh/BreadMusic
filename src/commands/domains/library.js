@@ -1,4 +1,5 @@
 const { tagOrigin } = require('../../music/trackOrigin');
+const { queueRequestedTracks } = require('../../music/queueInsert');
 const library = require('../../music/library');
 
 const CREATE_FAILURES = {
@@ -41,9 +42,7 @@ const createLibraryCommands = (context) => {
     const ordered = shuffle ? library.shuffled(entries) : entries;
     const tracks = tagOrigin(ordered.map((entry) => library.entryToTrack(entry, interaction.user)), 'library');
     tracks.forEach((track) => addManualSeed(player.guildId, track, { invalidatePrefetch: false }));
-    const autoplayIndex = player.queue.tracks.findIndex((track) => track.isAutoplay);
-    if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, ...tracks);
-    else await player.queue.add(tracks);
+    await queueRequestedTracks(player, tracks);
     if (!player.playing && !player.paused) await player.play();
     await queuePersist(player);
 

@@ -279,6 +279,11 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
             <span className="text-xs text-text-secondary">%</span>
           </div>
         </Row>
+        {config.djRoleId && (
+          <Row label="Open Controls Without a DJ" desc="While no DJ is in the voice channel, everyone listening there can pause, skip and change the volume">
+            <ToggleSwitch label="Open Controls Without a DJ" checked={config.openWithoutDJ} onChange={(v) => setConfig({ ...config, openWithoutDJ: v })} />
+          </Row>
+        )}
       </Section>
 
       <Section title="Volume">
@@ -336,6 +341,9 @@ export function DashboardSettings({ guildId }: { guildId: string }) {
         </Row>
         <Row label="Persistent Queue" desc="Save queue between bot restarts">
           <ToggleSwitch label="Persistent Queue" checked={config.persistentQueue} onChange={(v) => setConfig({ ...config, persistentQueue: v })} />
+        </Row>
+        <Row label="Take Turns" desc="Alternate queued tracks between the people who asked for them">
+          <ToggleSwitch label="Take Turns" checked={config.fairQueue} onChange={(v) => setConfig({ ...config, fairQueue: v })} />
         </Row>
         <Row label="Voice Channel Status" desc="Show the current track below the voice channel name">
           <ToggleSwitch label="Voice Channel Status" checked={config.voiceChannelStatus} onChange={(v) => setConfig({ ...config, voiceChannelStatus: v })} />

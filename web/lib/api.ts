@@ -86,6 +86,8 @@ export interface GuildConfig {
   lastfm?: LastfmStatus;
   activityControl: 'inherit' | 'admin' | 'mod' | 'dj' | 'members';
   voiceChannelStatus: boolean;
+  openWithoutDJ: boolean;
+  fairQueue: boolean;
   dashboardAccess: 'admin' | 'mod' | 'members';
 }
 

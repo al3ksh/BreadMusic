@@ -263,6 +263,17 @@ test('settings toggles and sliders are labelled', async ({ page }) => {
   await expect(page.getByRole('slider', { name: 'Vote skip threshold' })).toBeVisible();
 });
 
+test('take turns toggles and the DJ fallback only shows with a DJ role', async ({ page }) => {
+  await mockApi(page);
+  await page.goto(`/dashboard/${guildId}`);
+  const turns = page.getByRole('switch', { name: 'Take Turns' });
+  await expect(turns).toHaveAttribute('aria-checked', 'false');
+  await turns.click();
+  await expect(turns).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText('You have unsaved changes')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Open Controls Without a DJ' })).toHaveCount(0);
+});
+
 test('phones get a top bar with a menu that opens and closes', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'The top bar only exists on phones');
   await mockApi(page);

@@ -31,7 +31,7 @@ const { recordTrackPlay } = require('./state/analyticsStore');
 const { isStreamTrack } = require('./music/autoplay/normalize');
 const { withGuildMutex } = require('./music/guildMutex');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
-const { getConfig, listConfigs, assertDJ, hasDJPermissions } = require('./state/guildConfig');
+const { getConfig, listConfigs, assertDJ, canActAsDJ } = require('./state/guildConfig');
 const { createSelection } = require('./state/searchCache');
 const { deleteInteractionReply } = require('./utils/interactions');
 const { buildDashboardUrl } = require('./dashboard/url');
@@ -1392,7 +1392,7 @@ async function restartCurrent(player) {
 }
 
 function canControlPlayer(interaction, guildConfig) {
-  return !guildConfig?.djRoleId || hasDJPermissions(interaction.member, guildConfig);
+  return canActAsDJ(interaction.member, guildConfig);
 }
 
 async function handleAutocomplete(interaction) {

@@ -1,4 +1,5 @@
 const { classifyQuery, tagOrigin } = require('../../music/trackOrigin');
+const { queueRequestedTracks } = require('../../music/queueInsert');
 const createMusicCommands = (context) => {
   const {
     SlashCommandBuilder,
@@ -172,13 +173,7 @@ const createMusicCommands = (context) => {
       tagOrigin(tracksToAdd, resolvedTrack ? 'search' : classifyQuery(rawQuery));
       tracksToAdd.forEach((track) => addManualSeed(player.guildId, track));
 
-      const autoplayIndex = player.queue.tracks.findIndex(t => t.isAutoplay);
-      if (autoplayIndex !== -1) {
-        const tracksArray = isPlaylist ? tracksToAdd : [tracksToAdd[0]];
-        player.queue.tracks.splice(autoplayIndex, 0, ...tracksArray);
-      } else {
-        await player.queue.add(isPlaylist ? tracksToAdd : tracksToAdd[0]);
-      }
+      await queueRequestedTracks(player, isPlaylist ? tracksToAdd : tracksToAdd[0], { fair: config.fairQueue });
 
       if (!player.playing && !player.paused) {
         await player.play();

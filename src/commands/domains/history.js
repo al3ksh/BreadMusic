@@ -1,4 +1,5 @@
 const { tagOrigin } = require('../../music/trackOrigin');
+const { queueRequestedTracks } = require('../../music/queueInsert');
 const { getGuildHistory } = require('../../state/analyticsStore');
 
 const COMPONENT_PREFIX = 'history:';
@@ -110,9 +111,7 @@ const createHistoryCommands = (context) => {
 
     tagOrigin(track, 'history');
     addManualSeed(player.guildId, track);
-    const autoplayIndex = player.queue.tracks.findIndex((queued) => queued.isAutoplay);
-    if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, track);
-    else await player.queue.add(track);
+    await queueRequestedTracks(player, track);
     if (!player.playing && !player.paused) await player.play();
     await queuePersist(player);
     await interaction.editReply({ embeds: [buildTrackEmbed(track, interaction.user, voiceChannelId)] });

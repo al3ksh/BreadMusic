@@ -10,6 +10,7 @@ const { applySound, getSoundState, normalizePreset, resetSound } = require('../m
 const { isStreamTrack } = require('../music/autoplay/normalize');
 const defaultRadio = require('../music/radio');
 const { playStation } = require('../music/radioPlayback');
+const { queueRequestedTracks } = require('../music/queueInsert');
 
 // Anyone listening in the bot's voice channel may vote to skip and give autoplay feedback.
 const listenerActions = new Set(['skip', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
@@ -669,9 +670,7 @@ function createPlayerRouter({
           const tracksToAdd = playlistTracks.map((track) => ({ ...track, requester, origin: cachedSearch.origin ?? 'link' }));
           tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
           clearAutoplayPrefetch(guildId);
-          const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
-          if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, ...tracksToAdd);
-          else await player.queue.add(tracksToAdd);
+          await queueRequestedTracks(player, tracksToAdd, { fair: guildConfig.fairQueue });
           if (!player.queue.current && !player.playing && !player.paused) await player.play();
           await client.musicUI?.refresh(player).catch(() => {});
           await savePlayerState(player).catch(() => {});
@@ -693,9 +692,7 @@ function createPlayerRouter({
           const tracksToAdd = tagOrigin(entries.map((entry) => library.entryToTrack(entry, requester)), 'library');
           tracksToAdd.forEach((track) => addManualSeed(guildId, track, { invalidatePrefetch: false }));
           clearAutoplayPrefetch(guildId);
-          const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
-          if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, ...tracksToAdd);
-          else await player.queue.add(tracksToAdd);
+          await queueRequestedTracks(player, tracksToAdd, { fair: guildConfig.fairQueue });
           if (!player.queue.current && !player.playing && !player.paused) await player.play();
           await client.musicUI?.refresh(player).catch(() => {});
           await savePlayerState(player).catch(() => {});

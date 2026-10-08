@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { artworkPath, groupUploadFiles, uploadArtworkUrl } = require('./music/uploadArtworkUrls');
 const { Transform } = require('stream');
-const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG } = require('./state/guildConfig');
+const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG, isDJListening } = require('./state/guildConfig');
 const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
 const {
@@ -45,6 +45,7 @@ const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('.
 const { createServerExtensionHost } = require('./extensions/serverExtensions');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
 const { handleSkipRequest, clearVoteSkip, getVoteSkipSnapshot } = require('./music/skipManager');
+const { queueRequestedTracks } = require('./music/queueInsert');
 const { markPlayerStopping } = require('./music/playerLifecycle');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 const { acquireGuildMutex } = require('./music/guildMutex');
@@ -369,6 +370,7 @@ function createApiServer(client) {
       req.dashboardCapabilities = resolveActivityCapabilities(access.member, access.config, {
         memberVoiceChannelId: access.member?.voice?.channelId ?? null,
         botVoiceChannelId: access.guild?.members?.me?.voice?.channelId ?? player?.voiceChannelId ?? null,
+        djListening: isDJListening(access.guild?.members?.me?.voice?.channel, access.config),
       });
       return next();
     }
@@ -1178,13 +1180,7 @@ async function getGuildMembersSnapshot(guild) {
 }
 
 async function addManualTrackToQueue(player, track) {
-  const autoplayIndex = player.queue.tracks.findIndex((entry) => entry.isAutoplay);
-  if (autoplayIndex !== -1) {
-    player.queue.tracks.splice(autoplayIndex, 0, track);
-    return;
-  }
-
-  await player.queue.add(track);
+  await queueRequestedTracks(player, track);
 }
 
 async function addRequestedTrackToQueue(player, track, playImmediately) {

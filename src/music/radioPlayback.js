@@ -1,5 +1,6 @@
 const defaultRadio = require('./radio');
 const { isStreamTrack } = require('./autoplay/normalize');
+const { queueRequestedTracks } = require('./queueInsert');
 
 // The stream itself carries no useful metadata, so the station details become the track info.
 function dressStationTrack(track, station, radio = defaultRadio) {
@@ -28,9 +29,7 @@ async function playStation(player, station, requester, { radio = defaultRadio } 
     await player.skip();
     if (player.paused) await player.resume();
   } else {
-    const autoplayIndex = player.queue.tracks.findIndex((queued) => queued.isAutoplay);
-    if (autoplayIndex !== -1) player.queue.tracks.splice(autoplayIndex, 0, track);
-    else await player.queue.add(track);
+    await queueRequestedTracks(player, track);
     if (!player.playing && !player.paused) await player.play();
   }
   radio.reportPlay(station);
