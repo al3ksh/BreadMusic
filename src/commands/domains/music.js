@@ -3,6 +3,8 @@ const { queueRequestedTracks, fitQueueLimit, findQueuedCopy, describeQueuedCopy 
 const { createSelection } = require('../../state/searchCache');
 
 const DUPLICATE_PREFIX = 'play:dup:';
+const UNDO_PREFIX = 'play:undo:';
+const UNDO_WINDOW_MS = 120_000;
 const createMusicCommands = (context) => {
   const {
     SlashCommandBuilder,
@@ -89,6 +91,51 @@ const createMusicCommands = (context) => {
     buildHelpEmbed,
     buildHelpComponents,
   } = context;
+
+  // Whoever added a single track can take it back while it is still waiting. The button goes
+  // away after a couple of minutes so old confirmations do not keep controls around.
+  function undoComponents(interaction, player, track) {
+    if (!track || player.queue.current === track) return [];
+    const selectionId = createSelection([track], interaction.user.id, interaction.guildId, UNDO_WINDOW_MS);
+    const timeout = setTimeout(() => {
+      if (!getSelection(selectionId)) return;
+      deleteSelection(selectionId);
+      interaction.editReply({ components: [] }).catch(() => {});
+    }, UNDO_WINDOW_MS);
+    timeout.unref?.();
+    return [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`${UNDO_PREFIX}${selectionId}`).setLabel('Undo').setStyle(ButtonStyle.Secondary),
+    )];
+  }
+
+  async function handleUndo(interaction) {
+    const selectionId = interaction.customId.slice(UNDO_PREFIX.length);
+    const selection = getSelection(selectionId);
+    if (!selection || selection.guildId !== interaction.guildId) {
+      await interaction.update({ components: [] });
+      return;
+    }
+    if (selection.userId !== interaction.user.id) {
+      await interaction.reply({ content: 'Only the person who added this track can undo it.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const [track] = selection.tracks;
+    const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
+    const index = player ? player.queue.tracks.indexOf(track) : -1;
+    deleteSelection(selectionId);
+    if (index === -1) {
+      await interaction.update({ components: [] });
+      await interaction.followUp({
+        content: player?.queue.current === track ? 'It is already playing. Skip it instead.' : 'That track is no longer in the queue.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    player.queue.tracks.splice(index, 1);
+    await queuePersist(player);
+    await interaction.client.musicUI?.refresh(player).catch(() => {});
+    await interaction.update({ content: `Took **${track.info?.title ?? 'that track'}** back out of the queue.`, embeds: [], components: [] });
+  }
   return [
   {
     data: new SlashCommandBuilder()
@@ -100,9 +147,15 @@ const createMusicCommands = (context) => {
           .setDescription('URL or search query.')
           .setAutocomplete(true)
           .setRequired(true),
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName('next')
+          .setDescription('Play it right after the current track (DJ only).'),
       ),
     async execute(interaction) {
       const rawQuery = interaction.options.getString('query', true);
+      const playNext = interaction.options.getBoolean('next') === true;
       const selectionMatch = /^auto:([a-f0-9]+):(\d+)$/i.exec(rawQuery);
       let resolvedTrack = null;
 
@@ -136,6 +189,8 @@ const createMusicCommands = (context) => {
         requireSameChannel: true,
         createPlayer: true,
       });
+      // Jumping the line skips everyone's turn, so it stays with whoever runs the room.
+      if (playNext) assertDJ(interaction, config);
 
       const defaultSource = interaction.client.lavalink?.options?.playerOptions?.defaultSearchPlatform;
       let isPlaylist = false;
@@ -182,7 +237,7 @@ const createMusicCommands = (context) => {
         await interaction.editReply({
           content: describeQueuedCopy(tracksToAdd[0], copyPosition),
           components: [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`${DUPLICATE_PREFIX}${selectionId}`).setLabel('Add anyway').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`${DUPLICATE_PREFIX}${selectionId}${playNext ? ':next' : ''}`).setLabel('Add anyway').setStyle(ButtonStyle.Secondary),
           )],
         });
         return;
@@ -192,7 +247,7 @@ const createMusicCommands = (context) => {
       tracksToAdd = fitted.tracks;
       tracksToAdd.forEach((track) => addManualSeed(player.guildId, track));
 
-      await queueRequestedTracks(player, isPlaylist ? tracksToAdd : tracksToAdd[0], { fair: config.fairQueue });
+      await queueRequestedTracks(player, isPlaylist ? tracksToAdd : tracksToAdd[0], { fair: config.fairQueue, next: playNext });
 
       if (!player.playing && !player.paused) {
         await player.play();
@@ -214,14 +269,21 @@ const createMusicCommands = (context) => {
         }
         await interaction.editReply({ embeds: [playlistEmbed] });
       } else {
-        const embed = buildTrackEmbed(tracksToAdd[0], interaction.user, voiceChannelId);
-        await interaction.editReply({ embeds: [embed] });
+        await interaction.editReply({
+          embeds: [buildTrackEmbed(tracksToAdd[0], interaction.user, voiceChannelId, { next: playNext })],
+          components: undoComponents(interaction, player, tracksToAdd[0]),
+        });
       }
     },
-    componentPrefix: DUPLICATE_PREFIX,
-    // "Add anyway" on the duplicate question queues the copy after all.
+    componentPrefix: 'play:',
     async handleComponent(interaction) {
-      const selectionId = interaction.customId.slice(DUPLICATE_PREFIX.length);
+      if (interaction.customId.startsWith(UNDO_PREFIX)) {
+        await handleUndo(interaction);
+        return;
+      }
+      // "Add anyway" on the duplicate question queues the copy after all.
+      const [selectionId, flag] = interaction.customId.slice(DUPLICATE_PREFIX.length).split(':');
+      const playNext = flag === 'next';
       const selection = getSelection(selectionId);
       if (!selection || selection.guildId !== interaction.guildId) {
         await interaction.update({ content: 'That question expired. Run /play again to add it.', components: [] });
@@ -232,13 +294,18 @@ const createMusicCommands = (context) => {
         return;
       }
       const { player, voiceChannelId, config } = await ensureVoice(interaction, { requireSameChannel: true, createPlayer: true });
+      if (playNext) assertDJ(interaction, config);
       const { tracks } = fitQueueLimit(player, selection.tracks, { userId: interaction.user.id, member: interaction.member, config });
       deleteSelection(selectionId);
       tracks.forEach((track) => addManualSeed(player.guildId, track));
-      await queueRequestedTracks(player, tracks[0], { fair: config.fairQueue });
+      await queueRequestedTracks(player, tracks[0], { fair: config.fairQueue, next: playNext });
       if (!player.playing && !player.paused) await player.play();
       await queuePersist(player);
-      await interaction.update({ content: '', embeds: [buildTrackEmbed(tracks[0], interaction.user, voiceChannelId)], components: [] });
+      await interaction.update({
+        content: '',
+        embeds: [buildTrackEmbed(tracks[0], interaction.user, voiceChannelId, { next: playNext })],
+        components: undoComponents(interaction, player, tracks[0]),
+      });
     },
   },
   {
@@ -369,7 +436,7 @@ const createMusicCommands = (context) => {
     },
   },
   {
-    data: new SlashCommandBuilder().setName('nowplaying').setDescription('Aktualny utwor.'),
+    data: new SlashCommandBuilder().setName('nowplaying').setDescription('Show the track playing now.'),
     async execute(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const { player } = await ensurePlayer(interaction);

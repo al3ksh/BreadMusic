@@ -1,6 +1,9 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { buildNowPlayingEmbed } = require('./embeds');
 const { buildPlaybackErrorEmbed, buildReplacementEmbed } = require('./playbackErrors');
+const { isAutoplayEnabled, getAutoplayNext } = require('./autoplay');
+const { isStreamTrack } = require('./autoplay/normalize');
+const { playerEmoji } = require('./playerEmojis');
 
 const BUTTON_PREFIX = 'music';
 const PLAYBACK_ERROR_TTL_MS = 30_000;
@@ -15,31 +18,30 @@ const BUTTONS = {
   BACK: 'back',
   LYRICS: 'lyrics',
   ACTIVITY: 'activity',
+  LIKE: 'like',
+  DISLIKE: 'dislike',
+  REROLL: 'reroll',
 };
 
-const applicationEmojiIds = new Map(
-  String(process.env.PLAYER_EMOJI_IDS || '')
-    .split(',')
-    .map((entry) => entry.trim().split(':'))
-    .filter(([name, id]) => name && /^\d{17,20}$/.test(id)),
-);
+const FALLBACK_EMOJI = {
+  play: '▶️',
+  pause: '⏸️',
+  skip: '⏭️',
+  stop: '⏹️',
+  previous: '⏮️',
+  loop: '🔁',
+  shuffle: '🔀',
+  lyrics: '📖',
+  dashboard: '🎵',
+  like: '👍',
+  dislike: '👎',
+  reroll: '🎲',
+};
 
-function playerEmoji(name, fallback) {
-  const id = applicationEmojiIds.get(name);
-  return id ? { name, id } : fallback;
+// Resolved per render: the uploaded icons arrive after login.
+function icon(name) {
+  return playerEmoji(name, FALLBACK_EMOJI[name]);
 }
-
-const EMOJI = {
-  PLAY: playerEmoji('play', '\u25B6\uFE0F'),
-  PAUSE: playerEmoji('pause', '\u23F8\uFE0F'),
-  SKIP: playerEmoji('skip', '\u23ED\uFE0F'),
-  STOP: playerEmoji('stop', '\u23F9\uFE0F'),
-  PREVIOUS: playerEmoji('previous', '\u23EE\uFE0F'),
-  LOOP: playerEmoji('loop', '\uD83D\uDD01'),
-  SHUFFLE: playerEmoji('shuffle', '\uD83D\uDD00'),
-  LYRICS: playerEmoji('lyrics', '\uD83D\uDCD6'),
-  ACTIVITY: playerEmoji('dashboard', '\uD83C\uDFB5'),
-};
 
 class MusicUI {
   constructor(client) {
@@ -58,7 +60,7 @@ class MusicUI {
 
   buildControlRows(player) {
     const disabled = !player.queue.current;
-    const pauseEmoji = player.paused ? EMOJI.PLAY : EMOJI.PAUSE;
+    const pauseEmoji = icon(player.paused ? 'play' : 'pause');
     const pauseStyle = player.paused ? ButtonStyle.Success : ButtonStyle.Danger;
     const loopStyle =
       player.repeatMode && player.repeatMode !== 'off'
@@ -68,7 +70,7 @@ class MusicUI {
     const rowOne = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.BACK, player.guildId))
-        .setEmoji(EMOJI.PREVIOUS)
+        .setEmoji(icon('previous'))
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(disabled),
       new ButtonBuilder()
@@ -78,12 +80,12 @@ class MusicUI {
         .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.SKIP, player.guildId))
-        .setEmoji(EMOJI.SKIP)
+        .setEmoji(icon('skip'))
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.STOP, player.guildId))
-        .setEmoji(EMOJI.STOP)
+        .setEmoji(icon('stop'))
         .setStyle(ButtonStyle.Danger)
         .setDisabled(disabled),
     );
@@ -91,26 +93,46 @@ class MusicUI {
     const rowTwo = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.LOOP, player.guildId))
-        .setEmoji(EMOJI.LOOP)
+        .setEmoji(icon('loop'))
         .setStyle(loopStyle)
         .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.SHUFFLE, player.guildId))
-        .setEmoji(EMOJI.SHUFFLE)
+        .setEmoji(icon('shuffle'))
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(disabled || player.queue.tracks.length === 0),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.LYRICS, player.guildId))
-        .setEmoji(EMOJI.LYRICS)
+        .setEmoji(icon('lyrics'))
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.ACTIVITY, player.guildId))
-        .setEmoji(EMOJI.ACTIVITY)
+        .setEmoji(icon('dashboard'))
         .setStyle(ButtonStyle.Secondary),
     );
 
-    return [rowOne, rowTwo];
+    const rows = [rowOne, rowTwo];
+    // Autoplay feedback only appears while autoplay is on, so the player stays two rows otherwise.
+    if (!disabled && isAutoplayEnabled(player.guildId) && !isStreamTrack(player.queue.current)) {
+      const canReroll = player.queue.tracks.length === 0 && Boolean(getAutoplayNext(player.guildId));
+      rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(this.buildCustomId(BUTTONS.LIKE, player.guildId))
+          .setEmoji(icon('like'))
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(this.buildCustomId(BUTTONS.DISLIKE, player.guildId))
+          .setEmoji(icon('dislike'))
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(this.buildCustomId(BUTTONS.REROLL, player.guildId))
+          .setEmoji(icon('reroll'))
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(!canReroll),
+      ));
+    }
+    return rows;
   }
 
   buildCustomId(action, guildId) {

@@ -10,6 +10,7 @@ RUN npm ci --omit=dev
 
 COPY src/ ./src/
 COPY assets/breadarcade-logo.png ./assets/breadarcade-logo.png
+COPY assets/discord-player-icons/ ./assets/discord-player-icons/
 RUN mkdir -p /app/data
 
 EXPOSE 3001

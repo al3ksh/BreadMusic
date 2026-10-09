@@ -79,3 +79,9 @@ test('a copy already in the queue is flagged once, then allowed', () => {
   assert.equal(takeDuplicateWarning(player, song('b'), 'b'), null);
   assert.equal(takeDuplicateWarning(player, track('b', 'fresh', { info: { title: 'fresh', uri: 'https://example.com/fresh' } }), 'b'), null);
 });
+
+test('play next goes to the front, ahead of turns and autoplay', async () => {
+  const player = createPlayer(track('a', 'now'), [track('a', 'a1'), track('b', 'b1'), track('bot', 'auto', { isAutoplay: true })]);
+  await queueRequestedTracks(player, track('a', 'a2'), { fair: true, next: true });
+  assert.deepEqual(titles(player), ['a2', 'a1', 'b1', 'auto']);
+});

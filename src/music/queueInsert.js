@@ -27,10 +27,14 @@ function fairIndex(tracks, end, current, key) {
 }
 
 // Queues tracks someone asked for. They always go ahead of autoplay picks; with the fair queue on
-// they also take turns with what other people queued.
-async function queueRequestedTracks(player, input, { fair = getConfig(player.guildId).fairQueue } = {}) {
+// they also take turns with what other people queued. `next` puts them first, ahead of any turns.
+async function queueRequestedTracks(player, input, { fair = getConfig(player.guildId).fairQueue, next = false } = {}) {
   const tracks = Array.isArray(input) ? input : [input];
   if (tracks.length === 0) return;
+  if (next) {
+    player.queue.tracks.splice(0, 0, ...tracks);
+    return;
+  }
   const autoplayIndex = player.queue.tracks.findIndex((track) => track.isAutoplay);
 
   if (!fair) {

@@ -14,6 +14,7 @@ function load(relative) {
   const requirePresenter = (name) => {
     if (name === 'discord.js') return discord;
     if (name === './autoplay') return { isAutoplayEnabled: () => false, getAutoplayNext: () => null };
+    if (name === './playerEmojis') return { playerEmoji: (_, fallback) => fallback };
     if (name === './playbackErrors') return {};
     if (name === './uploadArtworkUrls') return { uploadArtworkUrl: () => null };
     const resolved = path.relative(root, path.resolve(path.dirname(filename), `${name}.js`)).replaceAll('\\', '/');

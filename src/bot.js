@@ -82,7 +82,12 @@ const {
   blockAutoplayAfterPlaybackFailure,
   resumeAutoplayAfterPlaybackSuccess,
   autoplayEvents,
+  likeTrack,
+  dislikeTrack,
+  rerollNext,
+  REROLL_FAILURES,
 } = require('./music/autoplay');
+const { syncPlayerEmojis } = require('./music/playerEmojis');
 const { flush: flushAutoplayProfiles } = require('./music/autoplay/profileStore');
 const { flush: flushLibrary } = require('./music/library');
 const { flush: flushAutoplayUserTaste } = require('./music/autoplay/userTaste');
@@ -410,6 +415,9 @@ client.once(Events.ClientReady, safeEventHandler('ClientReady', async (readyClie
       }
     }
   });
+
+  const addedIcons = await syncPlayerEmojis(readyClient.application).catch(() => 0);
+  if (addedIcons) console.log(`Uploaded ${addedIcons} player icons.`);
 
   startActivityRotation();
   await restoreTwentyFourSevenPlayers();
@@ -746,6 +754,9 @@ async function handleMusicButton(interaction) {
     [BUTTONS.LOOP]: toggleLoop,
     [BUTTONS.SHUFFLE]: shuffleQueue,
     [BUTTONS.LYRICS]: showLyrics,
+    [BUTTONS.LIKE]: likeCurrent,
+    [BUTTONS.DISLIKE]: dislikeCurrent,
+    [BUTTONS.REROLL]: rerollAutoplay,
   };
 
   const handler = handlers[action];
@@ -1278,6 +1289,41 @@ async function skipTrack(interaction) {
   } else {
     await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
+}
+
+// The like is the listener's own, so only they see the confirmation.
+async function likeCurrent(interaction) {
+  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+  const track = player.queue.current;
+  const result = likeTrack(interaction.user.id, track);
+  if (!result) throw new CommandError('This track cannot be liked.');
+  await interaction.reply({
+    content: result.liked ? `Liked **${track.info.title}**. Autoplay will lean towards it.` : `Removed your like from **${track.info.title}**.`,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+// A dislike is remembered for autoplay and then goes through the normal skip rules.
+async function dislikeCurrent(interaction) {
+  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+  if (!dislikeTrack(interaction.guildId, interaction.user.id, player.queue.current)) {
+    throw new CommandError('This track cannot be disliked.');
+  }
+  await skipTrack(interaction);
+}
+
+async function rerollAutoplay(interaction) {
+  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+  await interaction.deferUpdate();
+  const result = await rerollNext(player, client);
+  if (!result.ok) {
+    await interaction
+      .followUp({ content: REROLL_FAILURES[result.reason] ?? 'Could not reroll.', flags: MessageFlags.Ephemeral })
+      .catch(() => {});
+    return;
+  }
+  broadcastPlayerUpdate(interaction.guildId);
+  await client.musicUI.refresh(player);
 }
 
 async function stopPlayback(interaction) {

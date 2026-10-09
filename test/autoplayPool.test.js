@@ -319,7 +319,7 @@ test('like toggles and dislike drops the seed and the prepared track', async () 
   assert.equal(likeTrack(null, seed), null);
 });
 
-test('now playing shows the prepared track and keeps the two control rows', async () => {
+test('now playing shows the prepared track and a feedback row while autoplay is on', async () => {
   const { buildNowPlayingEmbed } = require('../src/music/embeds');
   const { MusicUI } = require('../src/music/ui');
   const guildId = 'pool-embed';
@@ -328,12 +328,19 @@ test('now playing shows the prepared track and keeps the two control rows', asyn
   const upNext = () => buildNowPlayingEmbed(player, seed).toJSON().fields.find((field) => field.name.includes('Up next'));
 
   assert.equal(upNext().value, '*Picking a track…*');
-  assert.equal(ui.buildControlRows(player).length, 2, 'autoplay feedback lives in /autoplay, not on the player');
+  const feedbackRow = () => ui.buildControlRows(player)[2]?.toJSON().components;
+  assert.deepEqual(feedbackRow().map((button) => button.custom_id.split(':')[1]), ['like', 'dislike', 'reroll']);
+  assert.equal(feedbackRow()[2].disabled, true, 'nothing to reroll before a pick is prepared');
 
   await __testing.prepareNext(player, seed, client);
   const prepared = getAutoplayNext(guildId);
   assert.equal(upNext().value, `[${prepared.author} - ${prepared.title}](${prepared.uri})`);
+  assert.equal(feedbackRow()[2].disabled, false);
 
   player.queue.tracks.push(track('Queued', 'Someone', 'queuedqueue'));
   assert.equal(upNext(), undefined, 'a queued track hides the autoplay preview');
+  assert.equal(feedbackRow()[2].disabled, true, 'reroll only applies once the queue runs out');
+
+  setAutoplay(guildId, false);
+  assert.equal(ui.buildControlRows(player).length, 2, 'the player stays two rows without autoplay');
 });

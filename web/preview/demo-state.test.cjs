@@ -101,7 +101,7 @@ test('autoplay picks a track when the queue runs out and shows it as up next', (
   assert.equal(state.current.title, 'BUBBLETEA'); assert.equal(state.queue.length, 0);
   const upNext = autoplayNext(state);
   const embed = trackEmbed('nowPlaying', state.current, state, { upNext });
-  assert.equal(embed.title, 'Now Playing [AUTO]');
+  assert.equal(embed.title, 'Now Playing · Autoplay');
   assert.match(embed.fields.at(-1).value, new RegExp(upNext.title));
   state = command(state, '/autoplay next');
   assert.match(state.messages.at(-1).text, /Up next/); assert.notEqual(autoplayNext(state).title, upNext.title);

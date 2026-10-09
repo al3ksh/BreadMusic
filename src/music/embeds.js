@@ -18,14 +18,14 @@ const LABELS = {
 };
 const UP_NEXT_MAX_LENGTH = 200;
 
-function buildTrackEmbed(track, requester, voiceChannelId) {
+function buildTrackEmbed(track, requester, voiceChannelId, { next = false } = {}) {
   const requesterLabel = requester?.tag ?? requester?.username ?? requester?.id ?? 'Unknown user';
   const trackTitle = formatTrackTitle(track);
   const trackAuthor = formatTrackAuthor(track);
   const description = formatTrackLink(track, trackTitle);
 
   const embed = new EmbedBuilder()
-    .setTitle('➕ Added to queue')
+    .setTitle(next ? '⏭️ Playing next' : '➕ Added to queue')
     .setDescription(description)
     .addFields(
       { name: LABELS.ARTIST, value: trackAuthor, inline: true },
@@ -65,7 +65,7 @@ function buildNowPlayingEmbed(player, track) {
   const progressBar = buildProgressBar(position, duration, 18);
   
   const autoplayOn = player?.guildId && isAutoplayEnabled(player.guildId);
-  const title = autoplayOn ? 'Now Playing [AUTO]' : 'Now Playing';
+  const title = autoplayOn ? 'Now Playing · Autoplay' : 'Now Playing';
   const trackTitle = formatTrackTitle(track);
   const trackAuthor = formatTrackAuthor(track);
   const source = formatTrackSource(track);

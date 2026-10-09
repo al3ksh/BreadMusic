@@ -29,7 +29,7 @@ export function trackEmbed(kind: 'nowPlaying' | 'added', track: DemoTrack, state
     const index = Math.round(Math.min(1, state.position / Math.max(1, duration(track))) * 18);
     const progress = track.live ? '🔴 LIVE' : `${'▬'.repeat(index)}🔘${'▬'.repeat(18 - index)}\n${time(state.position)} / ${track.duration}`;
     embed.description = `${embed.description.split('\n')[0]}\n${progress}`;
-    if (autoplay) embed.title = 'Now Playing [AUTO]';
+    if (autoplay) embed.title = 'Now Playing · Autoplay';
     embed.color = state.paused ? contract.empty.color : contract.nowPlaying.color;
     embed.fields![2].value = `${state.volume}%`;
     embed.fields![3].value = state.loop[0].toUpperCase() + state.loop.slice(1);

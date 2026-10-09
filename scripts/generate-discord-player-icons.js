@@ -5,6 +5,7 @@ const { renderToStaticMarkup } = require('../web/node_modules/react-dom/server')
 const sharp = require('../web/node_modules/sharp');
 const {
   BookOpenText,
+  Dices,
   LayoutDashboard,
   Pause,
   Play,
@@ -13,6 +14,8 @@ const {
   SkipBack,
   SkipForward,
   Square,
+  ThumbsDown,
+  ThumbsUp,
 } = require('../web/node_modules/lucide-react');
 
 const OUTPUT_DIR = path.join(__dirname, '..', 'assets', 'discord-player-icons');
@@ -31,6 +34,9 @@ const icons = [
   ['shuffle', Shuffle],
   ['lyrics', BookOpenText],
   ['dashboard', LayoutDashboard],
+  ['like', ThumbsUp],
+  ['dislike', ThumbsDown],
+  ['reroll', Dices],
 ];
 
 function renderIcon(Icon) {
