@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ChevronDown, Play, Radio, Search, Star } from 'lucide-react';
 import { ActivitySpinner } from '@/components/activity/ActivityArtwork';
@@ -42,13 +42,19 @@ export function ActivityRadioPanel({
   const [searchedQuery, setSearchedQuery] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [saved, setSaved] = useState<RadioStation[]>([]);
+  // Your stations is listed once per visit, so starring or unstarring never shifts the list under the pointer.
+  const [listed, setListed] = useState<RadioStation[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const starring = useRef(new Set<string>());
 
   useEffect(() => {
     let cancelled = false;
     libraryRequest<LibrarySnapshot>('')
       .then((snapshot) => {
-        if (!cancelled) setSaved(snapshot.stations ?? []);
+        if (cancelled) return;
+        const stations = snapshot.stations ?? [];
+        setSaved(stations);
+        setListed((current) => current ?? stations);
       })
       .catch(() => {});
     return () => {
@@ -75,10 +81,14 @@ export function ActivityRadioPanel({
 
   const savedIds = new Set(saved.map((station) => station.id));
 
+  // The star flips straight away and rolls back if the request fails.
   const toggleSaved = async (station: RadioStation) => {
-    setBusyId(`star:${station.id}`);
+    if (starring.current.has(station.id)) return;
+    starring.current.add(station.id);
+    const previous = saved;
+    const isSaved = savedIds.has(station.id);
+    setSaved(isSaved ? saved.filter((entry) => entry.id !== station.id) : [...saved, station]);
     try {
-      const isSaved = savedIds.has(station.id);
       const result = await libraryRequest<{ stations: RadioStation[] }>(
         isSaved ? '/stations/remove' : '/stations/add',
         isSaved ? { id: station.id } : { stationId: station.id },
@@ -87,9 +97,10 @@ export function ActivityRadioPanel({
       onLibraryChange();
       notify(isSaved ? `Removed ${station.name}` : `Saved ${station.name}`, 'success');
     } catch (error) {
+      setSaved(previous);
       notify(errorMessage(error, 'Could not update your stations'), 'error');
     } finally {
-      setBusyId(null);
+      starring.current.delete(station.id);
     }
   };
 
@@ -112,13 +123,12 @@ export function ActivityRadioPanel({
           <button
             type="button"
             className={isSaved ? 'activity-radio-star is-saved' : 'activity-radio-star'}
-            disabled={Boolean(busyId)}
             onClick={() => toggleSaved(station)}
             title={isSaved ? 'Remove from your stations' : 'Save station'}
             aria-label={isSaved ? `Remove ${station.name} from your stations` : `Save ${station.name}`}
             aria-pressed={isSaved}
           >
-            {busyId === `star:${station.id}` ? <ActivitySpinner /> : <Star size={15} />}
+            <Star size={15} />
           </button>
           <button type="button" disabled={!canQueue || Boolean(busyId)} onClick={() => play(station)} title="Play station" aria-label={`Play ${station.name}`}>
             {busyId === `play:${station.id}` ? <ActivitySpinner /> : <Play size={15} />}
@@ -148,10 +158,10 @@ export function ActivityRadioPanel({
         </button>
       </div>
 
-      {saved.length > 0 && (
+      {listed && listed.length > 0 && (
         <section className="activity-library-section">
           <h3>Your stations</h3>
-          <div className="activity-search-results">{saved.map(renderStation)}</div>
+          <div className="activity-search-results">{listed.map(renderStation)}</div>
         </section>
       )}
 

@@ -2527,7 +2527,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 7px;
   cursor: pointer;
-  transition: color 150ms ease, background 150ms ease;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 120ms ease;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -2540,6 +2540,13 @@ a { color: inherit; text-decoration: none; }
 .activity-search-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.35;
+}
+
+/* A request disables the row for a moment. Only dim once it takes a while, so a quick add does not flash. */
+.activity-search-actions button:disabled,
+.activity-history-actions button:disabled,
+.activity-search-playlist > button:disabled {
+  transition: opacity 160ms ease 350ms;
 }
 
 .activity-mini-progress {

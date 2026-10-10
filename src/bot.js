@@ -1265,7 +1265,7 @@ async function togglePlayPause(interaction) {
   await client.musicUI.refresh(player);
 }
 
-async function skipTrack(interaction) {
+async function skipTrack(interaction, { notePrefix = '' } = {}) {
   const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
   await interaction.deferUpdate();
   if (player.repeatMode === 'track' && canControlPlayer(interaction, config)) {
@@ -1287,7 +1287,7 @@ async function skipTrack(interaction) {
     }
     await savePlayerState(player).catch(() => {});
   } else {
-    await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral }).catch(() => {});
+    await interaction.followUp({ content: notePrefix + result.message, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 }
 
@@ -1309,7 +1309,8 @@ async function dislikeCurrent(interaction) {
   if (!dislikeTrack(interaction.guildId, interaction.user.id, player.queue.current)) {
     throw new CommandError('This track cannot be disliked.');
   }
-  await skipTrack(interaction);
+  // Without DJ rights the skip is only a vote, so say the dislike itself was kept.
+  await skipTrack(interaction, { notePrefix: `👎 Disliked **${player.queue.current.info.title}**. ` });
 }
 
 async function rerollAutoplay(interaction) {
