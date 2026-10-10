@@ -3934,7 +3934,7 @@ html.activity-vt .activity-compact-art {
   }
 }
 
-.activity-card:active:not(:has(button:active)) {
+.activity-card:active:not(:has(button:not(.activity-library-open):active)) {
   transform: scale(0.97);
   transition-duration: 90ms;
   transition-timing-function: ease-out;
@@ -3963,7 +3963,7 @@ html.activity-vt .activity-compact-art {
   100% { opacity: 0; max-height: 0; min-height: 0; margin-block: -3px; padding-block: 0; border-width: 0; transform: translateX(26px) scale(0.95); }
 }
 
-.activity-card button:active:not(:disabled) {
+.activity-card button:not(.activity-library-open):active:not(:disabled) {
   transform: scale(0.88);
 }
 
@@ -4018,8 +4018,8 @@ html.activity-vt .activity-compact-art {
   .activity-card.is-leaving { animation: none; }
   .activity-card { transition-timing-function: ease; transition-duration: 120ms; }
   .activity-card:hover,
-  .activity-card:active:not(:has(button:active)),
-  .activity-card button:active:not(:disabled) { transform: none; }
+  .activity-card:active:not(:has(button:not(.activity-library-open):active)),
+  .activity-card button:not(.activity-library-open):active:not(:disabled) { transform: none; }
 }
 .delay-200 { animation-delay: 0.2s; }
 .delay-300 { animation-delay: 0.3s; }
@@ -4164,7 +4164,6 @@ html.activity-vt .activity-compact-art {
   }
 }
 
-.activity-library-open:active { transform: scale(0.985); }
 
 .activity-library-hint {
   margin: 4px 2px 0;
