@@ -2056,7 +2056,9 @@ a { color: inherit; text-decoration: none; }
   /* The floating panel nav sits over the drawer bottom, so the last cards can scroll clear of it. */
   padding-bottom: calc(76px + env(safe-area-inset-bottom));
   container: activity-drawer / inline-size;
-  scrollbar-color: #4f4b7d #171820;
+  /* Results come and go while searching, so keep the scrollbar's room and the right edge never jumps. */
+  scrollbar-gutter: stable;
+  scrollbar-color: #4f4b7d transparent;
   scrollbar-width: thin;
 }
 
@@ -2065,12 +2067,13 @@ a { color: inherit; text-decoration: none; }
 }
 
 .activity-drawer-body::-webkit-scrollbar-track {
-  background: #171719;
+  background: transparent;
 }
 
 .activity-drawer-body::-webkit-scrollbar-thumb {
   background: #4f4b7d;
-  border: 2px solid #171820;
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 8px;
 }
 
