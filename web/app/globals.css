@@ -2505,6 +2505,11 @@ a { color: inherit; text-decoration: none; }
   min-width: 0;
 }
 
+/* The drawer scrolls the results. A card sliding in must not give the list its own brief scrollbar. */
+.activity-search-results {
+  overflow: visible;
+}
+
 .activity-search-result {
   overflow: hidden;
   grid-template-columns: 38px minmax(0, 1fr) auto;
