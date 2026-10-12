@@ -113,19 +113,21 @@ class MusicUI {
         .setCustomId(this.buildCustomId(BUTTONS.ACTIVITY, player.guildId))
         .setEmoji(icon('dashboard'))
         .setStyle(ButtonStyle.Secondary),
-      // Saves the track to the presser's own Liked list.
-      new ButtonBuilder()
-        .setCustomId(this.buildCustomId(BUTTONS.HEART, player.guildId))
-        .setEmoji(icon('heart'))
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(disabled || !canSaveTrack(player.queue.current)),
     );
+
+    // Saves the track to the presser's own Liked list. It leads the last row, next to the thumbs when autoplay is on.
+    const heart = new ButtonBuilder()
+      .setCustomId(this.buildCustomId(BUTTONS.HEART, player.guildId))
+      .setEmoji(icon('heart'))
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(disabled || !canSaveTrack(player.queue.current));
 
     const rows = [rowOne, rowTwo];
     // Autoplay feedback only appears while autoplay is on, so the player stays two rows otherwise.
     if (!disabled && isAutoplayEnabled(player.guildId) && !isStreamTrack(player.queue.current)) {
       const canReroll = player.queue.tracks.length === 0 && Boolean(getAutoplayNext(player.guildId));
       rows.push(new ActionRowBuilder().addComponents(
+        heart,
         new ButtonBuilder()
           .setCustomId(this.buildCustomId(BUTTONS.LIKE, player.guildId))
           .setEmoji(icon('like'))
@@ -140,6 +142,8 @@ class MusicUI {
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(!canReroll),
       ));
+    } else {
+      rowTwo.addComponents(heart);
     }
     return rows;
   }

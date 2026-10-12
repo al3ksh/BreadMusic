@@ -23,6 +23,7 @@ import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, Qu
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 import { ActivityPlayerControls } from '@/components/activity/ActivityPlayerControls';
 import { ActivityAutoplayBadge } from '@/components/activity/ActivityAutoplayBadge';
+import { ActivityHeartButton } from '@/components/activity/ActivityHeartButton';
 import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
 import { ActivityHistoryPanel } from '@/components/activity/ActivityHistoryPanel';
 import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
@@ -1575,7 +1576,6 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
       soundOpen={activePanel === 'sound'}
       soundActive={soundCustomized}
       onToggleSound={() => togglePanel('sound')}
-      onToggleLike={() => runControlAction('library_like')}
     />
   );
 
@@ -1705,13 +1705,16 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
                 <img src="/assets/breadicon.png?v=3" alt="" />
                 <span>{status.paused ? 'Paused' : 'Playing'}</span>
               </div>
-              <h1 key={`title-${trackKey}`} className="activity-track-swap">
-                {currentTrackLink ? (
-                  <a href={currentTrackLink} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); openExternalUrl(currentTrackLink); }}>
-                    {status.currentTrack?.title}
-                  </a>
-                ) : status.currentTrack?.title || 'Nothing is playing'}
-              </h1>
+              <div className="activity-title-row">
+                <h1 key={`title-${trackKey}`} className="activity-track-swap">
+                  {currentTrackLink ? (
+                    <a href={currentTrackLink} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); openExternalUrl(currentTrackLink); }}>
+                      {status.currentTrack?.title}
+                    </a>
+                  ) : status.currentTrack?.title || 'Nothing is playing'}
+                </h1>
+                <ActivityHeartButton status={status} hasTrack={hasTrack} actionBusy={actionBusy} controlFeedback={controlFeedback} onToggle={() => runControlAction('library_like')} />
+              </div>
               <p key={`author-${trackKey}`} className="activity-track-swap is-second">{status.currentTrack?.author || 'Bread'}</p>
             </div>
           </div>
@@ -1778,13 +1781,16 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
                   </span>
                 )}
               </div>
-              <h1 key={`title-${trackKey}`} className="activity-track-swap">
-                {currentTrackLink ? (
-                  <a href={currentTrackLink} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); openExternalUrl(currentTrackLink); }}>
-                    {status.currentTrack?.title}
-                  </a>
-                ) : status.currentTrack?.title || 'Nothing is playing'}
-              </h1>
+              <div className="activity-title-row">
+                <h1 key={`title-${trackKey}`} className="activity-track-swap">
+                  {currentTrackLink ? (
+                    <a href={currentTrackLink} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); openExternalUrl(currentTrackLink); }}>
+                      {status.currentTrack?.title}
+                    </a>
+                  ) : status.currentTrack?.title || 'Nothing is playing'}
+                </h1>
+                <ActivityHeartButton status={status} hasTrack={hasTrack} actionBusy={actionBusy} controlFeedback={controlFeedback} onToggle={() => runControlAction('library_like')} />
+              </div>
               <p key={`author-${trackKey}`} className="activity-track-swap is-second">{status.currentTrack?.author || 'Open Add music to start playback.'}</p>
               {hasTrack && <small className="activity-track-requester">Requested by <strong>{status.currentTrack?.requester || 'Unknown'}</strong></small>}
               {hasTrack && (

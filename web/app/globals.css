@@ -1107,6 +1107,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 .activity-queue-list,
+.activity-history-list,
 .activity-search-results {
   display: grid;
   gap: 5px;
@@ -2696,7 +2697,7 @@ a { color: inherit; text-decoration: none; }
 
 .activity-icon-controls .activity-secondary-controls {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, 52px);
   gap: 8px;
 }
 
@@ -2713,14 +2714,6 @@ a { color: inherit; text-decoration: none; }
 
 .activity-icon-controls .activity-control-button span {
   display: none;
-}
-
-/* Five buttons share the width of the four transport buttons above them. */
-.activity-icon-controls .activity-secondary-controls .activity-control-button,
-.activity-icon-controls .activity-secondary-controls .activity-volume-control {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
 }
 
 .activity-volume-control {
@@ -3320,7 +3313,7 @@ button.activity-track-art:active:not(:disabled) { transform: scale(0.98); }
   }
   .activity-icon-controls { width: 100%; }
   .activity-icon-controls .activity-secondary-controls {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(44px, 1fr));
   }
   .activity-icon-controls .activity-control-button,
   .activity-icon-controls .activity-control-button.primary {
@@ -3648,8 +3641,8 @@ button.activity-track-art:active:not(:disabled) { transform: scale(0.98); }
   .activity-control-button,
   .activity-volume { min-height: 36px; }
   .activity-icon-controls { gap: 6px; }
-  .activity-icon-controls .activity-primary-controls { grid-template-columns: repeat(4, 46px); gap: 6px; }
-  .activity-icon-controls .activity-secondary-controls { gap: 6px; }
+  .activity-icon-controls .activity-primary-controls,
+  .activity-icon-controls .activity-secondary-controls { grid-template-columns: repeat(4, 46px); gap: 6px; }
   .activity-icon-controls .activity-control-button,
   .activity-icon-controls .activity-control-button.primary {
     width: 46px;
@@ -4094,6 +4087,59 @@ html.activity-vt .activity-compact-art {
   place-items: center;
   color: #ffd9e4;
   background: linear-gradient(135deg, #7d5bd6, #d1497f);
+}
+
+/* The Library heart sits by the track title, like a save button on a record sleeve. */
+.activity-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.activity-title-row h1 {
+  min-width: 0;
+}
+
+.activity-title-heart {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: #8e91a2;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease, transform 220ms var(--activity-spring);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .activity-title-heart:hover:not(:disabled) {
+    color: #f4f5f9;
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+.activity-title-heart:active:not(:disabled) { transform: scale(0.88); }
+.activity-title-heart:disabled { cursor: default; opacity: 0.5; }
+.activity-title-heart.is-liked { color: #f07aa5; }
+.activity-title-heart.is-popping { animation: activity-thumb-pop 640ms ease-out both; }
+
+.activity-compact-copy .activity-title-heart {
+  width: 28px;
+  height: 28px;
+}
+
+.activity-compact-copy .activity-title-heart svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-title-heart.is-popping { animation: none; }
 }
 
 .activity-library-liked.activity-card {
