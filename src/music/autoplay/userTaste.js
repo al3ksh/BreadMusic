@@ -3,9 +3,10 @@ const { DISLIKED_ARTIST_REJECT_THRESHOLD } = require('./scoring');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Autoplay dislikes belong to the person who pressed 👎, across every server. Likes need no store
-// of their own: they are the person's Liked list in the library.
+// Autoplay likes and dislikes belong to the person who pressed 👍 or 👎, across every server.
+// They only steer autoplay; the library's Liked list is separate (and counts as liked too).
 const DISLIKE_LIMITS = { max: 300, ttl: 90 * DAY_MS };
+const LIKE_LIMITS = DISLIKE_LIMITS;
 // Blocked artists were chosen on purpose, so they stay until the person unblocks them.
 const BLOCKED_ARTIST_LIMIT = 200;
 
@@ -22,9 +23,10 @@ function getUser(userId, create = false) {
   const data = getStore().data;
   let user = data[userId];
   if (!user && create) {
-    user = { dislikes: [], artists: [] };
+    user = { likes: [], dislikes: [], artists: [] };
     data[userId] = user;
   }
+  if (user && !Array.isArray(user.likes)) user.likes = [];
   if (user && !Array.isArray(user.dislikes)) user.dislikes = [];
   if (user && !Array.isArray(user.artists)) user.artists = [];
   return user ?? null;
@@ -36,10 +38,41 @@ function prune(entries, now) {
   return kept.length > DISLIKE_LIMITS.max ? kept.slice(kept.length - DISLIKE_LIMITS.max) : kept;
 }
 
+// A like and a dislike of the same track cancel each other out.
+function recordLike(userId, entry, now = Date.now()) {
+  if (!userId || !entry?.key) return;
+  const user = getUser(userId, true);
+  user.likes = prune([...user.likes.filter((existing) => existing.key !== entry.key), { ...entry, at: now }], now);
+  user.dislikes = user.dislikes.filter((existing) => existing.key !== entry.key);
+  getStore().save();
+}
+
+function removeLike(userId, key) {
+  const user = getUser(userId);
+  if (!user) return false;
+  const before = user.likes.length;
+  user.likes = user.likes.filter((entry) => entry.key !== key);
+  if (user.likes.length === before) return false;
+  getStore().save();
+  return true;
+}
+
+function listLikes(userId, now = Date.now()) {
+  const user = getUser(userId);
+  if (!user) return [];
+  user.likes = prune(user.likes, now);
+  return user.likes;
+}
+
+function isLiked(userId, key, now = Date.now()) {
+  return Boolean(key) && listLikes(userId, now).some((entry) => entry.key === key);
+}
+
 function recordDislike(userId, entry, now = Date.now()) {
   if (!userId || !entry?.key) return;
   const user = getUser(userId, true);
   user.dislikes = prune([...user.dislikes.filter((existing) => existing.key !== entry.key), { ...entry, at: now }], now);
+  user.likes = user.likes.filter((existing) => existing.key !== entry.key);
   getStore().save();
 }
 
@@ -127,6 +160,11 @@ function getDislikes(userId, now = Date.now()) {
 
 module.exports = {
   DISLIKE_LIMITS,
+  LIKE_LIMITS,
+  recordLike,
+  removeLike,
+  listLikes,
+  isLiked,
   recordDislike,
   removeDislike,
   listDislikes,

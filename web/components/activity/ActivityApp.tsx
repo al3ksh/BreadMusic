@@ -28,7 +28,7 @@ import { ActivityHistoryPanel } from '@/components/activity/ActivityHistoryPanel
 import { ActivityQueuePanel } from '@/components/activity/ActivityQueuePanel';
 import { ActivitySearchPanel } from '@/components/activity/ActivitySearchPanel';
 import { ActivityRadioPanel } from '@/components/activity/ActivityRadioPanel';
-import type { RadioStation } from '@/components/activity/ActivityLibraryPanel';
+import type { LibraryEntry, LibraryTrackMode, RadioStation } from '@/components/activity/ActivityLibraryPanel';
 import { ActivityLyricsPanel } from '@/components/activity/ActivityLyricsPanel';
 import { ActivitySoundPanel } from '@/components/activity/ActivitySoundPanel';
 import { ActivityLibraryPanel } from '@/components/activity/ActivityLibraryPanel';
@@ -845,28 +845,39 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
     if (action === 'autoplay_like') {
       setStatus((current) => ({ ...current, autoplayFeedback: current.autoplayFeedback === 'like' ? null : 'like' }));
     }
+    if (action === 'autoplay_dislike') {
+      setStatus((current) => ({ ...current, autoplayFeedback: current.autoplayFeedback === 'dislike' ? null : 'dislike' }));
+    }
+    if (action === 'library_like') {
+      setStatus((current) => ({ ...current, liked: !current.liked }));
+    }
 
     setActionBusy(action);
     try {
-      const result = await activityFetch<{ message?: string; liked?: boolean; count?: number; skipped?: number; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
+      const result = await activityFetch<{ message?: string; liked?: boolean; disliked?: boolean; count?: number; skipped?: number; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
-      if ((action === 'skip' || action === 'autoplay_dislike') && result.message) {
-        if (result.voteSkip) notify(result.message, 'info');
-      }
+      if (action === 'skip' && result.message && result.voteSkip) notify(result.message, 'info');
       if (action === 'autoplay_like') {
         setStatus((current) => ({ ...current, autoplayFeedback: result.liked ? 'like' : null }));
-        notify(result.liked ? 'Liked: saved to your Library, autoplay will pick more like this' : 'Like removed', 'success');
+        notify(result.liked ? 'Liked: autoplay will pick more like this' : 'Like removed', 'success');
+      }
+      if (action === 'autoplay_dislike') {
+        setStatus((current) => ({ ...current, autoplayFeedback: result.disliked ? 'dislike' : null }));
+        notify(result.disliked ? 'Disliked: autoplay will steer clear of it' : 'Dislike removed', 'success');
+      }
+      if (action === 'library_like') {
+        setStatus((current) => ({ ...current, liked: Boolean(result.liked) }));
+        notify(result.liked ? 'Saved to your Library' : 'Removed from your Library', 'success');
         setLibraryRefreshKey((key) => key + 1);
       }
-      if (action === 'autoplay_dislike' && !result.voteSkip) notify('Disliked: autoplay will avoid this track', 'success');
       return result;
     } catch (error) {
       if ((error as Error & { status?: number }).status === 403) {
         await refreshCapabilities();
       }
-      if (['toggle', 'autoplay', 'autoplay_like', 'seek', 'volume'].includes(action)) {
+      if (['toggle', 'autoplay', 'autoplay_like', 'autoplay_dislike', 'library_like', 'seek', 'volume'].includes(action)) {
         const rollbackClock = action === 'seek' ? seekRollbackRef.current || previousClock : previousClock;
         clockRef.current = rollbackClock;
         setStatus(previousStatus);
@@ -952,6 +963,15 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
       return false;
     }
   }, [activityFetch, guildId, notify, refreshCapabilities]);
+
+  const playLibraryTrack = useCallback(async (playlistId: string, entry: LibraryEntry, mode: LibraryTrackMode) => {
+    const startsPlayback = !status.currentTrack;
+    const queued = await playerAction('library_track', { playlistId, key: entry.key, mode, channelId });
+    if (!queued) return false;
+    const message = mode === 'now' || startsPlayback ? 'Playing now' : mode === 'next' ? 'Up next' : 'Added to queue';
+    notify(`${message}: ${entry.title}`, 'success');
+    return true;
+  }, [channelId, notify, playerAction, status.currentTrack]);
 
   const searchRadioStations = useCallback(async (query: string) => {
     const result = await activityFetch<{ stations: RadioStation[] }>(`/api/guilds/${guildId}/radio/search?q=${encodeURIComponent(query)}`);
@@ -1555,6 +1575,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
       soundOpen={activePanel === 'sound'}
       soundActive={soundCustomized}
       onToggleSound={() => togglePanel('sound')}
+      onToggleLike={() => runControlAction('library_like')}
     />
   );
 
@@ -1986,7 +2007,9 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
                     hasTrack={hasTrack}
                     refreshKey={libraryRefreshKey}
                     request={libraryRequest}
+                    canDj={canDj}
                     onPlay={playLibrary}
+                    onPlayTrack={playLibraryTrack}
                     notify={notify}
                   />
                 )}

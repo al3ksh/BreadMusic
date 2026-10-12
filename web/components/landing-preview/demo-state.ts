@@ -5,7 +5,7 @@ export type Embed = { title: string; description?: string; color: number; fields
 export type Playback = { current: DemoTrack | null; queue: DemoTrack[]; previous: DemoTrack[]; paused: boolean; position: number; volume: number; loop: 'off' | 'track' | 'queue' };
 export type Message = { id: number; command?: string; kind: 'player' | 'embed' | 'text' | 'slots' | 'stats' | 'sound'; embed?: Embed; text?: string; snapshot: Playback; private?: boolean; round?: number; view?: string; stationId?: string; preset?: string };
 export type Dislike = { title: string; artist: string; blockedArtist: boolean };
-export type DemoState = Playback & { messages: Message[]; sequence: number; playerId: number; soundId: number; autoplay: boolean; autoplayCursor: number; liked: DemoTrack[]; disliked: Dislike[]; preset: string; savedStations: string[] };
+export type DemoState = Playback & { messages: Message[]; sequence: number; playerId: number; soundId: number; autoplay: boolean; autoplayCursor: number; liked: DemoTrack[]; tasteLiked: string[]; disliked: Dislike[]; preset: string; savedStations: string[] };
 export const trackKey = (track: Pick<DemoTrack, 'artist' | 'title'>) => `${track.artist}|${track.title}`.toLowerCase();
 export const duration = (track: DemoTrack) => track.duration.split(':').reduce((total, part) => total * 60 + Number(part), 0);
 export const time = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
@@ -73,7 +73,7 @@ function post(state: DemoState, message: Omit<Message, 'id' | 'snapshot'>): Demo
   return { ...state, sequence: id, playerId: message.kind === 'player' ? id : state.playerId, soundId: message.kind === 'sound' ? id : state.soundId, messages: [...state.messages, { ...message, id, snapshot }].slice(-40) };
 }
 export function initialState(): DemoState {
-  const state: DemoState = { current: demoTracks[0], queue: demoTracks.slice(1), previous: [], paused: false, position: 84, volume: 100, loop: 'off', messages: [], sequence: 0, playerId: 0, soundId: 0, autoplay: false, autoplayCursor: 0, liked: [], disliked: [], preset: 'off', savedStations: [] };
+  const state: DemoState = { current: demoTracks[0], queue: demoTracks.slice(1), previous: [], paused: false, position: 84, volume: 100, loop: 'off', messages: [], sequence: 0, playerId: 0, soundId: 0, autoplay: false, autoplayCursor: 0, liked: [], tasteLiked: [], disliked: [], preset: 'off', savedStations: [] };
   return post(state, { kind: 'player', command: '/play Daft Punk - Instant Crush' });
 }
 const remember = (state: DemoState) => state.current && !state.current.live ? [...state.previous, state.current].slice(-20) : state.previous;
@@ -89,7 +89,7 @@ function advance(state: DemoState, natural = false): DemoState {
   }
   return post({ ...state, current, queue, autoplayCursor, paused: false, position: 0, previous: remember(state) }, { kind: 'player' });
 }
-export type DemoAction = { type: 'command'; value: string; random?: number; silent?: boolean } | { type: 'tick' } | { type: 'reset' } | { type: 'resolved'; tracks: DemoTrack[]; command?: string; mode?: 'now' | 'queue' } | { type: 'error'; message: string; command?: string } | { type: 'remove'; index: number } | { type: 'move'; from: number; to: number } | { type: 'seek'; position: number } | { type: 'preset'; preset: string } | { type: 'saveStation'; id: string } | { type: 'like'; track: DemoTrack; liked: boolean } | { type: 'undislike'; title: string; artist: string } | { type: 'block'; artist: string } | { type: 'unblock'; artist: string };
+export type DemoAction = { type: 'command'; value: string; random?: number; silent?: boolean } | { type: 'tick' } | { type: 'reset' } | { type: 'resolved'; tracks: DemoTrack[]; command?: string; mode?: 'now' | 'next' | 'queue' } | { type: 'error'; message: string; command?: string } | { type: 'remove'; index: number } | { type: 'move'; from: number; to: number } | { type: 'seek'; position: number } | { type: 'preset'; preset: string } | { type: 'saveStation'; id: string } | { type: 'like'; track: DemoTrack; liked: boolean } | { type: 'taste'; track: DemoTrack; liked: boolean } | { type: 'undislike'; title: string; artist: string } | { type: 'block'; artist: string } | { type: 'unblock'; artist: string };
 // Activity actions run as commands but answer in the Activity itself, so their private replies stay out of the chat.
 export function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'command' && action.silent) {
@@ -115,6 +115,13 @@ function reduce(state: DemoState, action: DemoAction): DemoState {
     const rest = state.liked.filter(track => trackKey(track) !== trackKey(action.track));
     return { ...state, liked: action.liked ? [{ ...action.track, autoplay: undefined }, ...rest] : rest };
   }
+  // The autoplay thumbs only steer picks: a like and a dislike of the same track cancel out.
+  if (action.type === 'taste') {
+    const key = trackKey(action.track);
+    const tasteLiked = state.tasteLiked.filter(entry => entry !== key);
+    if (!action.liked) return { ...state, tasteLiked };
+    return { ...state, tasteLiked: [key, ...tasteLiked], disliked: state.disliked.flatMap(entry => trackKey(entry) !== key ? [entry] : entry.blockedArtist ? [{ ...entry, title: '' }] : []) };
+  }
   // A track dislike under a blocked artist keeps the block; only the track entry goes.
   if (action.type === 'undislike') return { ...state, disliked: state.disliked.flatMap(entry => entry.title !== action.title || entry.artist !== action.artist ? [entry] : entry.blockedArtist ? [{ ...entry, title: '' }] : []) };
   if (action.type === 'block') return state.disliked.some(entry => entry.blockedArtist && entry.artist === action.artist) ? state : { ...state, disliked: [...state.disliked, { title: '', artist: action.artist, blockedArtist: true }] };
@@ -131,7 +138,8 @@ function reduce(state: DemoState, action: DemoAction): DemoState {
     if (state.queue.length + action.tracks.length > 50) return post(state, { kind: 'text', text: 'Preview queue is full (50 tracks). Remove tracks before adding more.', private: true });
     const [track, ...rest] = action.tracks;
     const start = !state.current || action.mode === 'now';
-    const next = start ? { ...state, current: track, queue: [...state.queue, ...rest], previous: remember(state), position: 0, paused: false } : { ...state, queue: [...state.queue, ...action.tracks] };
+    const queued = action.mode === 'next' ? [...action.tracks, ...state.queue] : [...state.queue, ...action.tracks];
+    const next = start ? { ...state, current: track, queue: [...state.queue, ...rest], previous: remember(state), position: 0, paused: false } : { ...state, queue: queued };
     const added = post(next, { kind: 'embed', command: action.command, embed: trackEmbed('added', track, next) });
     return start ? post(added, { kind: 'player' }) : added;
   }
@@ -198,11 +206,12 @@ function reduce(state: DemoState, action: DemoAction): DemoState {
     if (!state.current) return response('Nothing playing. Add a track with /play.');
     if (state.current.live) return response(`This track cannot be ${sub}d.`);
     const track = state.current;
-    if (sub === 'like') return post(demoReducer(state, { type: 'like', track, liked: true }), { kind: 'text', command, text: `👍 Liked **${track.title}**. Autoplay will pick more like it, and it is in your \`/liked\` list.`, private: true });
+    if (sub === 'like') return post(demoReducer(state, { type: 'taste', track, liked: true }), { kind: 'text', command, text: `👍 Liked **${track.title}**. Autoplay will pick more like it.`, private: true });
     const blockedArtist = options.some(option => /^(artist(:true)?|true)$/.test(option));
     const disliked = [...state.disliked.filter(entry => blockedArtist ? !(entry.blockedArtist && entry.artist === track.artist) : entry.title !== track.title), { title: track.title, artist: track.artist, blockedArtist }];
-    const what = blockedArtist ? `Blocked **${track.artist}** for your autoplay` : `Disliked **${track.title}**`;
-    return post(advance({ ...state, disliked }), { kind: 'text', command, text: `👎 ${what} and skipped the track. Undo it with \`/autoplay disliked\`.`, private: true });
+    const what = blockedArtist ? `Blocked **${track.artist}** for your autoplay` : `Disliked **${track.title}**. Autoplay will steer clear of it`;
+    const tasteLiked = state.tasteLiked.filter(entry => entry !== trackKey(track));
+    return post({ ...state, disliked, tasteLiked }, { kind: 'text', command, text: `👎 ${what}. Undo it with \`/autoplay disliked\`.`, private: true });
   }
   if (name === '/slots') return query ? response('This preview only supports /slots without a bet. No real balance is used.') : post(state, { kind: 'slots', command, round: Math.floor((action.random ?? 0) * 4) });
   if (name === '/help') return response('Preview commands: /play, /radio, /autoplay, /sound, /stats, /queue, /nowplaying, /pause, /resume, /skip, /back, /stop, /volume, /seek, /loop, /shuffle, /slots.');

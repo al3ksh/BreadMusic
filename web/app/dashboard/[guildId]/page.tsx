@@ -448,7 +448,6 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       back: 'Switched to previous track.',
       pause: 'Playback paused.',
       resume: 'Playback resumed.',
-      autoplay_dislike: 'Disliked and skipped. Autoplay will avoid this track.',
       autoplay_reroll: 'Autoplay picked a different next track.',
       radio: 'Station started.',
     };
@@ -486,6 +485,9 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
       if (action === 'autoplay_like') {
         newStatus.autoplayFeedback = status.autoplayFeedback === 'like' ? null : 'like';
       }
+      if (action === 'autoplay_dislike') {
+        newStatus.autoplayFeedback = status.autoplayFeedback === 'dislike' ? null : 'dislike';
+      }
       if (action === 'autoplay' && typeof body?.enabled === 'boolean') {
         newStatus.autoplay = body.enabled as boolean;
       }
@@ -497,7 +499,7 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
     }
 
     try {
-      const result = await apiFetch<{ message?: string; liked?: boolean; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/guilds/${guildId}/player/${action}`, {
+      const result = await apiFetch<{ message?: string; liked?: boolean; disliked?: boolean; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/guilds/${guildId}/player/${action}`, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -506,8 +508,9 @@ function PlayerTab({ guildId, capabilities }: { guildId: string; capabilities: D
 
       if (!silentActions.has(action)) {
         let description = actionDescriptions[action] || 'Player action completed.';
-        if ((action === 'skip' || (action === 'autoplay_dislike' && result.voteSkip)) && result.message) description = result.message;
+        if (action === 'skip' && result.message) description = result.message;
         if (action === 'autoplay_like') description = result.liked ? 'Autoplay will pick more like this.' : 'Like removed.';
+        if (action === 'autoplay_dislike') description = result.disliked ? 'Autoplay will steer clear of this track.' : 'Dislike removed.';
         toast.success(result.voteSkip ? 'Vote registered' : 'Action applied', description);
       }
       return true;

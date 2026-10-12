@@ -73,9 +73,10 @@ test('/autoplay offers toggle, like, dislike, next and disliked', () => {
 test('/autoplay like toggles the like on the current track for any listener', async () => {
   const guildId = 'command-like';
   const { run, calls, current } = setup(guildId);
-  assert.match(await run('like'), /Liked \*\*Midnight City\*\*.*`\/liked` list/);
+  assert.match(await run('like'), /Liked \*\*Midnight City\*\*\. Autoplay will pick more like it/);
   assert.equal(getTrackFeedback('listener-1', current), 'like');
-  assert.equal(library.isLiked('listener-1', current), true);
+  // The autoplay like only steers autoplay; the library stays untouched.
+  assert.equal(library.isLiked('listener-1', current), false);
   assert.match(await run('like'), /Removed your like/);
   assert.equal(getTrackFeedback('listener-1', current), null);
   assert.equal(library.isLiked('listener-1', current), false);
@@ -83,20 +84,25 @@ test('/autoplay like toggles the like on the current track for any listener', as
   assert.ok(calls.includes('refresh'));
 });
 
-test('/autoplay dislike records the dislike and goes through the skip rules', async () => {
-  const guildId = 'command-dislike';
-  const voted = setup(guildId, { skipResult: { skipped: false, message: 'Vote recorded (1/2).' } });
-  assert.match(await voted.run('dislike'), /Disliked \*\*Midnight City\*\*\. Vote recorded/);
-  assert.equal(getTrackFeedback('listener-1', voted.current), 'dislike');
-  assert.deepEqual(voted.calls, ['skip']);
+test('/autoplay dislike records the dislike and keeps the track playing', async () => {
+  const { run, calls, current } = setup('command-dislike');
+  assert.match(await run('dislike'), /Disliked \*\*Midnight City\*\*\. Autoplay will steer clear of it/);
+  assert.equal(getTrackFeedback('listener-1', current), 'dislike');
+  assert.ok(!calls.includes('skip'));
+});
 
-  const skipped = setup('command-dislike-skip');
-  assert.match(await skipped.run('dislike'), /Disliked \*\*Midnight City\*\* and skipped/);
+test('a like and a dislike of the same track cancel each other out', async () => {
+  const { run, current } = setup('command-exclusive');
+  await run('like');
+  await run('dislike');
+  assert.equal(getTrackFeedback('listener-1', current), 'dislike');
+  assert.equal(userTaste.listLikes('listener-1').length, 0);
+  userTaste.removeDislike('listener-1', userTaste.listDislikes('listener-1').at(-1).key);
 });
 
 test('/autoplay dislike artist:true blocks the artist for that person', async () => {
   const { run } = setup('command-dislike-artist');
-  assert.match(await run('dislike', { artist: true }), /Blocked \*\*M83\*\* for your autoplay and skipped/);
+  assert.match(await run('dislike', { artist: true }), /Blocked \*\*M83\*\* for your autoplay\./);
   assert.deepEqual(userTaste.listBlockedArtists('listener-1').map((artist) => artist.author), ['M83']);
 });
 

@@ -1,4 +1,4 @@
-import { ArrowLeft, Copy, Download, Heart, ListMusic, ListPlus, Play, Plus, Share2, Shuffle, ThumbsDown, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Copy, Download, Heart, ListMusic, ListPlus, ListStart, Play, Plus, Share2, Shuffle, SquarePlus, ThumbsDown, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
@@ -51,12 +51,16 @@ type LibraryPlaylist = { id: string; name: string; tracks: LibraryEntry[]; share
 
 type LibraryRequest = <T>(path: string, body?: Record<string, unknown>) => Promise<T>;
 
+export type LibraryTrackMode = 'queue' | 'next' | 'now';
+
 type ActivityLibraryPanelProps = {
   canQueue: boolean;
+  canDj: boolean;
   hasTrack: boolean;
   refreshKey: number;
   request: LibraryRequest;
   onPlay: (playlistId: string, shuffle: boolean) => Promise<boolean>;
+  onPlayTrack: (playlistId: string, entry: LibraryEntry, mode: LibraryTrackMode) => Promise<boolean>;
   notify: (message: string, tone: 'success' | 'error' | 'info') => void;
 };
 
@@ -86,7 +90,7 @@ function errorMessage(error: unknown, fallback: string) {
 
 // Per-user Liked list and playlists. Everything is the signed-in listener's own,
 // so it works on any server where they can queue music.
-export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, onPlay, notify }: ActivityLibraryPanelProps) {
+export function ActivityLibraryPanel({ canQueue, canDj, hasTrack, refreshKey, request, onPlay, onPlayTrack, notify }: ActivityLibraryPanelProps) {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [dislikes, setDislikes] = useState<DislikeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +148,10 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
 
   const play = (playlistId: string, shuffle: boolean) => run(`play:${playlistId}:${shuffle}`, async () => {
     await onPlay(playlistId, shuffle);
+  });
+
+  const playTrack = (playlistId: string, entry: LibraryEntry, mode: LibraryTrackMode) => run(`track:${entry.key}:${mode}`, async () => {
+    await onPlayTrack(playlistId, entry, mode);
   });
 
   const addCurrent = (playlist: LibraryPlaylistSummary) => run(`add:${playlist.id}`, async () => {
@@ -320,6 +328,21 @@ export function ActivityLibraryPanel({ canQueue, hasTrack, refreshKey, request, 
                 </div>
                 <time>{formatDuration(entry.duration)}</time>
                 <div className="activity-history-actions">
+                  {(canQueue || canDj) && (
+                    <button type="button" disabled={Boolean(busy)} onClick={() => playTrack(openId, entry, 'queue')} aria-label={`Add ${entry.title} to queue`} title="Add to queue">
+                      <SquarePlus size={15} />
+                    </button>
+                  )}
+                  {canDj && hasTrack && (
+                    <button type="button" disabled={Boolean(busy)} onClick={() => playTrack(openId, entry, 'next')} aria-label={`Play ${entry.title} next`} title="Play next">
+                      <ListStart size={15} />
+                    </button>
+                  )}
+                  {canDj && (
+                    <button type="button" disabled={Boolean(busy)} onClick={() => playTrack(openId, entry, 'now')} aria-label={`Play ${entry.title} now`} title="Play now">
+                      <Play size={15} />
+                    </button>
+                  )}
                   <button type="button" disabled={Boolean(busy)} onClick={() => removeTrack(entry, index)} aria-label={`Remove ${entry.title}`} title="Remove">
                     <X size={15} />
                   </button>

@@ -343,4 +343,7 @@ test('now playing shows the prepared track and a feedback row while autoplay is 
 
   setAutoplay(guildId, false);
   assert.equal(ui.buildControlRows(player).length, 2, 'the player stays two rows without autoplay');
+  const heart = ui.buildControlRows(player)[1].toJSON().components.at(-1);
+  assert.equal(heart.custom_id.split(':')[1], 'heart', 'the library heart stays on the player without autoplay');
+  assert.equal(heart.disabled, false);
 });

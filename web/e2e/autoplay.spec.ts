@@ -24,7 +24,7 @@ function json(route: Route, body: unknown, statusCode = 200) {
 
 // A tiny stateful player: like toggles, reroll advances the prepared track.
 async function mockAutoplayApi(page: Page) {
-  const state = { feedback: null as 'like' | null, next: 0, actions: [] as string[] };
+  const state = { feedback: null as 'like' | 'dislike' | null, next: 0, actions: [] as string[] };
   const status = () => ({
     connected: true,
     playing: true,
@@ -64,7 +64,11 @@ async function mockAutoplayApi(page: Page) {
         state.next = (state.next + 1) % candidates.length;
         return json(route, { success: true });
       }
-      return json(route, { success: true, message: 'Skipped', voteSkip: null });
+      if (action === 'autoplay_dislike') {
+        state.feedback = state.feedback === 'dislike' ? null : 'dislike';
+        return json(route, { success: true, disliked: state.feedback === 'dislike' });
+      }
+      return json(route, { success: true });
     }
     if (path === '/api/me') return json(route, { id: 'user-1', username: 'tester', discriminator: '0001', avatar: '', global_name: 'Tester' });
     if (path === '/api/activity/config') return json(route, { enabled: true, clientId: 'test-client-id' });
@@ -119,7 +123,8 @@ test('dashboard listeners can like, reroll and dislike autoplay picks', async ({
   await page.getByRole('button', { name: 'Pick a different next track' }).click();
   await expect(page.getByText('Kids', { exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: /^Dislike and skip/ }).click();
+  await page.getByRole('button', { name: /^Dislike/ }).click();
+  await expect(page.getByRole('button', { name: 'Remove dislike' })).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => state.actions).toEqual(['autoplay_like', 'autoplay_reroll', 'autoplay_dislike']);
 });
 

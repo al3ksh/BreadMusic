@@ -111,12 +111,16 @@ test('autoplay picks a track when the queue runs out and shows it as up next', (
   assert.equal(trackEmbed('nowPlaying', state.current, state).footer.text, 'Picked by autoplay');
   assert.equal(command(initialState(), '/autoplay next').messages.at(-1).text, 'Autoplay is off.');
 });
-test('dislike skips and is avoided by autoplay; artist block and disliked panel', () => {
+test('dislike keeps playing, cancels a like and is avoided by autoplay; artist block and disliked panel', () => {
   const { autoplayNext } = load('./demo-state');
   let state = command(initialState(), '/autoplay like');
   assert.match(state.messages.at(-1).text, /Liked \*\*Instant Crush\*\*/);
+  assert.equal(state.tasteLiked.length, 1);
   state = command(state, '/autoplay dislike');
-  assert.equal(state.current.title, 'Not Like Us'); assert.match(state.messages.at(-1).text, /Disliked \*\*Instant Crush\*\*/);
+  assert.equal(state.current.title, 'Instant Crush'); assert.match(state.messages.at(-1).text, /Disliked \*\*Instant Crush\*\*/);
+  assert.equal(state.tasteLiked.length, 0);
+  state = command(state, '/skip');
+  assert.equal(state.current.title, 'Not Like Us');
   state = command(state, '/autoplay dislike artist');
   assert.match(state.messages.at(-1).text, /Blocked \*\*Kendrick Lamar\*\*/);
   for (let cursor = 0; cursor < 6; cursor++) assert.ok(!['Instant Crush', 'Not Like Us'].includes(autoplayNext({ ...state, current: null, autoplayCursor: cursor }).title));

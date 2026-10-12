@@ -23,6 +23,7 @@ function useBusy() {
 export function AutoplayRating({ feedback, onAction }: { feedback: AutoplayFeedback; onAction: PlayerAction }) {
   const [busy, run] = useBusy();
   const liked = feedback === 'like';
+  const disliked = feedback === 'dislike';
   const base = 'w-8 h-8 rounded-full flex items-center justify-center border transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed';
 
   return (
@@ -39,10 +40,11 @@ export function AutoplayRating({ feedback, onAction }: { feedback: AutoplayFeedb
       <button
         onClick={() => run(() => onAction('autoplay_dislike'))}
         disabled={busy}
-        title="Dislike and skip: autoplay will avoid this track"
-        className={`${base} bg-bg-hover text-text-secondary border-border hover:text-danger hover:border-danger/30`}
+        title={disliked ? 'Remove dislike' : 'Dislike: autoplay will steer clear of this'}
+        aria-pressed={disliked}
+        className={`${base} ${disliked ? 'bg-danger/15 text-danger border-danger/30 hover:bg-danger/20' : 'bg-bg-hover text-text-secondary border-border hover:text-danger hover:border-danger/30'}`}
       >
-        <ThumbsDown size={14} />
+        <ThumbsDown size={14} fill={disliked ? 'currentColor' : 'none'} />
       </button>
     </div>
   );

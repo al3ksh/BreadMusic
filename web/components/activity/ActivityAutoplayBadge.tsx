@@ -24,6 +24,7 @@ export function ActivityAutoplayBadge({
 }: ActivityAutoplayBadgeProps) {
   const rateable = Boolean(status.autoplay && status.autoplayRateable && hasTrack);
   const liked = status.autoplayFeedback === 'like';
+  const disliked = status.autoplayFeedback === 'dislike';
   const disabled = Boolean(actionBusy);
 
   return (
@@ -44,13 +45,14 @@ export function ActivityAutoplayBadge({
           </button>
           <button
             type="button"
-            className={`activity-autoplay-thumb is-dislike${controlFeedback === 'autoplay_dislike' ? ' is-popping' : ''}`}
+            className={`activity-autoplay-thumb is-dislike${disliked ? ' is-disliked' : ''}${controlFeedback === 'autoplay_dislike' ? ' is-popping' : ''}`}
             disabled={disabled}
             onClick={() => runControlAction('autoplay_dislike')}
-            aria-label="Dislike"
-            title="Dislike and skip: autoplay will avoid this track"
+            aria-label={disliked ? 'Disliked' : 'Dislike'}
+            aria-pressed={disliked}
+            title={disliked ? 'Remove dislike' : 'Dislike: autoplay will steer clear of this'}
           >
-            <ThumbsDown size={12} />
+            <ThumbsDown size={12} fill={disliked ? 'currentColor' : 'none'} />
           </button>
         </>
       )}

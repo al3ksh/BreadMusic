@@ -1773,6 +1773,11 @@ a { color: inherit; text-decoration: none; }
   opacity: 1;
 }
 
+.activity-autoplay-thumb.is-disliked {
+  color: #f3a4a4;
+  opacity: 1;
+}
+
 .activity-autoplay-thumb.is-popping {
   animation: activity-thumb-pop 640ms ease-out both;
 }
@@ -2691,7 +2696,7 @@ a { color: inherit; text-decoration: none; }
 
 .activity-icon-controls .activity-secondary-controls {
   display: grid;
-  grid-template-columns: repeat(4, 52px);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2708,6 +2713,14 @@ a { color: inherit; text-decoration: none; }
 
 .activity-icon-controls .activity-control-button span {
   display: none;
+}
+
+/* Five buttons share the width of the four transport buttons above them. */
+.activity-icon-controls .activity-secondary-controls .activity-control-button,
+.activity-icon-controls .activity-secondary-controls .activity-volume-control {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
 }
 
 .activity-volume-control {
@@ -3307,7 +3320,7 @@ button.activity-track-art:active:not(:disabled) { transform: scale(0.98); }
   }
   .activity-icon-controls { width: 100%; }
   .activity-icon-controls .activity-secondary-controls {
-    grid-template-columns: repeat(4, minmax(44px, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
   .activity-icon-controls .activity-control-button,
   .activity-icon-controls .activity-control-button.primary {
@@ -3635,8 +3648,8 @@ button.activity-track-art:active:not(:disabled) { transform: scale(0.98); }
   .activity-control-button,
   .activity-volume { min-height: 36px; }
   .activity-icon-controls { gap: 6px; }
-  .activity-icon-controls .activity-primary-controls,
-  .activity-icon-controls .activity-secondary-controls { grid-template-columns: repeat(4, 46px); gap: 6px; }
+  .activity-icon-controls .activity-primary-controls { grid-template-columns: repeat(4, 46px); gap: 6px; }
+  .activity-icon-controls .activity-secondary-controls { gap: 6px; }
   .activity-icon-controls .activity-control-button,
   .activity-icon-controls .activity-control-button.primary {
     width: 46px;

@@ -6,6 +6,7 @@ const sharp = require('../web/node_modules/sharp');
 const {
   BookOpenText,
   Dices,
+  Heart,
   LayoutDashboard,
   Pause,
   Play,
@@ -34,6 +35,7 @@ const icons = [
   ['shuffle', Shuffle],
   ['lyrics', BookOpenText],
   ['dashboard', LayoutDashboard],
+  ['heart', Heart],
   ['like', ThumbsUp],
   ['dislike', ThumbsDown],
   ['reroll', Dices],

@@ -14,7 +14,7 @@ const { queueRequestedTracks, fitQueueLimit, takeDuplicateWarning } = require('.
 const { CommandError } = require('../utils/commandError');
 
 // Anyone listening in the bot's voice channel may vote to skip and give autoplay feedback.
-const listenerActions = new Set(['skip', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
+const listenerActions = new Set(['skip', 'library_like', 'autoplay_like', 'autoplay_dislike', 'autoplay_reroll']);
 
 function createPlayerRouter({
   client,
@@ -88,6 +88,7 @@ function createPlayerRouter({
   setAutoplay,
   likeTrack,
   dislikeTrack,
+  undislikeTrack,
   rerollNext,
   isTrackSeekable,
   seekTrack,
@@ -460,7 +461,7 @@ function createPlayerRouter({
       let botVoiceChannelId = connectedBotVoiceChannelId || player?.voiceChannelId || null;
       const privileged = capabilities.canControlPlayer === true;
       const canQueue = capabilities.canQueue === true;
-      const queueContributorAction = action === 'search' || action === 'play' || action === 'library' || action === 'radio';
+      const queueContributorAction = action === 'search' || action === 'play' || action === 'library' || action === 'library_track' || action === 'radio';
       if (!privileged && !listenerActions.has(action) && !(canQueue && queueContributorAction)) {
         return res.status(403).json({ error: 'Player control is not enabled for your role' });
       }
@@ -586,12 +587,14 @@ function createPlayerRouter({
         return res.json({ success: true, channelId: targetVoiceChannelId, channelName: channel.name });
       }
 
-      const djOnlyActions = new Set(['stop', 'clearqueue', 'shuffle', 'loop', 'back', 'volume', 'filter', 'sound', 'autoplay', 'remove', 'seek', 'move', 'playnow', 'playlist']);
-      if (!privileged && djOnlyActions.has(action)) {
+      const djOnlyActions = new Set(['stop', 'clearqueue', 'shuffle', 'loop', 'back', 'volume', 'filter', 'sound', 'autoplay', 'remove', 'seek', 'move', 'playnow', 'playnext', 'playlist']);
+      // A Library track jumps the line only for DJs, like play next and play now.
+      const jumpsQueue = action === 'library_track' && ['next', 'now'].includes(req.body?.mode);
+      if (!privileged && (djOnlyActions.has(action) || jumpsQueue)) {
         return res.status(403).json({ error: 'This action requires the DJ role or Manage Guild permission' });
       }
 
-      const isPlaybackAction = ['play', 'playnow', 'playlist', 'library', 'radio'].includes(action);
+      const isPlaybackAction = ['play', 'playnow', 'playnext', 'playlist', 'library', 'library_track', 'radio'].includes(action);
       if (isPlaybackAction && req.activityUser && !memberVoiceChannelId) {
         return res.status(403).json({ error: 'Join the voice channel Bread is playing in before controlling playback' });
       }
@@ -714,6 +717,34 @@ function createPlayerRouter({
           return res.json({ success: true, title: playable.name, count: tracksToAdd.length, skipped, mode: 'queue' });
         }
 
+        // One saved track from the Library: queued for anyone, next in line or straight away for DJs.
+        case 'library_track': {
+          if (!library) return res.status(503).json({ error: 'The library is not available' });
+          const mode = ['next', 'now'].includes(req.body?.mode) ? req.body.mode : 'queue';
+          const userId = getRequestUser(req)?.id;
+          const playlistId = typeof req.body?.playlistId === 'string' ? req.body.playlistId : '';
+          const key = typeof req.body?.key === 'string' ? req.body.key : '';
+          const playable = playlistId && key ? library.resolvePlayable(userId, playlistId) : null;
+          const entry = playable?.tracks.find((saved) => saved.key === key);
+          if (!entry) return res.status(404).json({ error: 'Track not found in your Library' });
+
+          const requester = getDashboardRequester(req, client);
+          const [track] = tagOrigin([library.entryToTrack(entry, requester)], 'library');
+          if (mode !== 'now') {
+            fitQueueLimit(player, [track], { userId: requester.id, member, config: guildConfig });
+            const warning = takeDuplicateWarning(player, track, requester.id);
+            if (warning) return res.status(409).json({ error: warning, code: 'duplicate' });
+          }
+          addManualSeed(guildId, track);
+          if (mode === 'next' && player.queue.current) await queueRequestedTracks(player, track, { next: true });
+          else await addRequestedTrackToQueue(player, track, mode === 'now');
+          if (mode === 'now' && player.queue.current) await player.skip();
+          else if (!player.queue.current || (!player.playing && !player.paused)) await player.play();
+          await client.musicUI?.refresh(player).catch(() => {});
+          await savePlayerState(player).catch(() => {});
+          return res.json({ success: true, title: track.info.title, mode });
+        }
+
         // Plays a station picked in the Activity radio tab (a search result or a saved station).
         case 'radio': {
           const stationId = typeof req.body?.stationId === 'string' ? req.body.stationId.trim() : '';
@@ -747,8 +778,16 @@ function createPlayerRouter({
           if (player.paused) await player.resume();
           else await player.pause();
           break;
+        case 'library_like': {
+          // The heart is the listener's own library Liked list.
+          if (!library) return res.status(503).json({ error: 'The library is not available' });
+          const result = library.toggleLiked(getRequestUser(req)?.id, player.queue.current);
+          if (!result) return res.status(409).json({ error: 'This track cannot be saved.' });
+          broadcastPlayerUpdate(guildId);
+          return res.json({ success: true, liked: result.liked });
+        }
         case 'autoplay_like': {
-          // The badge like is the listener's own Liked list.
+          // The badge like only steers the listener's own autoplay.
           const result = likeTrack(getRequestUser(req)?.id, player.queue.current);
           if (!result) return res.status(409).json({ error: 'This track cannot be liked.' });
           await client.musicUI?.refresh(player).catch(() => {});
@@ -760,10 +799,17 @@ function createPlayerRouter({
           await client.musicUI?.refresh(player).catch(() => {});
           return res.json({ success: true });
         }
-        // A dislike is remembered for autoplay and then goes through the normal skip rules.
-        case 'autoplay_dislike':
-          dislikeTrack(guildId, getRequestUser(req)?.id, player.queue.current);
-        // falls through
+        // A dislike only steers autoplay and does not skip. Pressing it again takes it back.
+        case 'autoplay_dislike': {
+          const userId = getRequestUser(req)?.id;
+          if (undislikeTrack(userId, player.queue.current)) {
+            broadcastPlayerUpdate(guildId);
+            return res.json({ success: true, disliked: false });
+          }
+          if (!dislikeTrack(guildId, userId, player.queue.current)) return res.status(409).json({ error: 'This track cannot be disliked.' });
+          broadcastPlayerUpdate(guildId);
+          return res.json({ success: true, disliked: true });
+        }
         case 'skip':
           if (privileged) {
             const currentTrack = player.queue.current;
@@ -823,9 +869,16 @@ function createPlayerRouter({
           return res.json({ success: true, volume: clamped });
         }
         case 'playnow':
+        case 'playnext':
         case 'play': {
           const { encoded, query, track: metadata } = req.body;
           const playImmediately = action === 'playnow';
+          const playNext = action === 'playnext';
+          // Play next goes straight to the front of the queue, ahead of everyone's turns.
+          const enqueue = (track) => (playNext && player.queue.current
+            ? queueRequestedTracks(player, track, { next: true })
+            : addRequestedTrackToQueue(player, track, playImmediately));
+          const mode = playImmediately ? 'now' : playNext ? 'next' : 'queue';
           const requester = getDashboardRequester(req, client);
           // The client names the origin for history replays and search picks.
           const requestedOrigin = [req.body?.origin, metadata?.origin].find(isOrigin) ?? null;
@@ -853,12 +906,12 @@ function createPlayerRouter({
             const warning = duplicateWarning(track);
             if (warning) return res.status(409).json({ error: warning, code: 'duplicate' });
             addManualSeed(guildId, track);
-            await addRequestedTrackToQueue(player, track, playImmediately);
+            await enqueue(track);
             if (playImmediately && player.queue.current) await player.skip();
             else if (!player.queue.current || (!player.playing && !player.paused)) await player.play();
             await client.musicUI?.refresh(player).catch(() => {});
             await savePlayerState(player).catch(() => {});
-            return res.json({ success: true, mode: playImmediately ? 'now' : 'queue' });
+            return res.json({ success: true, mode });
           }
           if (query) {
             checkRoom(query);
@@ -883,12 +936,12 @@ function createPlayerRouter({
             const warning = duplicateWarning(track);
             if (warning) return res.status(409).json({ error: warning, code: 'duplicate' });
             addManualSeed(guildId, track);
-            await addRequestedTrackToQueue(player, track, playImmediately);
+            await enqueue(track);
             if (playImmediately && player.queue.current) await player.skip();
             else if (!player.queue.current || (!player.playing && !player.paused)) await player.play();
             await client.musicUI?.refresh(player).catch(() => {});
             await savePlayerState(player).catch(() => {});
-            return res.json({ success: true, title: track.info.title, mode: playImmediately ? 'now' : 'queue' });
+            return res.json({ success: true, title: track.info.title, mode });
           }
           return res.status(400).json({ error: 'Provide encoded track or query' });
         }

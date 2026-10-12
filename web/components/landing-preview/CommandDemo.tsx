@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useReducer, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowUp, BookOpen, Check, Hash, Headphones, LayoutGrid, ListMusic, LoaderCircle, Pause, Play, Plus, Repeat2, RotateCcw, Shuffle, SkipBack, SkipForward, Square, Star, Volume2 } from 'lucide-react';
+import { ArrowUp, BookOpen, Check, Hash, Headphones, Heart, LayoutGrid, ListMusic, LoaderCircle, Pause, Play, Plus, Repeat2, RotateCcw, Shuffle, SkipBack, SkipForward, Square, Star, Volume2 } from 'lucide-react';
 import { artwork, asset, commands, demoTracks, quickCommands, soundPresets, statsViews, type DemoTrack } from './demo';
-import { autoplayNext, demoReducer, initialState, queueEmbed, soundEmbed, trackEmbed, type DemoAction, type DemoState, type Embed, type Message, type Playback } from './demo-state';
+import { autoplayNext, demoReducer, initialState, queueEmbed, soundEmbed, trackEmbed, trackKey, type DemoAction, type DemoState, type Embed, type Message } from './demo-state';
 import contract from './bot-contract.json';
 import styles from './preview.module.css';
 import type { DemoHost } from './demo-backend';
@@ -41,13 +41,20 @@ const controls = {
   shuffle: { icon: Shuffle, label: 'Shuffle queue', command: '/shuffle' },
   lyrics: { icon: BookOpen, label: 'Show lyrics', command: '/lyrics' },
   activity: { icon: LayoutGrid, label: 'Open Activity preview', command: '' },
+  heart: { icon: Heart, label: 'Save to your Library', command: '' },
 };
 
-function PlayerButtons({ state, busy, run, openActivity }: { state: Playback; busy: boolean; run: (value: string) => void; openActivity: () => void }) {
+function PlayerButtons({ state, busy, run, openActivity, dispatch }: { state: DemoState; busy: boolean; dispatch: (action: DemoAction) => void; run: (value: string) => void; openActivity: () => void }) {
   return <div className={styles.playerButtons}>{contract.controls.map((row, index) => <div key={index}>{row.components.map((button) => {
     const id = button.custom_id.split(':')[1] as keyof typeof controls;
     const control = controls[id];
     const isPause = id === 'playpause';
+    if (id === 'heart') {
+      const track = state.current;
+      const saved = !!track && state.liked.some(entry => trackKey(entry) === trackKey(track));
+      const heartLabel = saved ? 'Remove from your Library' : control.label;
+      return <button key={id} type="button" title={heartLabel} aria-label={heartLabel} aria-pressed={saved} disabled={busy || !track || track.live} data-style="secondary" onClick={() => track && dispatch({ type: 'like', track, liked: !saved })}><Heart size={18} fill={saved ? 'currentColor' : 'none'} /></button>;
+    }
     const Icon = isPause && state.paused ? Play : control.icon;
     const label = isPause && state.paused ? 'Resume playback' : control.label;
     const command = isPause && state.paused ? '/resume' : id === 'loop' ? `/loop ${state.loop === 'off' ? 'track' : state.loop === 'track' ? 'queue' : 'off'}` : control.command;
@@ -70,7 +77,7 @@ function BotReply({ message, state, dispatch, live, busy, run, openActivity }: {
       <div className={styles.reply}>
         {embed && <DiscordEmbed embed={embed} live={live} />}
         {message.text && <p>{message.text}</p>}
-        {message.kind === 'player' && live && state.current && <PlayerButtons state={state} busy={busy} run={run} openActivity={openActivity} />}
+        {message.kind === 'player' && live && state.current && <PlayerButtons state={state} busy={busy} run={run} openActivity={openActivity} dispatch={dispatch} />}
         {message.embed?.title === contract.queue.title && <div className={styles.queuePagination}><button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</button><button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}>Next</button></div>}
         {message.stationId && <button type="button" className={styles.playAgain} disabled={busy} onClick={() => dispatch({ type: 'saveStation', id: message.stationId! })}><Star size={14} fill={state.savedStations.includes(message.stationId) ? 'currentColor' : 'none'} /> {state.savedStations.includes(message.stationId) ? 'Saved' : 'Save station'}</button>}
         {liveSound && <select className={styles.discordSelect} aria-label="Sound preset" value={state.preset} onChange={event => dispatch({ type: 'preset', preset: event.target.value })}>{soundPresets.map(preset => <option key={preset.id} value={preset.id}>{preset.label} - {preset.description}</option>)}</select>}

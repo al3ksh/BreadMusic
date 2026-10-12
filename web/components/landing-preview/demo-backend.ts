@@ -173,8 +173,12 @@ export function createDemoBackend(host: DemoHost, originalFetch: typeof fetch = 
       sound,
       autoplay: state.autoplay,
       autoplayNext: next ? { title: next.title, author: next.artist, uri: uriOf(next), duration: ms(next), artwork: artwork(next), source: next.source || 'youtube' } : null,
-      autoplayFeedback: state.autoplay && track && state.liked.some((entry) => trackKey(entry) === trackKey(track)) ? 'like' : null,
+      autoplayFeedback: !state.autoplay || !track ? null
+        : state.tasteLiked.includes(trackKey(track)) ? 'like'
+          : state.disliked.some((entry) => entry.title && trackKey(entry) === trackKey(track)) ? 'dislike' : null,
       autoplayRateable: Boolean(state.autoplay && track && !live),
+      liked: Boolean(track && state.liked.some((entry) => trackKey(entry) === trackKey(track))),
+      likeable: Boolean(track && !live),
       voteSkip: null,
       sessionHistory: state.previous.slice(-2).reverse().map(queueTrack),
     };
@@ -257,7 +261,7 @@ export function createDemoBackend(host: DemoHost, originalFetch: typeof fetch = 
     const seconds = Math.round(meta.duration / 1000);
     return register({ title: String(meta.title), artist: String(meta.author || 'Unknown'), cover: '', duration: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, uri: uri || undefined, artwork: text(meta.artwork, 2048) || undefined, source: text(meta.source) || undefined, seekable: meta.seekable !== false });
   };
-  const queueTracks = (tracks: DemoTrack[], name: string, mode: 'queue' | 'now' = 'queue') => {
+  const queueTracks = (tracks: DemoTrack[], name: string, mode: 'queue' | 'next' | 'now' = 'queue') => {
     if (!tracks.length) throw new DemoError(400, 'There is nothing to queue.');
     apply({ type: 'resolved', tracks, command: `/play ${name}`, mode });
   };
@@ -345,14 +349,29 @@ export function createDemoBackend(host: DemoHost, originalFetch: typeof fetch = 
       }
       case 'autoplay_like': {
         const track = state.current;
-        if (track && state.liked.some((entry) => trackKey(entry) === trackKey(track))) {
-          apply({ type: 'like', track, liked: false });
+        if (track && state.tasteLiked.includes(trackKey(track))) {
+          apply({ type: 'taste', track, liked: false });
           return { success: true, liked: false };
         }
         command('/autoplay like');
         return { success: true, liked: true };
       }
-      case 'autoplay_dislike': command('/autoplay dislike'); return { success: true };
+      case 'autoplay_dislike': {
+        const track = state.current;
+        if (track && state.disliked.some((entry) => entry.title && trackKey(entry) === trackKey(track))) {
+          apply({ type: 'undislike', title: track.title, artist: track.artist });
+          return { success: true, disliked: false };
+        }
+        command('/autoplay dislike');
+        return { success: true, disliked: true };
+      }
+      case 'library_like': {
+        const track = state.current;
+        if (!track || track.live) throw new DemoError(409, 'This track cannot be saved.');
+        const liked = !state.liked.some((entry) => trackKey(entry) === trackKey(track));
+        apply({ type: 'like', track, liked });
+        return { success: true, liked };
+      }
       case 'autoplay_reroll': command('/autoplay next'); return { success: true };
       case 'radio': {
         const station = demoStations.find((entry) => entry.id === body.stationId);
@@ -372,10 +391,19 @@ export function createDemoBackend(host: DemoHost, originalFetch: typeof fetch = 
         if (volume !== state.volume) command(`/volume ${volume}`);
         return { success: true };
       }
-      case 'play': case 'playnow': {
+      case 'play': case 'playnow': case 'playnext': {
         const track = trackFromBody(body);
-        queueTracks([track], `${track.artist} - ${track.title}`, action === 'playnow' ? 'now' : 'queue');
-        return { success: true };
+        const mode = action === 'playnow' ? 'now' : action === 'playnext' ? 'next' : 'queue';
+        queueTracks([track], `${track.artist} - ${track.title}`, mode);
+        return { success: true, mode };
+      }
+      case 'library_track': {
+        const source = body.playlistId === 'liked' ? state.liked : findPlaylist(String(body.playlistId)).tracks;
+        const track = source.find((entry) => trackKey(entry) === body.key);
+        if (!track) throw new DemoError(404, 'Track not found in your Library');
+        const mode = body.mode === 'now' || body.mode === 'next' ? body.mode : 'queue';
+        queueTracks([{ ...track, autoplay: undefined }], `${track.artist} - ${track.title}`, mode);
+        return { success: true, title: track.title, mode };
       }
       case 'playlist': {
         const playlist = searchPlaylists.get(String(body.cacheKey));

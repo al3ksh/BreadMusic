@@ -181,6 +181,9 @@ export interface PlayerStatus {
   autoplayNext?: AutoplayNextTrack | null;
   autoplayFeedback?: AutoplayFeedback;
   autoplayRateable?: boolean;
+  // The viewer's own library Liked list, separate from the autoplay thumbs.
+  liked?: boolean;
+  likeable?: boolean;
   voteSkip: {
     votes: number;
     requiredVotes: number;

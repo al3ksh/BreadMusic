@@ -84,12 +84,13 @@ const {
   autoplayEvents,
   likeTrack,
   dislikeTrack,
+  undislikeTrack,
   rerollNext,
   REROLL_FAILURES,
 } = require('./music/autoplay');
 const { syncPlayerEmojis } = require('./music/playerEmojis');
 const { flush: flushAutoplayProfiles } = require('./music/autoplay/profileStore');
-const { flush: flushLibrary } = require('./music/library');
+const { flush: flushLibrary, toggleLiked } = require('./music/library');
 const { flush: flushAutoplayUserTaste } = require('./music/autoplay/userTaste');
 const {
   clearVoiceTrackStatus,
@@ -754,6 +755,7 @@ async function handleMusicButton(interaction) {
     [BUTTONS.LOOP]: toggleLoop,
     [BUTTONS.SHUFFLE]: shuffleQueue,
     [BUTTONS.LYRICS]: showLyrics,
+    [BUTTONS.HEART]: heartCurrent,
     [BUTTONS.LIKE]: likeCurrent,
     [BUTTONS.DISLIKE]: dislikeCurrent,
     [BUTTONS.REROLL]: rerollAutoplay,
@@ -1265,7 +1267,7 @@ async function togglePlayPause(interaction) {
   await client.musicUI.refresh(player);
 }
 
-async function skipTrack(interaction, { notePrefix = '' } = {}) {
+async function skipTrack(interaction) {
   const { player, config } = await ensurePlayer(interaction, { requireSameChannel: true });
   await interaction.deferUpdate();
   if (player.repeatMode === 'track' && canControlPlayer(interaction, config)) {
@@ -1287,30 +1289,53 @@ async function skipTrack(interaction, { notePrefix = '' } = {}) {
     }
     await savePlayerState(player).catch(() => {});
   } else {
-    await interaction.followUp({ content: notePrefix + result.message, flags: MessageFlags.Ephemeral }).catch(() => {});
+    await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 }
 
-// The like is the listener's own, so only they see the confirmation.
+// The heart saves the track to the listener's own Liked list, so only they see the confirmation.
+async function heartCurrent(interaction) {
+  const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
+  const track = player.queue.current;
+  const result = toggleLiked(interaction.user.id, track);
+  if (!result) throw new CommandError('This track cannot be saved.');
+  broadcastPlayerUpdate(interaction.guildId);
+  await interaction.reply({
+    content: result.liked ? `Saved **${track.info.title}** to your Library.` : `Removed **${track.info.title}** from your Library.`,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+// Autoplay likes and dislikes are the listener's own and only steer autoplay.
 async function likeCurrent(interaction) {
   const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
   const track = player.queue.current;
   const result = likeTrack(interaction.user.id, track);
   if (!result) throw new CommandError('This track cannot be liked.');
+  broadcastPlayerUpdate(interaction.guildId);
   await interaction.reply({
-    content: result.liked ? `Liked **${track.info.title}**. Autoplay will lean towards it.` : `Removed your like from **${track.info.title}**.`,
+    content: result.liked ? `👍 Liked **${track.info.title}**. Autoplay will pick more like it.` : `Removed your like from **${track.info.title}**.`,
     flags: MessageFlags.Ephemeral,
   });
 }
 
-// A dislike is remembered for autoplay and then goes through the normal skip rules.
+// The dislike does not skip, that is the skip button's job. Pressing it again takes it back.
 async function dislikeCurrent(interaction) {
   const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
-  if (!dislikeTrack(interaction.guildId, interaction.user.id, player.queue.current)) {
+  const track = player.queue.current;
+  if (undislikeTrack(interaction.user.id, track)) {
+    broadcastPlayerUpdate(interaction.guildId);
+    await interaction.reply({ content: `Removed your dislike from **${track.info.title}**.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  if (!dislikeTrack(interaction.guildId, interaction.user.id, track)) {
     throw new CommandError('This track cannot be disliked.');
   }
-  // Without DJ rights the skip is only a vote, so say the dislike itself was kept.
-  await skipTrack(interaction, { notePrefix: `👎 Disliked **${player.queue.current.info.title}**. ` });
+  broadcastPlayerUpdate(interaction.guildId);
+  await interaction.reply({
+    content: `👎 Disliked **${track.info.title}**. Autoplay will steer clear of it.`,
+    flags: MessageFlags.Ephemeral,
+  });
 }
 
 async function rerollAutoplay(interaction) {

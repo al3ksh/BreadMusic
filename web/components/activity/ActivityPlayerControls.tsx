@@ -1,4 +1,4 @@
-import { Pause, Play, Radio, Repeat, Shuffle, SkipBack, SkipForward, SlidersHorizontal, Square, Volume2 } from 'lucide-react';
+import { Heart, Pause, Play, Radio, Repeat, Shuffle, SkipBack, SkipForward, SlidersHorizontal, Square, Volume2 } from 'lucide-react';
 import type { CSSProperties, MutableRefObject, ReactNode } from 'react';
 import type { PlayerStatus } from '@/lib/api';
 import { ActivitySpinner } from '@/components/activity/ActivityArtwork';
@@ -29,6 +29,7 @@ type ActivityPlayerControlsProps = {
   soundOpen?: boolean;
   soundActive?: boolean;
   onToggleSound?: () => void;
+  onToggleLike?: () => void;
 };
 
 export function ActivityPlayerControls({
@@ -57,7 +58,9 @@ export function ActivityPlayerControls({
   soundOpen = false,
   soundActive = false,
   onToggleSound,
+  onToggleLike,
 }: ActivityPlayerControlsProps) {
+  const liked = Boolean(status.liked);
   return (
     <div className={`activity-controls-panel${iconOnly ? ' activity-icon-controls' : ''}`}>
       <div className="activity-primary-controls">
@@ -72,6 +75,17 @@ export function ActivityPlayerControls({
         <ControlButton label="Shuffle" feedback={controlFeedback === 'shuffle'} disabled={!canDj || !queueTotal || Boolean(actionBusy)} onClick={() => runControlAction('shuffle')}><Shuffle size={16} /></ControlButton>
         <ControlButton label={`Loop ${status.repeatMode}`} active={loopActive} feedback={controlFeedback === 'loop'} disabled={!canDj || !hasTrack || Boolean(actionBusy)} onClick={() => runControlAction('loop')}><Repeat size={16} /></ControlButton>
         {iconOnly && <ControlButton label={`Autoplay ${status.autoplay ? 'on' : 'off'}`} active={status.autoplay} feedback={controlFeedback === 'autoplay'} disabled={autoplayDisabled || !canDj || Boolean(actionBusy)} onClick={() => runControlAction('autoplay', { enabled: !status.autoplay })}><Radio size={16} /></ControlButton>}
+        {onToggleLike && (
+          <ControlButton
+            label={liked ? 'Saved to your Library' : 'Save to your Library'}
+            active={liked}
+            feedback={controlFeedback === 'library_like'}
+            disabled={!hasTrack || !status.likeable || Boolean(actionBusy)}
+            onClick={onToggleLike}
+          >
+            <Heart size={16} fill={liked ? 'currentColor' : 'none'} />
+          </ControlButton>
+        )}
         <div className={`activity-volume-control ${volumeOpen ? 'is-open' : ''} ${soundActive ? 'has-sound' : ''}`} ref={volumeControlRef}>
           <button
             type="button"

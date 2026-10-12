@@ -4,6 +4,7 @@ const { buildPlaybackErrorEmbed, buildReplacementEmbed } = require('./playbackEr
 const { isAutoplayEnabled, getAutoplayNext } = require('./autoplay');
 const { isStreamTrack } = require('./autoplay/normalize');
 const { playerEmoji } = require('./playerEmojis');
+const { canSaveTrack } = require('./library');
 
 const BUTTON_PREFIX = 'music';
 const PLAYBACK_ERROR_TTL_MS = 30_000;
@@ -18,6 +19,7 @@ const BUTTONS = {
   BACK: 'back',
   LYRICS: 'lyrics',
   ACTIVITY: 'activity',
+  HEART: 'heart',
   LIKE: 'like',
   DISLIKE: 'dislike',
   REROLL: 'reroll',
@@ -33,6 +35,7 @@ const FALLBACK_EMOJI = {
   shuffle: '🔀',
   lyrics: '📖',
   dashboard: '🎵',
+  heart: '🤍',
   like: '👍',
   dislike: '👎',
   reroll: '🎲',
@@ -110,6 +113,12 @@ class MusicUI {
         .setCustomId(this.buildCustomId(BUTTONS.ACTIVITY, player.guildId))
         .setEmoji(icon('dashboard'))
         .setStyle(ButtonStyle.Secondary),
+      // Saves the track to the presser's own Liked list.
+      new ButtonBuilder()
+        .setCustomId(this.buildCustomId(BUTTONS.HEART, player.guildId))
+        .setEmoji(icon('heart'))
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(disabled || !canSaveTrack(player.queue.current)),
     );
 
     const rows = [rowOne, rowTwo];

@@ -198,6 +198,16 @@
           },
           "custom_id": "music:activity:preview",
           "style": 2
+        },
+        {
+          "type": 2,
+          "emoji": {
+            "name": "🤍",
+            "animated": false
+          },
+          "custom_id": "music:heart:preview",
+          "style": 2,
+          "disabled": false
         }
       ]
     }

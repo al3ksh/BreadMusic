@@ -224,8 +224,8 @@
 .channelMention svg { display: inline; vertical-align: -2px; }
 .embedFooter { margin-top: 14px; font-size: 10px; font-weight: 600; color: #dbdee1; }
 .embedFooter span { font-weight: 400; }
-.playerButtons { display: grid; gap: 6px; margin-top: 8px; width: min(100%, 310px); }
-.playerButtons > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.playerButtons { display: grid; gap: 6px; margin-top: 8px; width: min(100%, 380px); }
+.playerButtons > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
 .playerButtons button { min-width: 0; height: 36px; display: grid; place-items: center; border-radius: 4px; background: #4e5058; color: #f2f3f5; transition: background 140ms; }
 @media (hover: hover) and (pointer: fine) {
   .playerButtons button:hover { background: #63656e; }

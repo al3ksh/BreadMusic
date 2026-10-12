@@ -251,10 +251,12 @@ function getListenerIds(player, client) {
   return ids;
 }
 
+// What the person likes: their library Liked list plus their autoplay 👍s.
 function likedEntries(userId) {
-  return library.listLiked(userId)
-    .map((entry) => normalizeTrack(library.entryToTrack(entry)))
-    .filter(Boolean);
+  return [
+    ...library.listLiked(userId).map((entry) => normalizeTrack(library.entryToTrack(entry))).filter(Boolean),
+    ...userTaste.listLikes(userId),
+  ];
 }
 
 // Likes and dislikes belong to people, so only the people listening right now shape the pick.
@@ -840,34 +842,43 @@ function canRateTrack(track) {
   return feedbackEntry(track) !== null;
 }
 
-// 'like', 'dislike' or null: what this person thinks of the track. A like is the track being
-// on their library Liked list.
+// 'like', 'dislike' or null: what this person told autoplay about the track. The library heart
+// is separate and does not show here.
 function getTrackFeedback(userId, track) {
   const entry = feedbackEntry(track);
   if (!userId || !entry) return null;
   if (userTaste.isDisliked(userId, entry.key)) return 'dislike';
-  return library.listLiked(userId).some((liked) => liked.key === entry.key) ? 'like' : null;
+  return userTaste.isLiked(userId, entry.key) ? 'like' : null;
 }
 
-// Toggles the track on the person's Liked list. Returns { liked } or null when the track cannot
-// carry feedback (streams, uploads, tracks without an encoded form).
+// Toggles the person's autoplay like. It only steers autoplay and never touches the library.
+// Returns { liked } or null when the track cannot carry feedback (streams, uploads).
 function likeTrack(userId, track) {
   const entry = feedbackEntry(track);
-  const result = userId && entry ? library.toggleLiked(userId, track) : null;
-  if (!result) return null;
-  const { liked } = result;
+  if (!userId || !entry) return null;
+  const liked = !userTaste.isLiked(userId, entry.key);
+  if (liked) userTaste.recordLike(userId, { ...entry, artwork: track.info?.artworkUrl || null });
+  else userTaste.removeLike(userId, entry.key);
   logAutoplay('info', `${liked ? 'Liked' : 'Like removed'}: "${entry.title}" by ${entry.author || 'unknown'}`);
   return { liked };
 }
 
+// Takes back the person's dislike of the track. Returns { disliked: false }, or null when
+// there was nothing to undo.
+function undislikeTrack(userId, track) {
+  const entry = feedbackEntry(track);
+  if (!userId || !entry || !userTaste.removeDislike(userId, entry.key)) return null;
+  logAutoplay('info', `Dislike removed: "${entry.title}" by ${entry.author || 'unknown'}`);
+  return { disliked: false };
+}
+
 // Records the person's dislike and drops the track from the server's seeds. With
-// { artist: true } the whole artist is blocked and their seeds go as well. The caller skips
-// the track; the next pick re-scores the pool, so the prepared track is redone as well.
+// { artist: true } the whole artist is blocked and their seeds go as well. The track keeps
+// playing (skipping is the skip button's job); the prepared next pick is redone.
 function dislikeTrack(guildId, userId, track, { artist = false } = {}) {
   const entry = feedbackEntry(track);
   if (!guildId || !userId || !entry) return null;
   userTaste.recordDislike(userId, { ...entry, artwork: track.info?.artworkUrl || null });
-  library.removeLiked(userId, entry.key);
   const blocked = artist && userTaste.blockArtist(userId, entry);
 
   const dropped = (info) => {
@@ -946,6 +957,7 @@ module.exports = {
   canRateTrack,
   getTrackFeedback,
   likeTrack,
+  undislikeTrack,
   dislikeTrack,
   rerollNext,
   getListenerIds,

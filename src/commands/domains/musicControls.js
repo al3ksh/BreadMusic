@@ -1,4 +1,4 @@
-const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES, handleAutoplay } = require('../../music/autoplay');
+const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES } = require('../../music/autoplay');
 const { buildDislikedPanel, handleDislikedComponent } = require('./autoplayDisliked');
 
 const createMusicControlCommands = (context) => {
@@ -56,7 +56,6 @@ const createMusicControlCommands = (context) => {
     buildDiceEmbed,
     buildRPSChoiceComponents,
     applyPreferredSource,
-    handleSkipRequest,
     markPlayerStopping,
     deleteInteractionReply,
     isAutoplayEnabled,
@@ -74,7 +73,6 @@ const createMusicControlCommands = (context) => {
     buildDashboardUrl,
     getGuildInsights,
     getUserInsights,
-    withGuildMutex,
     formatStatsDuration,
     formatCompactRankedCounts,
     formatSourceLabel,
@@ -96,7 +94,7 @@ const createMusicControlCommands = (context) => {
       .addSubcommand((sub) => sub.setName('like').setDescription('Like the current track so autoplay picks more like it.'))
       .addSubcommand((sub) => sub
         .setName('dislike')
-        .setDescription('Dislike and skip the current track; autoplay will avoid it.')
+        .setDescription('Dislike the current track; autoplay will avoid it.')
         .addBooleanOption((option) => option
           .setName('artist')
           .setDescription('Block the whole artist for your autoplay, not just this track.')))
@@ -125,13 +123,13 @@ const createMusicControlCommands = (context) => {
         await interaction.client.musicUI.refresh(player);
         await interaction.editReply(
           result.liked
-            ? `\uD83D\uDC4D Liked **${track.info.title}**. Autoplay will pick more like it, and it is in your \`/liked\` list.`
+            ? `\uD83D\uDC4D Liked **${track.info.title}**. Autoplay will pick more like it.`
             : `Removed your like from **${track.info.title}**.`,
         );
         return;
       }
 
-      // A dislike is remembered for autoplay and then goes through the normal skip rules.
+      // A dislike only steers autoplay; skipping stays with /skip.
       if (subcommand === 'dislike') {
         const track = player.queue.current;
         const blockArtist = interaction.options.getBoolean('artist') === true;
@@ -140,21 +138,10 @@ const createMusicControlCommands = (context) => {
           await interaction.editReply('This track cannot be disliked.');
           return;
         }
-        const result = await withGuildMutex(interaction.guildId, () =>
-          handleSkipRequest(interaction, player, config, interaction.client),
-        );
-        if (result.skipped && result.needsAutoplay && result.lastTrack) {
-          await handleAutoplay(player, result.lastTrack, interaction.client);
-        }
-        if (result.skipped) await queuePersist(player);
         const what = disliked.blockedArtist
           ? `Blocked **${track.info.author || 'this artist'}** for your autoplay`
-          : `Disliked **${track.info.title}**`;
-        await interaction.editReply(
-          result.skipped
-            ? `\uD83D\uDC4E ${what} and skipped the track. Undo it with \`/autoplay disliked\`.`
-            : `\uD83D\uDC4E ${what}. ${result.message}`,
-        );
+          : `Disliked **${track.info.title}**. Autoplay will steer clear of it`;
+        await interaction.editReply(`👎 ${what}. Undo it with \`/autoplay disliked\`.`);
         return;
       }
 

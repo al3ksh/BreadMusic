@@ -4,7 +4,7 @@ const path = require('node:path');
 const ICON_DIR = path.join(__dirname, '..', '..', 'assets', 'discord-player-icons');
 const ICON_NAMES = [
   'previous', 'play', 'pause', 'skip', 'stop', 'loop', 'shuffle',
-  'lyrics', 'dashboard', 'like', 'dislike', 'reroll',
+  'lyrics', 'dashboard', 'heart', 'like', 'dislike', 'reroll',
 ];
 // Application emoji names are shared by everything the app owns, so the player ones get a prefix.
 const EMOJI_PREFIX = 'bread_';
