@@ -104,3 +104,25 @@ test('an invalid Activity bearer token never falls back to a dashboard session',
   const auth = await __testing.resolveRequestAuth(req, async () => null);
   assert.deepEqual(auth, { error: 'Activity authentication expired' });
 });
+
+test('rejected Activity tokens are remembered and a flood of them pauses Discord lookups', async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const token = options.headers.Authorization.slice('Bearer '.length);
+    calls.push(token);
+    if (token === 'good-token') return new Response(JSON.stringify({ id: 'listener', username: 'listener' }), { status: 200 });
+    return new Response('{}', { status: 401 });
+  });
+
+  assert.equal(await __testing.resolveActivityUser('bad-token'), null);
+  assert.equal(await __testing.resolveActivityUser('bad-token'), null);
+  assert.deepEqual(calls, ['bad-token']);
+
+  assert.equal((await __testing.resolveActivityUser('good-token')).id, 'listener');
+  for (let i = 0; i < 100; i++) await __testing.resolveActivityUser(`flood-${i}`);
+  const before = calls.length;
+  assert.equal(await __testing.resolveActivityUser('another-unknown-token'), null);
+  assert.equal(calls.length, before);
+  assert.equal((await __testing.resolveActivityUser('good-token')).id, 'listener');
+  assert.equal(calls.length, before);
+});

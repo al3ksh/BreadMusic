@@ -1,6 +1,7 @@
 const express = require('express');
 
 const DEBUG_FAILURE_KINDS = new Set(['discord', 'lavalink', 'voice', 'auth', 'access', 'generic']);
+const ARTWORK_CONTENT_TYPE = /^image\/(jpeg|png|webp|gif|avif)(;|$)/i;
 
 function createActivityRouter({
   discordApi,
@@ -52,7 +53,8 @@ function createActivityRouter({
       const contentType = response.headers.get('content-type') || '';
       const contentLength = Number(response.headers.get('content-length') || 0);
 
-      if (!response.ok || !contentType.startsWith('image/')) {
+      // Raster formats only: an SVG served from our own origin could carry script.
+      if (!response.ok || !ARTWORK_CONTENT_TYPE.test(contentType)) {
         return res.status(404).json({ error: 'Artwork unavailable' });
       }
       if (contentLength > artworkMaxBytes) {

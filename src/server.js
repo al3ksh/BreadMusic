@@ -67,6 +67,12 @@ const { createFixedWindowRateLimiter } = require('./utils/rateLimit');
 const DISCORD_API = 'https://discord.com/api/v10';
 const SCOPES = ['identify', 'guilds'].join(' ');
 const activityAuthCache = new Map();
+const ACTIVITY_AUTH_CACHE_MAX_ENTRIES = 2_000;
+const ACTIVITY_AUTH_LOOKUP_TIMEOUT_MS = 5_000;
+const ACTIVITY_AUTH_REJECTED_TTL_MS = 60_000;
+const ACTIVITY_AUTH_PAUSE_MS = 60_000;
+const ACTIVITY_AUTH_REJECTION_LIMIT = createFixedWindowRateLimiter({ windowMs: 60_000, max: 100 });
+let activityLookupsPausedUntil = 0;
 const ACTIVITY_ARTWORK_MAX_BYTES = 6 * 1024 * 1024;
 const ACTIVITY_TOKEN_RATE_LIMIT = createFixedWindowRateLimiter({ windowMs: 60_000, max: 10 });
 const ACTIVITY_ARTWORK_RATE_LIMIT = createFixedWindowRateLimiter({ windowMs: 60_000, max: 120 });
@@ -1749,15 +1755,43 @@ function readBearerToken(req) {
   return match ? match[1].trim() : null;
 }
 
+function pruneActivityAuthCache(now) {
+  if (activityAuthCache.size <= ACTIVITY_AUTH_CACHE_MAX_ENTRIES) return;
+  for (const [token, entry] of activityAuthCache) {
+    if (entry.expiresAt <= now) activityAuthCache.delete(token);
+  }
+  while (activityAuthCache.size > ACTIVITY_AUTH_CACHE_MAX_ENTRIES) {
+    activityAuthCache.delete(activityAuthCache.keys().next().value);
+  }
+}
+
+// Every lookup goes to Discord from the bot's own IP, and Discord bans IPs that send too many
+// rejected requests. Rejected tokens are remembered, and a flood of them pauses lookups of
+// unknown tokens for a while; people already signed in keep working from the cache.
+function rememberRejectedActivityToken(accessToken, now) {
+  activityAuthCache.set(accessToken, { user: null, expiresAt: now + ACTIVITY_AUTH_REJECTED_TTL_MS });
+  pruneActivityAuthCache(now);
+  if (!ACTIVITY_AUTH_REJECTION_LIMIT.check('rejected', now).allowed) {
+    activityLookupsPausedUntil = now + ACTIVITY_AUTH_PAUSE_MS;
+  }
+}
+
 async function resolveActivityUser(accessToken) {
+  const now = Date.now();
   const cached = activityAuthCache.get(accessToken);
-  if (cached && cached.expiresAt > Date.now()) return cached.user;
+  if (cached && cached.expiresAt > now) return cached.user;
   if (cached) activityAuthCache.delete(accessToken);
+  if (now < activityLookupsPausedUntil) return null;
 
   try {
     const response = await fetch(`${DISCORD_API}/users/@me`, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(ACTIVITY_AUTH_LOOKUP_TIMEOUT_MS),
     });
+    if (response.status === 401) {
+      rememberRejectedActivityToken(accessToken, Date.now());
+      return null;
+    }
     if (!response.ok) return null;
 
     const profile = await response.json();
@@ -1775,6 +1809,7 @@ async function resolveActivityUser(accessToken) {
       user,
       expiresAt: Date.now() + 5 * 60 * 1000,
     });
+    pruneActivityAuthCache(Date.now());
     return user;
   } catch {
     return null;
@@ -1838,5 +1873,5 @@ function buildTrustedOrigins(webUrl) {
 module.exports = {
   createApiServer,
   broadcastPlayerUpdate,
-  __testing: { resolveRequestAuth, cleanupExpiredAudioUploads, makeRoomForAudioUpload },
+  __testing: { resolveRequestAuth, resolveActivityUser, cleanupExpiredAudioUploads, makeRoomForAudioUpload },
 };

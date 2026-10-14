@@ -23,8 +23,8 @@
     "express-session": "^1.18.1",
     "gifenc": "1.0.3",
     "lavalink-client": "2.9.11",
-    "music-metadata": "11.15.0",
-    "sharp": "0.35.4",
+    "music-metadata": "11.16.1",
+    "sharp": "0.35.5",
     "strtok3": "10.3.5"
   }
 }

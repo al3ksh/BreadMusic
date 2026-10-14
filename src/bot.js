@@ -134,6 +134,7 @@ const ACTIVITY_ROTATION_INTERVAL = 30_000;
 const NODE_RECONNECT_DELAY = 5_000;
 const AUTOCOMPLETE_TIMEOUT = 2_500;
 const MAX_AUTOCOMPLETE_RESULTS = 5;
+const SHUTDOWN_TEARDOWN_TIMEOUT_MS = 6_000;
 
 const config = loadConfig();
 let isShuttingDown = false;
@@ -1651,24 +1652,27 @@ async function gracefulShutdown(signal) {
   alertMonitor?.stop();
   alertMonitor = null;
 
-  const players = client.lavalink?.players?.values() ?? [];
-  for (const player of players) {
-    try {
-      await savePlayerState(player);
-      await player.destroy('Bot shutting down', false);
-    } catch {}
-  }
-
-  for (const guildId of client.musicUI?.messages?.keys() ?? []) {
-    await client.musicUI.clear(guildId).catch(() => {});
-  }
-
-  await flushQueueStore().catch((error) => {
-    console.error('Failed to flush queue store:', error);
-  });
+  // Docker kills the process 10 seconds after SIGTERM, so everything people saved is written
+  // before the slower network teardown, and that teardown gets a deadline of its own.
   flushAutoplayProfiles();
   flushAutoplayUserTaste();
   flushLibrary();
+
+  const players = [...(client.lavalink?.players?.values() ?? [])];
+  for (const player of players) {
+    await savePlayerState(player).catch(() => {});
+  }
+  await flushQueueStore().catch((error) => {
+    console.error('Failed to flush queue store:', error);
+  });
+
+  const teardown = (async () => {
+    await Promise.allSettled(players.map((player) => player.destroy('Bot shutting down', false)));
+    await Promise.allSettled(
+      [...(client.musicUI?.messages?.keys() ?? [])].map((guildId) => client.musicUI.clear(guildId)),
+    );
+  })();
+  await Promise.race([teardown, new Promise((resolve) => setTimeout(resolve, SHUTDOWN_TEARDOWN_TIMEOUT_MS))]);
   client.lyricsUI?.clearAll();
 
   try {
