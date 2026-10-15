@@ -1,3 +1,4 @@
+// @ts-check
 // Who is making a request: dashboard session or Activity bearer token.
 const { createFixedWindowRateLimiter } = require('../utils/rateLimit');
 
@@ -88,6 +89,7 @@ async function resolveActivityUser(accessToken) {
     }
     if (!response.ok) return null;
 
+    /** @type {any} */
     const profile = await response.json();
     if (!profile?.id) return null;
 

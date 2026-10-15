@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src/state/*.js", "src/music/autoplay/*.js"]
+  "include": ["src/state/*.js", "src/music/autoplay/*.js", "src/api/*.js", "src/routes/*.js", "src/utils/*.js", "src/dashboard/*.js", "src/access/*.js"]
 }

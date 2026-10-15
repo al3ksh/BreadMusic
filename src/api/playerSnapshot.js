@@ -1,3 +1,4 @@
+// @ts-check
 // Player and queue snapshots the dashboard and Activity render.
 const crypto = require('crypto');
 const { uploadArtworkUrl } = require('../music/uploadArtworkUrls');

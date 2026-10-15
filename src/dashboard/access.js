@@ -1,3 +1,4 @@
+// @ts-check
 const DASHBOARD_ACCESS_LEVELS = new Set(['admin', 'mod', 'members']);
 const ACTIVITY_CONTROL_MODES = new Set(['inherit', 'admin', 'mod', 'dj', 'members']);
 

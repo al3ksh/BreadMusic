@@ -1,3 +1,4 @@
+// @ts-check
 const express = require('express');
 
 const DEBUG_FAILURE_KINDS = new Set(['discord', 'lavalink', 'voice', 'auth', 'access', 'generic']);
@@ -106,6 +107,7 @@ function createActivityRouter({
           code,
         }),
       });
+      /** @type {any} */
       const payload = await tokenRes.json().catch(() => ({}));
       if (!tokenRes.ok || !payload.access_token) {
         return res.status(401).json({ error: 'Activity authorization failed' });

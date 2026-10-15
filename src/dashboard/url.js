@@ -1,3 +1,4 @@
+// @ts-check
 const DASHBOARD_FALLBACK_BASE_URL = 'https://breadmusic.aleksh.xyz';
 
 function getDashboardBaseUrl() {

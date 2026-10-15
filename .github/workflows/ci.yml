@@ -35,7 +35,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Typecheck state and autoplay modules
+      - name: Typecheck state, autoplay, api, routes and utils modules
         run: npm run typecheck
 
       - name: Install web dependencies

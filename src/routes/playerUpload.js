@@ -1,3 +1,4 @@
+// @ts-check
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');

@@ -1,3 +1,4 @@
+// @ts-check
 async function deleteInteractionReply(interaction) {
   if (!interaction) return;
   try {

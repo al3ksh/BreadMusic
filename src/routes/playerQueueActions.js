@@ -1,3 +1,4 @@
+// @ts-check
 const { classifyQuery, isOrigin, tagOrigin } = require('../music/trackOrigin');
 const { playStation } = require('../music/radioPlayback');
 const { queueRequestedTracks, fitQueueLimit, takeDuplicateWarning } = require('../music/queueInsert');

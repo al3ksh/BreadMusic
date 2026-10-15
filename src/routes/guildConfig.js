@@ -1,3 +1,4 @@
+// @ts-check
 const express = require('express');
 
 function createGuildConfigRouter({
@@ -115,6 +116,7 @@ function createGuildConfigRouter({
 
       if (!guildsRes.ok) {
         if (guildsRes.status === 429) {
+          /** @type {any} */
           const body = await guildsRes.json().catch(() => ({}));
           const retryMs = Math.ceil((body.retry_after || 1) * 1000) + 500;
           await new Promise((resolve) => setTimeout(resolve, retryMs));

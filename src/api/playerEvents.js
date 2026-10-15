@@ -1,3 +1,4 @@
+// @ts-check
 // Live player updates: SSE subscribers and short notices.
 const crypto = require('crypto');
 

@@ -1,3 +1,4 @@
+// @ts-check
 const BRACKET_NOISE_PATTERN = /[[(][^\])]*(official|video|audio|lyric|visualizer|m\/v|\bmv\b|\bhd\b|\bhq\b|4k|color\s*coded|performance|stage\s*(mix|video)|comeback)[^\])]*[\])]/gi;
 const DASHED_VIDEO_PATTERN = /\s*[-–—|]\s*(official\s+)?(music\s+)?(video|audio|lyric(s)?(\s+video)?|visualizer|performance\s+video)\s*$/i;
 const PROD_BRACKET_PATTERN = /\s*[[(]\s*prod(?:uced)?\.?(?:\s*by\b)?[^\])]*[\])]/gi;

@@ -1,3 +1,4 @@
+// @ts-check
 function createFixedWindowRateLimiter({ windowMs, max, maxEntries = 5000 }) {
   if (!Number.isFinite(windowMs) || windowMs <= 0) throw new TypeError('windowMs must be positive');
   if (!Number.isFinite(max) || max <= 0) throw new TypeError('max must be positive');

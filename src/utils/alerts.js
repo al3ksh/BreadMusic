@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -100,6 +101,11 @@ function createAlertManager({
   return { recordFailure, recordSuccess, snapshot };
 }
 
+/**
+ * @param {any} client
+ * @param {string | null} [userId]
+ * @param {{ logger?: (message: string) => void }} [options]
+ */
 function createDmTransport(client, userId, { logger = () => {} } = {}) {
   let resolvedUserId = userId ? String(userId) : null;
 
@@ -132,6 +138,7 @@ async function checkDiskSpace({ dataDir, minBytes, statfsImpl = fs.promises.stat
   };
 }
 
+/** @param {Record<string, any>} [options] */
 function startMonitoring({
   client,
   alerter,

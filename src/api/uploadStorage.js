@@ -1,3 +1,4 @@
+// @ts-check
 // Audio upload files on disk: names, quota, cleanup and streaming.
 const crypto = require('crypto');
 const fs = require('fs');
@@ -27,8 +28,10 @@ const DATA_DIR = path.resolve(process.env.BREAD_DATA_DIR || path.join(process.cw
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 let uploadQuotaQueue = Promise.resolve();
 const activeUploadTempPaths = new Set();
+/** @returns {Promise<(value?: unknown) => void>} */
 async function acquireUploadQuotaMutex() {
   const previous = uploadQuotaQueue;
+  /** @type {(value?: unknown) => void} */
   let release;
   const gate = new Promise((resolve) => {
     release = resolve;
@@ -102,7 +105,7 @@ function streamUploadToFile(request, filePath, maxBytes) {
   return new Promise((resolve, reject) => {
     const declaredLength = Number(request.headers['content-length']);
     if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-      const error = new Error(`Upload exceeds the ${Math.floor(maxBytes / (1024 * 1024))}MB limit`);
+      const error = /** @type {NodeJS.ErrnoException} */ (new Error(`Upload exceeds the ${Math.floor(maxBytes / (1024 * 1024))}MB limit`));
       error.code = 'LIMIT_FILE_SIZE';
       request.resume();
       reject(error);
@@ -116,7 +119,7 @@ function streamUploadToFile(request, filePath, maxBytes) {
       transform(chunk, _encoding, callback) {
         size += chunk.length;
         if (size > maxBytes) {
-          const error = new Error(`Upload exceeds the ${Math.floor(maxBytes / (1024 * 1024))}MB limit`);
+          const error = /** @type {NodeJS.ErrnoException} */ (new Error(`Upload exceeds the ${Math.floor(maxBytes / (1024 * 1024))}MB limit`));
           error.code = 'LIMIT_FILE_SIZE';
           callback(error);
           return;
@@ -141,7 +144,7 @@ function streamUploadToFile(request, filePath, maxBytes) {
     };
 
     request.once('aborted', () => {
-      const error = new Error('Upload request was aborted');
+      const error = /** @type {NodeJS.ErrnoException} */ (new Error('Upload request was aborted'));
       error.code = 'ECONNABORTED';
       fail(error);
     });

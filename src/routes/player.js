@@ -1,3 +1,4 @@
+// @ts-check
 const express = require('express');
 const { isStreamTrack } = require('../music/autoplay/normalize');
 const defaultRadio = require('../music/radio');

@@ -1,3 +1,4 @@
+// @ts-check
 class CommandError extends Error {
   constructor(message, options = {}) {
     super(message);

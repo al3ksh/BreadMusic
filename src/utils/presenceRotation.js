@@ -1,3 +1,4 @@
+// @ts-check
 function shuffle(entries, random) {
   const shuffled = [...entries];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {

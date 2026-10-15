@@ -1,3 +1,4 @@
+// @ts-check
 const { REROLL_FAILURES } = require('../music/autoplay');
 const { applySound, getSoundState, normalizePreset, resetSound } = require('../music/sound');
 

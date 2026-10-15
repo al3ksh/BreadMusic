@@ -1,3 +1,4 @@
+// @ts-check
 const express = require('express');
 const defaultUserTaste = require('../music/autoplay/userTaste');
 const defaultRadio = require('../music/radio');

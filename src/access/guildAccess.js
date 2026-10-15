@@ -1,3 +1,4 @@
+// @ts-check
 const DEFAULT_CONTACT = 'aleksh8';
 
 function createGuildAccessPolicy(env = process.env) {

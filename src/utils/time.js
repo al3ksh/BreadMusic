@@ -1,3 +1,4 @@
+// @ts-check
 function formatDuration(ms, options = {}) {
   if (!Number.isFinite(ms) || ms < 0) ms = 0;
   const totalSeconds = Math.floor(ms / 1000);

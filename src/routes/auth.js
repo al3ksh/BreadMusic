@@ -1,3 +1,4 @@
+// @ts-check
 const express = require('express');
 const crypto = require('crypto');
 
@@ -67,6 +68,7 @@ function createAuthRouter({ discordApi, scopes, requireAuth, requireTrustedOrigi
         return res.redirect('/?error=token_failed');
       }
 
+      /** @type {any} */
       const tokens = await tokenRes.json();
       const userRes = await fetch(`${discordApi}/users/@me`, {
         headers: { Authorization: `Bearer ${tokens.access_token}` },
@@ -76,6 +78,7 @@ function createAuthRouter({ discordApi, scopes, requireAuth, requireTrustedOrigi
         return res.redirect('/?error=user_fetch_failed');
       }
 
+      /** @type {any} */
       const user = await userRes.json();
       const sessionUser = {
         id: user.id,
