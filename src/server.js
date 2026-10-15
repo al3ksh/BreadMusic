@@ -1,11 +1,6 @@
 const express = require('express');
 const session = require('express-session');
 const cookieParser = require('cookie-parser');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { artworkPath, groupUploadFiles, uploadArtworkUrl } = require('./music/uploadArtworkUrls');
-const { Transform } = require('stream');
 const { getConfig, setConfig, deleteConfig, isDJListening } = require('./state/guildConfig');
 const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
@@ -15,10 +10,7 @@ const {
   recordAutoplaySkip,
   clearAutoplayState,
   clearAutoplayPrefetch,
-  getAutoplayNext,
   handleAutoplay,
-  canRateTrack,
-  getTrackFeedback,
   likeTrack,
   dislikeTrack,
   undislikeTrack,
@@ -27,7 +19,7 @@ const {
   scheduleAutoplayPrefetch,
   getListenerIds,
 } = require('./music/autoplay');
-const { SOUND_PRESET_CHOICES, getSoundState } = require('./music/sound');
+const { SOUND_PRESET_CHOICES } = require('./music/sound');
 const { getLastfmClient } = require('./music/autoplay/lastfm');
 const { applyPreferredSource } = require('./music/searchUtils');
 const { classifyPlaybackError, describeSearchFailure } = require('./music/playbackErrors');
@@ -37,7 +29,7 @@ const { createHealthRouter } = require('./routes/health');
 const { createActivityRouter } = require('./routes/activity');
 const { createUploadRouter } = require('./routes/uploads');
 const { createAuthRouter } = require('./routes/auth');
-const { hydratePlayer, getStoredLocalUploadPaths, savePlayerState } = require('./state/queueStore');
+const { hydratePlayer, savePlayerState } = require('./state/queueStore');
 const { createGuildConfigRouter } = require('./routes/guildConfig');
 const { createPlayerRouter } = require('./routes/player');
 const { createLibraryRouter } = require('./routes/library');
@@ -49,7 +41,7 @@ const library = require('./music/library');
 const { resolveActivityCapabilities, resolveDashboardCapabilities } = require('./dashboard/access');
 const { createServerExtensionHost } = require('./extensions/serverExtensions');
 const { findLyrics, trackToLyricsQuery } = require('./music/lyrics');
-const { handleSkipRequest, clearVoteSkip, getVoteSkipSnapshot } = require('./music/skipManager');
+const { handleSkipRequest, clearVoteSkip } = require('./music/skipManager');
 const { queueRequestedTracks } = require('./music/queueInsert');
 const { markPlayerStopping } = require('./music/playerLifecycle');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
@@ -67,32 +59,63 @@ const {
   hasValidUploadSignature,
 } = require('./music/uploadUrls');
 const { createFixedWindowRateLimiter } = require('./utils/rateLimit');
+const {
+  AUDIO_UPLOAD_MAX_BYTES,
+  AUDIO_UPLOAD_QUOTA_BYTES,
+  AUDIO_UPLOAD_TTL_MS,
+  AUDIO_UPLOAD_EXTENSIONS,
+  UPLOAD_DIR,
+  activeUploadTempPaths,
+  acquireUploadQuotaMutex,
+  sanitizeUploadName,
+  decodeUploadHeader,
+  isAllowedAudioUpload,
+  isSafeId,
+  isPathInside,
+  getAudioContentType,
+  streamUploadToFile,
+  renameFileWithRetry,
+  safeDeleteFile,
+  fileExists,
+  touchFile,
+  cleanupExpiredAudioUploads,
+  runAudioUploadCleanup,
+  makeRoomForAudioUpload,
+} = require('./api/uploadStorage');
+const {
+  PLAYER_TEXT_CHANNEL_DISABLED,
+  resolvePlayerTextChannelId,
+  isUsableTextChannel,
+  buildPlayerStatusSnapshot,
+  buildQueueSnapshot,
+  isUnknownTrackAuthor,
+  parseQueuePage,
+  writeSseEvent,
+  extractArtwork,
+  isAllowedActivityArtworkHost,
+} = require('./api/playerSnapshot');
+const {
+  playerEventSubscribers,
+  publishPlayerNotice,
+  getPlayerNotice,
+  broadcastPlayerUpdate,
+} = require('./api/playerEvents');
+const {
+  DISCORD_API,
+  SCOPES,
+  getDashboardRequester,
+  getRequestUser,
+  resolveRequestAuth,
+  resolveActivityUser,
+  getUsableNode,
+  refreshAccessToken,
+  normalizeOrigin,
+  buildTrustedOrigins,
+} = require('./api/requestAuth');
 
-const DISCORD_API = 'https://discord.com/api/v10';
-const SCOPES = ['identify', 'guilds'].join(' ');
-const activityAuthCache = new Map();
-const ACTIVITY_AUTH_CACHE_MAX_ENTRIES = 2_000;
-const ACTIVITY_AUTH_LOOKUP_TIMEOUT_MS = 5_000;
-const ACTIVITY_AUTH_REJECTED_TTL_MS = 60_000;
-const ACTIVITY_AUTH_PAUSE_MS = 60_000;
-const ACTIVITY_AUTH_REJECTION_LIMIT = createFixedWindowRateLimiter({ windowMs: 60_000, max: 100 });
-let activityLookupsPausedUntil = 0;
 const ACTIVITY_ARTWORK_MAX_BYTES = 6 * 1024 * 1024;
 const ACTIVITY_TOKEN_RATE_LIMIT = createFixedWindowRateLimiter({ windowMs: 60_000, max: 10 });
 const ACTIVITY_ARTWORK_RATE_LIMIT = createFixedWindowRateLimiter({ windowMs: 60_000, max: 120 });
-const ACTIVITY_ARTWORK_HOSTS = [
-  'i.ytimg.com',
-  'img.youtube.com',
-  'yt3.ggpht.com',
-  // YouTube Music album art, used by most autoplay picks.
-  'yt3.googleusercontent.com',
-  'lh3.googleusercontent.com',
-  'i.scdn.co',
-  'scdn.co',
-  'sndcdn.com',
-  'cdn.discordapp.com',
-  'media.discordapp.net',
-];
 
 const FILTER_PRESET_CHOICES = SOUND_PRESET_CHOICES;
 
@@ -108,39 +131,6 @@ const PLAYER_PLAYLIST_CACHE_TTL_MS = 2 * 60_000;
 const PLAYER_SEARCH_CACHE_MAX_ENTRIES = 200;
 const PLAYER_PLAYLIST_CACHE_MAX_TRACKS = 5_000;
 const PLAYER_PLAYLIST_MAX_TRACKS = 500;
-const AUDIO_UPLOAD_MAX_BYTES = 256 * 1024 * 1024;
-const AUDIO_UPLOAD_QUOTA_DEFAULT_MB = 1024;
-const AUDIO_UPLOAD_QUOTA_MIN_MB = 256;
-const AUDIO_UPLOAD_QUOTA_MAX_MB = 10 * 1024;
-const configuredUploadQuotaMb = Number.parseInt(process.env.UPLOAD_STORAGE_LIMIT_MB || '', 10);
-const AUDIO_UPLOAD_QUOTA_BYTES = Math.max(
-  AUDIO_UPLOAD_QUOTA_MIN_MB,
-  Math.min(
-    AUDIO_UPLOAD_QUOTA_MAX_MB,
-    Number.isFinite(configuredUploadQuotaMb) ? configuredUploadQuotaMb : AUDIO_UPLOAD_QUOTA_DEFAULT_MB,
-  ),
-) * 1024 * 1024;
-const AUDIO_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
-const AUDIO_UPLOAD_TEMP_TTL_MS = 60 * 60 * 1000;
-const AUDIO_UPLOAD_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus', '.webm']);
-const AUDIO_UPLOAD_MIME_PREFIXES = ['audio/'];
-const AUDIO_UPLOAD_MIME_TYPES = new Set(['application/ogg', 'video/webm']);
-const DATA_DIR = path.resolve(process.env.BREAD_DATA_DIR || path.join(process.cwd(), 'data'));
-const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
-const PLAYER_TEXT_CHANNEL_DISABLED = 'disabled';
-let uploadQuotaQueue = Promise.resolve();
-const activeUploadTempPaths = new Set();
-
-async function acquireUploadQuotaMutex() {
-  const previous = uploadQuotaQueue;
-  let release;
-  const gate = new Promise((resolve) => {
-    release = resolve;
-  });
-  uploadQuotaQueue = previous.catch(() => {}).then(() => gate);
-  await previous.catch(() => {});
-  return release;
-}
 
 function prunePlayerSearchCache(now = Date.now()) {
   for (const [key, entry] of playerSearchCache) {
@@ -184,41 +174,6 @@ function waitForPlayerVoice(player, timeoutMs = ACTIVITY_VOICE_READY_TIMEOUT_MS)
     };
     check();
   });
-}
-const playerEventSubscribers = new Map();
-const playerNotices = new Map();
-
-function publishPlayerNotice(guildId, message, tone = 'info') {
-  if (!guildId || !message) return;
-  playerNotices.set(guildId, {
-    id: crypto.randomUUID(),
-    message,
-    tone,
-    expiresAt: Date.now() + 8000,
-  });
-  broadcastPlayerUpdate(guildId);
-}
-
-function getPlayerNotice(guildId) {
-  const notice = playerNotices.get(guildId);
-  if (!notice) return null;
-  if (notice.expiresAt <= Date.now()) {
-    playerNotices.delete(guildId);
-    return null;
-  }
-  return notice;
-}
-
-function broadcastPlayerUpdate(guildId) {
-  const subscribers = playerEventSubscribers.get(guildId);
-  if (!subscribers) return;
-  for (const subscriber of subscribers) {
-    try {
-      subscriber();
-    } catch (error) {
-      console.warn(`Failed to broadcast player update for ${guildId}:`, error.message);
-    }
-  }
 }
 
 function createApiServer(client) {
@@ -674,669 +629,6 @@ async function addRequestedTrackToQueue(player, track, playImmediately) {
     return;
   }
   await addManualTrackToQueue(player, track);
-}
-
-function sanitizeUploadName(fileName) {
-  const normalized = path.basename(String(fileName || 'upload.mp3'))
-    .replace(/[^\w.\- ()[\]]+/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const fallback = 'upload.mp3';
-  if (!normalized || normalized === '.' || normalized === '..') return fallback;
-
-  const ext = path.extname(normalized);
-  const base = path.basename(normalized, ext).slice(0, Math.max(1, 120 - ext.length));
-  return `${base || 'upload'}${ext}`;
-}
-
-function decodeUploadHeader(value) {
-  const encoded = String(value || '');
-  if (!encoded) return '';
-  try {
-    return decodeURIComponent(encoded);
-  } catch {
-    return encoded;
-  }
-}
-
-function isAllowedAudioUpload(ext, mimeType) {
-  if (!AUDIO_UPLOAD_EXTENSIONS.has(ext)) return false;
-  if (!mimeType || mimeType === 'application/octet-stream') return true;
-  if (AUDIO_UPLOAD_MIME_TYPES.has(mimeType)) return true;
-  return AUDIO_UPLOAD_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix));
-}
-
-function isSafeId(value) {
-  return typeof value === 'string' && /^[a-zA-Z0-9_-]+$/.test(value);
-}
-
-function isPathInside(filePath, parentPath) {
-  const relative = path.relative(parentPath, filePath);
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-}
-
-function getAudioContentType(ext) {
-  switch (ext) {
-    case '.mp3':
-      return 'audio/mpeg';
-    case '.flac':
-      return 'audio/flac';
-    case '.wav':
-      return 'audio/wav';
-    case '.ogg':
-    case '.opus':
-      return 'audio/ogg';
-    case '.m4a':
-    case '.aac':
-      return 'audio/aac';
-    case '.webm':
-      return 'audio/webm';
-    default:
-      return 'application/octet-stream';
-  }
-}
-
-function streamUploadToFile(request, filePath, maxBytes) {
-  return new Promise((resolve, reject) => {
-    const declaredLength = Number(request.headers['content-length']);
-    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-      const error = new Error(`Upload exceeds the ${Math.floor(maxBytes / (1024 * 1024))}MB limit`);
-      error.code = 'LIMIT_FILE_SIZE';
-      request.resume();
-      reject(error);
-      return;
-    }
-
-    const hash = crypto.createHash('sha256');
-    let size = 0;
-    let settled = false;
-    const transform = new Transform({
-      transform(chunk, _encoding, callback) {
-        size += chunk.length;
-        if (size > maxBytes) {
-          const error = new Error(`Upload exceeds the ${Math.floor(maxBytes / (1024 * 1024))}MB limit`);
-          error.code = 'LIMIT_FILE_SIZE';
-          callback(error);
-          return;
-        }
-        hash.update(chunk);
-        callback(null, chunk);
-      },
-    });
-    const output = fs.createWriteStream(filePath, { flags: 'wx' });
-
-    const cleanup = async () => {
-      request.unpipe(transform);
-      request.resume();
-      transform.destroy();
-      output.destroy();
-      await safeDeleteFile(filePath);
-    };
-    const fail = (error) => {
-      if (settled) return;
-      settled = true;
-      cleanup().finally(() => reject(error));
-    };
-
-    request.once('aborted', () => {
-      const error = new Error('Upload request was aborted');
-      error.code = 'ECONNABORTED';
-      fail(error);
-    });
-    request.once('error', fail);
-    transform.once('error', fail);
-    output.once('error', fail);
-    output.once('finish', () => {
-      if (settled) return;
-      settled = true;
-      resolve({ path: filePath, size, uploadId: hash.digest('hex') });
-    });
-
-    request.pipe(transform).pipe(output);
-  });
-}
-
-async function renameFileWithRetry(source, destination, attempts = 5) {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      await fs.promises.rename(source, destination);
-      return;
-    } catch (error) {
-      const retryable = ['EPERM', 'EACCES', 'EBUSY', 'ENOENT'].includes(error.code);
-      if (!retryable || attempt === attempts - 1) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
-    }
-  }
-}
-
-async function safeDeleteFile(filePath) {
-  try {
-    if (AUDIO_UPLOAD_EXTENSIONS.has(path.extname(filePath))) {
-      await fs.promises.unlink(artworkPath(filePath)).catch((error) => {
-        if (error.code !== 'ENOENT') throw error;
-      });
-    }
-    await fs.promises.unlink(filePath);
-    return true;
-  } catch {}
-  return false;
-}
-
-async function fileExists(filePath) {
-  try {
-    await fs.promises.access(filePath, fs.constants.R_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function touchFile(filePath) {
-  const now = new Date();
-  try {
-    await fs.promises.utimes(filePath, now, now);
-  } catch {}
-}
-
-function getProtectedAudioUploadPaths(client) {
-  const protectedPaths = new Set(activeUploadTempPaths);
-  const players = client?.lavalink?.players;
-  if (players) {
-    for (const player of players.values()) {
-      const tracks = [player.queue?.current, ...(player.queue?.tracks || [])].filter(Boolean);
-      for (const track of tracks) {
-        const filePath = track.localUpload?.filePath;
-        if (!filePath) continue;
-        const resolvedPath = path.resolve(filePath);
-        if (isPathInside(resolvedPath, UPLOAD_DIR)) protectedPaths.add(resolvedPath);
-      }
-    }
-  }
-
-  for (const filePath of getStoredLocalUploadPaths()) {
-    const resolvedPath = path.resolve(filePath);
-    if (isPathInside(resolvedPath, UPLOAD_DIR)) protectedPaths.add(resolvedPath);
-  }
-  return protectedPaths;
-}
-
-async function listAudioUploadFiles() {
-  let guildDirs = [];
-  try {
-    guildDirs = await fs.promises.readdir(UPLOAD_DIR, { withFileTypes: true });
-  } catch (error) {
-    if (error.code === 'ENOENT') return [];
-    throw error;
-  }
-
-  const files = [];
-  for (const guildDir of guildDirs) {
-    if (!guildDir.isDirectory() || !isSafeId(guildDir.name)) continue;
-
-    const guildPath = path.join(UPLOAD_DIR, guildDir.name);
-    const entries = await fs.promises.readdir(guildPath, { withFileTypes: true }).catch(() => []);
-    for (const file of entries) {
-      if (!file.isFile()) continue;
-
-      const filePath = path.join(guildPath, file.name);
-      const stats = await fs.promises.stat(filePath).catch(() => null);
-      if (stats?.isFile()) {
-        const incoming = file.name.startsWith('.incoming-');
-        files.push({
-          path: filePath,
-          size: stats.size,
-          mtimeMs: stats.mtimeMs,
-          incoming,
-          activeIncoming: incoming && activeUploadTempPaths.has(path.resolve(filePath)),
-        });
-      }
-    }
-  }
-  return groupUploadFiles(files);
-}
-
-async function cleanupExpiredAudioUploads(client) {
-  const files = await listAudioUploadFiles();
-  const protectedPaths = getProtectedAudioUploadPaths(client);
-  const now = Date.now();
-  for (const file of files) {
-    if (file.activeIncoming) continue;
-    const cutoff = now - (file.incoming ? AUDIO_UPLOAD_TEMP_TTL_MS : AUDIO_UPLOAD_TTL_MS);
-    if ((file.orphan || file.mtimeMs < cutoff) && !protectedPaths.has(path.resolve(file.path))) {
-      await safeDeleteFile(file.path);
-    }
-  }
-}
-
-async function runAudioUploadCleanup(client) {
-  const releaseQuota = await acquireUploadQuotaMutex();
-  try {
-    await cleanupExpiredAudioUploads(client);
-  } finally {
-    releaseQuota();
-  }
-}
-
-async function makeRoomForAudioUpload(requiredBytes, client, incomingPath = null) {
-  const files = await listAudioUploadFiles();
-  const protectedPaths = getProtectedAudioUploadPaths(client);
-  const excludedIncomingPath = incomingPath ? path.resolve(incomingPath) : null;
-  let totalBytes = files.reduce(
-    (total, file) => total + (path.resolve(file.path) === excludedIncomingPath ? 0 : file.size),
-    0,
-  );
-  if (totalBytes + requiredBytes <= AUDIO_UPLOAD_QUOTA_BYTES) return true;
-
-  const candidates = files
-    .filter((file) => !file.incoming && !protectedPaths.has(path.resolve(file.path)))
-    .sort((left, right) => left.mtimeMs - right.mtimeMs);
-
-  for (const file of candidates) {
-    if (totalBytes + requiredBytes <= AUDIO_UPLOAD_QUOTA_BYTES) break;
-    if (await safeDeleteFile(file.path)) {
-      totalBytes -= file.size;
-    }
-  }
-
-  return totalBytes + requiredBytes <= AUDIO_UPLOAD_QUOTA_BYTES;
-}
-
-function resolvePlayerTextChannelId(guild, preferredChannelId = null, fallbackChannelId = null) {
-  if (!guild) return null;
-
-  if (preferredChannelId === PLAYER_TEXT_CHANNEL_DISABLED) {
-    return null;
-  }
-
-  if (preferredChannelId) {
-    const preferred = guild.channels.cache.get(preferredChannelId);
-    if (isUsableTextChannel(preferred)) {
-      return preferred.id;
-    }
-  }
-
-  if (fallbackChannelId) {
-    const fallback = guild.channels.cache.get(fallbackChannelId);
-    if (isUsableTextChannel(fallback)) {
-      return fallback.id;
-    }
-  }
-
-  return null;
-}
-
-function isUsableTextChannel(channel) {
-  if (!channel || !channel.isTextBased()) return false;
-  if (typeof channel.isSendable === 'function') return channel.isSendable();
-  return channel.viewable !== false;
-}
-
-// viewerId picks whose 👍/👎 the autoplay badge shows; feedback is per person.
-function buildPlayerStatusSnapshot(client, guildId, viewerId = null) {
-  const player = client.lavalink?.players?.get(guildId);
-  const guild = client.guilds.cache.get(guildId);
-  const config = getConfig(guildId);
-
-  if (!player) {
-    return {
-      connected: false,
-      playing: false,
-      paused: false,
-      voiceChannelId: null,
-      voiceChannelName: null,
-      currentTrack: null,
-      queueLength: 0,
-      repeatMode: 'off',
-      volume: 100,
-      filters: null,
-      autoplay: config.autoplay ?? false,
-      autoplayNext: null,
-      autoplayFeedback: null,
-      autoplayRateable: false,
-      liked: false,
-      likeable: false,
-      voteSkip: null,
-      sessionHistory: [],
-    };
-  }
-
-  let voiceChannelName = null;
-  if (player.voiceChannelId && guild) {
-    const channel = guild.channels.cache.get(player.voiceChannelId);
-    voiceChannelName = channel ? channel.name : null;
-  }
-
-  let currentTrack = null;
-  if (player.queue.current) {
-    const info = player.queue.current.info || {};
-    const isLocalUpload = isLocalUploadInfo(info, player.queue.current);
-    currentTrack = {
-      title: info.title || 'Unknown',
-      author: isLocalUpload && isUnknownTrackAuthor(info.author) ? 'Local upload' : info.author || 'Unknown',
-      uri: info.uri || '',
-      duration: info.duration || 0,
-      position: player.position || 0,
-      seekable: isTrackSeekable(player.queue.current),
-      artwork: extractArtwork(info),
-      requester: formatRequester(player.queue.current.requester),
-    };
-  }
-
-  const sessionHistory = (player.queue.previous || [])
-    .slice(-2)
-    .reverse()
-    .map((track) => {
-      const info = track?.info || {};
-      return {
-        title: info.title || 'Unknown',
-        author: info.author || 'Unknown',
-        uri: info.uri || '',
-        duration: info.duration || 0,
-        artwork: extractArtwork(info),
-      };
-    });
-
-  return {
-    connected: true,
-    playing: player.playing,
-    paused: player.paused,
-    voiceChannelId: player.voiceChannelId,
-    voiceChannelName,
-    currentTrack,
-    queueLength: player.queue.tracks.length,
-    repeatMode: player.repeatMode || 'off',
-    volume: player.volume ?? 100,
-    filters: player.filterManager?.activePreset || null,
-    sound: getSoundState(player),
-    autoplay: config.autoplay ?? false,
-    autoplayNext: buildAutoplayNextSnapshot(guildId, config),
-    autoplayFeedback: config.autoplay ? getTrackFeedback(viewerId, player.queue.current) : null,
-    autoplayRateable: Boolean(config.autoplay && canRateTrack(player.queue.current)),
-    // The heart is the viewer's own library Liked list.
-    liked: Boolean(viewerId && library.isLiked(viewerId, player.queue.current)),
-    likeable: library.canSaveTrack(player.queue.current),
-    voteSkip: getVoteSkipSnapshot(player, config, guild),
-    sessionHistory,
-  };
-}
-
-function buildAutoplayNextSnapshot(guildId, config) {
-  if (!config.autoplay) return null;
-  const next = getAutoplayNext(guildId);
-  if (!next) return null;
-  return {
-    title: next.title || 'Unknown',
-    author: next.author || 'Unknown',
-    uri: next.uri || '',
-    duration: next.duration || 0,
-    artwork: extractArtwork(next),
-    source: next.source || null,
-  };
-}
-
-function buildQueueSnapshot(client, guildId, page = 0) {
-  const player = client.lavalink?.players?.get(guildId);
-  if (!player) {
-    return { current: null, tracks: [], total: 0, page, totalPages: 0, revision: 'empty' };
-  }
-
-  const perPage = 20;
-  const allTracks = player.queue.tracks;
-  const start = page * perPage;
-  const revision = buildQueueRevision(allTracks);
-
-  const current = player.queue.current
-    ? formatQueueTrack(player.queue.current)
-    : null;
-
-  const tracks = allTracks
-    .slice(start, start + perPage)
-    .map((track) => formatQueueTrack(track));
-
-  return {
-    current,
-    tracks,
-    total: allTracks.length,
-    page,
-    totalPages: Math.ceil(allTracks.length / perPage),
-    revision,
-  };
-}
-
-function buildQueueRevision(tracks) {
-  const hash = crypto.createHash('sha1');
-  hash.update(String(tracks.length));
-  for (const track of tracks) {
-    const info = track?.info || {};
-    hash.update('\0');
-    hash.update(String(info.identifier || info.uri || track?.localUpload?.uploadId || ''));
-    hash.update('\0');
-    hash.update(String(info.title || ''));
-    hash.update('\0');
-    hash.update(String(info.author || ''));
-    hash.update('\0');
-    hash.update(String(track?.requester?.id || track?.requester?.username || ''));
-    hash.update('\0');
-    hash.update(track?.isAutoplay ? '1' : '0');
-    if (info.uploadArtwork) {
-      hash.update(JSON.stringify(info.uploadArtwork));
-      hash.update(String(Math.floor(Date.now() / 3600000)));
-    }
-  }
-  return hash.digest('base64url').slice(0, 16);
-}
-
-function formatQueueTrack(track) {
-  const info = track?.info || {};
-  const isLocalUpload = isLocalUploadInfo(info, track);
-  const formatted = {
-    title: info.title || track?.localUpload?.fileName || 'Unknown',
-    author: isLocalUpload && isUnknownTrackAuthor(info.author) ? 'Local upload' : info.author || 'Unknown',
-    uri: info.uri || '',
-    duration: info.duration || 0,
-    requester: formatRequester(track?.requester),
-    artwork: extractArtwork(info),
-  };
-
-  return formatted;
-}
-
-function formatRequester(requester) {
-  return requester?.global_name || requester?.globalName || requester?.username || requester?.tag || requester?.id || 'Unknown';
-}
-
-function isLocalUploadInfo(info = {}, track = null) {
-  return Boolean(
-    track?.localUpload ||
-      info.localUpload ||
-      info.isLocalUpload ||
-      info.sourceName === 'localUpload' ||
-      (typeof info.uri === 'string' && info.uri.includes('/api/uploads/')),
-  );
-}
-
-function isUnknownTrackAuthor(author) {
-  if (typeof author !== 'string') return true;
-  const normalized = author.trim().toLowerCase();
-  return !normalized || normalized === 'unknown' || normalized === 'unknown artist';
-}
-
-function parseQueuePage(value) {
-  const parsed = parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function writeSseEvent(res, event, data) {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-}
-
-function extractArtwork(info) {
-  if (info.uploadArtwork) return uploadArtworkUrl(info.uploadArtwork);
-  if (info.artworkUrl) return info.artworkUrl;
-  if (info.uri && (info.uri.includes('youtube.com') || info.uri.includes('youtu.be')) && info.identifier) {
-    return `https://i.ytimg.com/vi/${info.identifier}/mqdefault.jpg`;
-  }
-  return null;
-}
-
-function isAllowedActivityArtworkHost(hostname) {
-  const normalized = String(hostname || '').toLowerCase();
-  return ACTIVITY_ARTWORK_HOSTS.some((allowed) => normalized === allowed || normalized.endsWith(`.${allowed}`));
-}
-
-function getDashboardRequester(req, client) {
-  const user = getRequestUser(req);
-  if (user?.id) {
-    return {
-      id: user.id,
-      username: user.username || user.global_name || 'Dashboard user',
-      global_name: user.global_name || null,
-      avatar: user.avatar || null,
-      bot: false,
-    };
-  }
-
-  return client.user ?? { id: '0', username: 'Bot', bot: true };
-}
-
-function getRequestUser(req) {
-  return req.activityUser || req.session?.user || null;
-}
-
-async function resolveRequestAuth(req, resolveActivityUserImpl = resolveActivityUser) {
-  const activityToken = readBearerToken(req);
-  if (activityToken) {
-    const activityUser = await resolveActivityUserImpl(activityToken);
-    return activityUser
-      ? { activityUser }
-      : { error: 'Activity authentication expired' };
-  }
-  return req.session?.user
-    ? { sessionUser: req.session.user }
-    : { error: 'Not authenticated' };
-}
-
-function readBearerToken(req) {
-  const header = req.get('authorization') || '';
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1].trim() : null;
-}
-
-function pruneActivityAuthCache(now) {
-  if (activityAuthCache.size <= ACTIVITY_AUTH_CACHE_MAX_ENTRIES) return;
-  for (const [token, entry] of activityAuthCache) {
-    if (entry.expiresAt <= now) activityAuthCache.delete(token);
-  }
-  while (activityAuthCache.size > ACTIVITY_AUTH_CACHE_MAX_ENTRIES) {
-    activityAuthCache.delete(activityAuthCache.keys().next().value);
-  }
-}
-
-// Every lookup goes to Discord from the bot's own IP, and Discord bans IPs that send too many
-// rejected requests. Rejected tokens are remembered, and a flood of them pauses lookups of
-// unknown tokens for a while; people already signed in keep working from the cache.
-function rememberRejectedActivityToken(accessToken, now) {
-  activityAuthCache.set(accessToken, { user: null, expiresAt: now + ACTIVITY_AUTH_REJECTED_TTL_MS });
-  pruneActivityAuthCache(now);
-  if (!ACTIVITY_AUTH_REJECTION_LIMIT.check('rejected', now).allowed) {
-    activityLookupsPausedUntil = now + ACTIVITY_AUTH_PAUSE_MS;
-  }
-}
-
-async function resolveActivityUser(accessToken) {
-  const now = Date.now();
-  const cached = activityAuthCache.get(accessToken);
-  if (cached && cached.expiresAt > now) return cached.user;
-  if (cached) activityAuthCache.delete(accessToken);
-  if (now < activityLookupsPausedUntil) return null;
-
-  try {
-    const response = await fetch(`${DISCORD_API}/users/@me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(ACTIVITY_AUTH_LOOKUP_TIMEOUT_MS),
-    });
-    if (response.status === 401) {
-      rememberRejectedActivityToken(accessToken, Date.now());
-      return null;
-    }
-    if (!response.ok) return null;
-
-    const profile = await response.json();
-    if (!profile?.id) return null;
-
-    const user = {
-      id: profile.id,
-      username: profile.username,
-      discriminator: profile.discriminator,
-      avatar: profile.avatar,
-      global_name: profile.global_name || null,
-      accessToken,
-    };
-    activityAuthCache.set(accessToken, {
-      user,
-      expiresAt: Date.now() + 5 * 60 * 1000,
-    });
-    pruneActivityAuthCache(Date.now());
-    return user;
-  } catch {
-    return null;
-  }
-}
-
-function getUsableNode(client) {
-  const nodes = client.lavalink?.nodeManager?.nodes;
-  if (!nodes) return null;
-  for (const node of nodes.values()) {
-    if (node.connected) return node;
-  }
-  return nodes.values().next().value ?? null;
-}
-
-async function refreshAccessToken(refreshToken) {
-  if (!refreshToken) return null;
-  try {
-    const res = await fetch(`${DISCORD_API}/oauth2/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: process.env.DISCORD_CLIENT_ID,
-        client_secret: process.env.DISCORD_CLIENT_SECRET,
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-      }),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-function normalizeOrigin(value) {
-  if (!value || typeof value !== 'string') return null;
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
-}
-
-function buildTrustedOrigins(webUrl) {
-  const candidates = [
-    webUrl,
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-  ];
-
-  const origins = new Set();
-  for (const candidate of candidates) {
-    const normalized = normalizeOrigin(candidate);
-    if (normalized) origins.add(normalized);
-  }
-
-  return origins;
 }
 
 module.exports = {
