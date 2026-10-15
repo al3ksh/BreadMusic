@@ -1,3 +1,4 @@
+// @ts-check
 const { logAutoplay, normalizeComparable } = require('./normalize');
 
 const API_URL = 'https://ws.audioscrobbler.com/2.0/';
@@ -64,6 +65,7 @@ function createLastfmClient({
       throw new LastfmUnavailableError(`HTTP ${response.status}`);
     }
 
+    /** @type {any} */
     const body = await response.json().catch(() => null);
     // Error 29 is Last.fm's rate limit, error 11/16 a temporary outage.
     if ([11, 16, 29].includes(body?.error)) {

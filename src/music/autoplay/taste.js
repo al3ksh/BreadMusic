@@ -1,3 +1,4 @@
+// @ts-check
 const { logAutoplay, normalizeTrack, isLocalUploadTrack, isStreamTrack } = require('./normalize');
 const { DISLIKED_ARTIST_REJECT_THRESHOLD } = require('./scoring');
 const profileStore = require('./profileStore');

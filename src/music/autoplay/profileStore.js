@@ -1,3 +1,4 @@
+// @ts-check
 const { SqliteStore } = require('../../state/sqliteStore');
 
 const HOUR_MS = 60 * 60 * 1000;

@@ -1,3 +1,4 @@
+// @ts-check
 const { cleanTrackTitle: cleanTitle } = require('../../utils/trackTitles');
 
 const AUTOPLAY_LOG_LEVELS = {

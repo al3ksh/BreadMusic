@@ -1,3 +1,4 @@
+// @ts-check
 const { FileStore } = require('./fileStore');
 const { normalizeSourceName } = require('../music/sourceNames');
 const { originOf } = require('../music/trackOrigin');

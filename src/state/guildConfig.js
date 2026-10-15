@@ -1,6 +1,30 @@
+// @ts-check
 const { FileStore } = require('./fileStore');
 const { CommandError } = require('../utils/commandError');
 
+/**
+ * @typedef {object} GuildConfig
+ * @property {string | null} preferredSource
+ * @property {string | null} djRoleId
+ * @property {string | null} modRoleId
+ * @property {string | null} playerTextChannelId
+ * @property {number} maxVolume
+ * @property {number} voteSkipPercent
+ * @property {boolean} stayInChannel
+ * @property {number} afkTimeout
+ * @property {boolean} persistentQueue
+ * @property {string | null} twentyFourSevenChannelId
+ * @property {number} defaultVolume
+ * @property {boolean} autoplay
+ * @property {'inherit' | 'admin' | 'mod' | 'dj' | 'members'} activityControl
+ * @property {boolean} voiceChannelStatus
+ * @property {'admin' | 'mod' | 'members'} dashboardAccess
+ * @property {boolean} openWithoutDJ
+ * @property {boolean} fairQueue
+ * @property {number} maxQueuedPerUser
+ */
+
+/** @type {GuildConfig} */
 const DEFAULT_CONFIG = {
   preferredSource: null,
   djRoleId: null,
@@ -60,6 +84,10 @@ function normalizeVolumeConfig(config) {
   return normalized;
 }
 
+/**
+ * @param {string | null | undefined} guildId
+ * @returns {GuildConfig}
+ */
 function getConfig(guildId) {
   if (!guildId) return { ...DEFAULT_CONFIG };
   const stored = configStore.get(guildId, {});
@@ -80,6 +108,11 @@ function getConfig(guildId) {
   return merged;
 }
 
+/**
+ * @param {string} guildId
+ * @param {Partial<GuildConfig>} partial
+ * @returns {GuildConfig | undefined}
+ */
 function setConfig(guildId, partial) {
   if (!guildId) return;
   const updated = normalizeVolumeConfig({ ...getConfig(guildId), ...partial });

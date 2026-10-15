@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('fs');
 const { FileStore } = require('./fileStore');
 const { getConfig } = require('./guildConfig');

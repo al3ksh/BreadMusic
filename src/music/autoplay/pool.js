@@ -1,3 +1,4 @@
+// @ts-check
 const { normalizeTrack } = require('./normalize');
 
 const POOL_TTL_MS = 20 * 60 * 1000;

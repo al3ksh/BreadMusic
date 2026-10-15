@@ -1,3 +1,4 @@
+// @ts-check
 const { SqliteStore } = require('./sqliteStore');
 
 // Keep the existing API so state modules migrate without changing their callers.

@@ -1,3 +1,4 @@
+// @ts-check
 const { hasTerm, normalizeComparable, tokenOverlap } = require('./normalize');
 
 const MIN_SCORE = 35;
@@ -53,6 +54,7 @@ const HARD_REJECT_TERMS = [
   'bass boosted',
 ];
 
+/** @type {Array<[string, number]>} */
 const SOFT_PENALTIES = [
   ['remix', 24],
   ['cover', 22],
@@ -77,6 +79,7 @@ const SOFT_PENALTIES = [
   ['reupload', 14],
 ];
 
+/** @type {Array<[string, number]>} */
 const POSITIVE_TERMS = [
   ['official audio', 12],
   ['audio', 6],

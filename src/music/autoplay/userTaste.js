@@ -1,3 +1,4 @@
+// @ts-check
 const { SqliteStore } = require('../../state/sqliteStore');
 const { DISLIKED_ARTIST_REJECT_THRESHOLD } = require('./scoring');
 
@@ -97,6 +98,11 @@ function isDisliked(userId, key, now = Date.now()) {
   return Boolean(key) && listDislikes(userId, now).some((entry) => entry.key === key);
 }
 
+/**
+ * @param {string} userId
+ * @param {{ artistKey?: string, author?: string }} [artist]
+ * @param {number} [now]
+ */
 function blockArtist(userId, { artistKey, author } = {}, now = Date.now()) {
   if (!userId || !artistKey) return false;
   const user = getUser(userId, true);

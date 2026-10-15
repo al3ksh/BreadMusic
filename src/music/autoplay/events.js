@@ -1,3 +1,4 @@
+// @ts-check
 const { EventEmitter } = require('node:events');
 
 // 'next-changed' (guildId): the prepared autoplay track changed or was cleared.

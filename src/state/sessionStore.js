@@ -1,3 +1,4 @@
+// @ts-check
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -49,6 +50,7 @@ function createFileSessionStore(session, options = {}) {
         });
     }
 
+    /** @param {(error?: Error | null) => void} [callback] */
     set(sid, sess, callback = () => {}) {
       const record = {
         expiresAt: this._expiresAt(sess),
@@ -60,6 +62,7 @@ function createFileSessionStore(session, options = {}) {
         .catch((error) => callback(error));
     }
 
+    /** @param {(error?: Error | null) => void} [callback] */
     destroy(sid, callback = () => {}) {
       this._enqueueWrite(sid, () => fs.promises.unlink(this._filePath(sid)))
         .then(() => callback(null))
@@ -72,6 +75,7 @@ function createFileSessionStore(session, options = {}) {
         });
     }
 
+    /** @param {(error?: Error | null) => void} [callback] */
     touch(sid, sess, callback = () => {}) {
       this.get(sid, (error, existing) => {
         if (error) {
