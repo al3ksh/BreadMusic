@@ -286,7 +286,9 @@ function createApiServer(client) {
     if (!member) {
       try {
         member = await guild.members.fetch(requestUser.id);
-      } catch {}
+      } catch {
+        // Not a member of this guild; the access check below handles it.
+      }
     }
 
     const config = getConfig(guildId);

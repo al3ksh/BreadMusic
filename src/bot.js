@@ -353,7 +353,8 @@ client.once(Events.ClientReady, safeEventHandler('ClientReady', async (readyClie
             await message.edit({ ...expiredMessage, components: [] });
           }
         }
-      } catch (err) {
+      } catch {
+        // The challenge message was deleted or the channel is gone; nothing left to update.
       }
     }
   });
@@ -392,7 +393,10 @@ client.on(Events.InteractionCreate, safeEventHandler('InteractionCreate', async 
   if (interaction.isAutocomplete()) {
     try {
       await handleAutocomplete(interaction);
-    } catch {}
+    } catch (error) {
+      // Autocomplete often expires while the user keeps typing; anything else is worth seeing.
+      if (error?.code !== 10062) console.warn('Autocomplete failed:', error?.message ?? error);
+    }
     return;
   }
 
@@ -876,7 +880,9 @@ async function handleInteractionError(interaction, error) {
         flags: ephemeral ? MessageFlags.Ephemeral : undefined,
       });
     }
-  } catch {}
+  } catch {
+    // The interaction expired, so the user can no longer be told about the error.
+  }
 }
 
 async function gracefulShutdown(signal) {
@@ -914,7 +920,9 @@ async function gracefulShutdown(signal) {
 
   try {
     client.destroy();
-  } catch {}
+  } catch {
+    // Shutting down anyway.
+  }
 
   console.log('Shutdown complete.');
   process.exit(0);

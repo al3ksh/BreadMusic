@@ -180,7 +180,9 @@ async function safeDeleteFile(filePath) {
     }
     await fs.promises.unlink(filePath);
     return true;
-  } catch {}
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn(`Failed to delete upload ${path.basename(filePath)}:`, error.message);
+  }
   return false;
 }
 
@@ -197,7 +199,9 @@ async function touchFile(filePath) {
   const now = new Date();
   try {
     await fs.promises.utimes(filePath, now, now);
-  } catch {}
+  } catch {
+    // A file that is already gone has nothing to keep alive.
+  }
 }
 
 function getProtectedAudioUploadPaths(client) {

@@ -57,7 +57,9 @@ function closeDatabases() {
   for (const database of databaseByPath.values()) {
     try {
       database.close();
-    } catch {}
+    } catch {
+      // Already closed.
+    }
   }
   databaseByPath.clear();
 }
