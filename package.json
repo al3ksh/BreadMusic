@@ -10,6 +10,7 @@
     "dev:web": "cd web && npm run dev",
     "register": "node src/register-commands.js",
     "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" \"test/*.test.js\"",
     "lint": "eslint ."
   },
   "keywords": [],

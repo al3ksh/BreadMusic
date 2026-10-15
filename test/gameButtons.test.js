@@ -11,7 +11,7 @@ process.env.BREAD_DB_PATH = path.join(tempDir, 'bread.sqlite');
 const { closeDatabases } = require('../src/state/sqliteStore');
 const { handleBlackjackButton, handleArcadeReplayButton, handleRPSButton } = require('../src/games/buttons');
 const { startGame, getGame, endGame } = require('../src/games/blackjack');
-const { addBalance, getBalance } = require('../src/games/economy');
+const { addBalance, getBalance, checkGamblingCooldown } = require('../src/games/economy');
 const { buildReplayComponents } = require('../src/games/arcadeControls');
 const { createChallenge, getChallenge, cleanupChallenge } = require('../src/games/fun');
 
@@ -141,6 +141,7 @@ test('arcade replay plays once per button and keeps the token when the game refu
   assert.match(again.last().payload.content, /already used or expired/);
 
   // The next replay lands inside the gambling cooldown, so its token must survive for a retry.
+  checkGamblingCooldown(userId); // restart the cooldown so slow renders cannot let it lapse first
   const nextId = replayCustomId(first.last().payload.components);
   const cooledDown = createInteraction({ customId: nextId, userId });
   await handleArcadeReplayButton(cooledDown);

@@ -38,8 +38,8 @@ jobs:
       - name: Install web dependencies
         run: npm ci --prefix web
 
-      - name: Run tests
-        run: npm test
+      - name: Run tests with coverage report
+        run: npm run test:coverage
 
       - name: Test landing demo boundaries and bot contract
         run: |
