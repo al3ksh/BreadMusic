@@ -1,3 +1,4 @@
+// @ts-check
 const createBlackjackCommands = (context) => {
   const {
     SlashCommandBuilder,

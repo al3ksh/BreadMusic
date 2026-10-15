@@ -1,3 +1,4 @@
+// @ts-check
 const { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { BRAND_COLORS } = require('../theme');
 const { renderArcadeImage } = require('./arcadeRenderer');
@@ -285,7 +286,9 @@ function buildRPSChoiceComponents(challengerId, targetId, bet = 0) {
 function buildRPSDuelResultEmbed(challenge, outcome) {
   const { challengerChoice, targetChoice, challengerName, targetName, bet } = challenge;
   
-  let resultText, color;
+  let resultText;
+  /** @type {`#${string}`} */
+  let color;
   if (outcome.result === 'draw') {
     resultText = "🤝 It's a tie! Bets refunded.";
     color = '#eab308';

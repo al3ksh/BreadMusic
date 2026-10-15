@@ -1,3 +1,4 @@
+// @ts-check
 const { EmbedBuilder } = require('discord.js');
 
 const ERROR_COLOR = '#ef4444';

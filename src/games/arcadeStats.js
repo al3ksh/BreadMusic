@@ -1,3 +1,4 @@
+// @ts-check
 const { FileStore } = require('../state/fileStore');
 
 const arcadeStore = new FileStore('arcade-stats.json', {});

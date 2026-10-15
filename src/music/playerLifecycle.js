@@ -1,3 +1,4 @@
+// @ts-check
 const intentionallyStoppedPlayers = new WeakSet();
 
 function markPlayerStopping(player) {

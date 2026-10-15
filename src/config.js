@@ -1,3 +1,4 @@
+// @ts-check
 const path = require('path');
 const dotenv = require('dotenv');
 const { createGuildAccessPolicy } = require('./access/guildAccess');

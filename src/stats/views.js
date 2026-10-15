@@ -1,3 +1,4 @@
+// @ts-check
 const { ORIGINS, originLabel } = require('../music/trackOrigin');
 const {
   COLORS,

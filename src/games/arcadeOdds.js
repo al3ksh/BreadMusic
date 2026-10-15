@@ -1,3 +1,4 @@
+// @ts-check
 const SLOTS_SYMBOLS = ['🍞', '🍒', '🔔', '💎', '7️⃣'];
 const SLOTS_MULTIPLIERS = {
   '🍞🍞🍞': 2,

@@ -1,3 +1,4 @@
+// @ts-check
 const queues = new Map();
 
 async function acquireGuildMutex(guildId) {

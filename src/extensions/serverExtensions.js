@@ -1,3 +1,4 @@
+// @ts-check
 const path = require('path');
 
 function parseExtensionPaths(value) {

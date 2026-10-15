@@ -6,13 +6,14 @@
     "strict": false,
     "noImplicitAny": false,
     "strictNullChecks": false,
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "node16",
+    "moduleResolution": "node16",
     "target": "es2022",
     "lib": ["es2023"],
     "types": ["node"],
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src/state/*.js", "src/music/autoplay/*.js", "src/api/*.js", "src/routes/*.js", "src/utils/*.js", "src/dashboard/*.js", "src/access/*.js"]
+  "include": ["src/**/*.js"],
+  "exclude": ["src/data"]
 }

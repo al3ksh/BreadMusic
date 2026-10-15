@@ -1,3 +1,4 @@
+// @ts-check
 const sharp = require('sharp');
 
 sharp.cache(false);

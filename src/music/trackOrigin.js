@@ -1,3 +1,4 @@
+// @ts-check
 // How a track got into the queue: the link someone pasted, a text search,
 // an upload, their library, history or autoplay. This is the input, not the
 // platform the audio streams from (a Spotify link usually plays from YouTube).
@@ -16,6 +17,7 @@ const ORIGINS = {
   autoplay: { label: 'Autoplay', color: '#61d59b' },
 };
 
+/** @type {Array<[string, RegExp]>} */
 const LINK_HOSTS = [
   ['spotify', /(^|\.)spotify\.com$|^spotify\.link$/],
   ['youtube', /(^|\.)youtube\.com$|^youtu\.be$|(^|\.)youtube-nocookie\.com$/],
@@ -55,6 +57,7 @@ function tagOrigin(tracks, origin) {
 
 // Origin to store for a play. Older events never recorded one, so only
 // autoplay and uploads can be recovered for them.
+/** @param {{ origin?: string, autoplay?: boolean, source?: string }} [event] */
 function originOf({ origin, autoplay, source } = {}) {
   if (isOrigin(origin)) return origin;
   if (autoplay) return 'autoplay';

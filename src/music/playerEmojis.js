@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
@@ -11,6 +12,7 @@ const EMOJI_PREFIX = 'bread_';
 
 const emojiIds = new Map(parseEmojiIds(process.env.PLAYER_EMOJI_IDS));
 
+/** @returns {Array<[string, { name: string, id: string }]>} */
 function parseEmojiIds(value) {
   return String(value || '')
     .split(',')

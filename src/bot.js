@@ -1,3 +1,4 @@
+// @ts-check
 const {
   Client,
   Collection,
@@ -7,6 +8,7 @@ const {
   MessageFlags,
   Partials,
 } = require('discord.js');
+// @ts-expect-error lavalink-client publishes ESM-only types for its CommonJS build.
 const { LavalinkManager } = require('lavalink-client');
 const path = require('node:path');
 const { loadConfig } = require('./config');
@@ -88,7 +90,18 @@ function safeEventHandler(label, handler) {
   };
 }
 
-const client = new Client({
+/**
+ * The Discord client with the services Bread attaches to it at startup.
+ * @typedef {Client & {
+ *   commands: Collection<string, any>,
+ *   musicUI: any,
+ *   lyricsUI: any,
+ *   behavior: any,
+ *   guildAccess: any,
+ *   lavalink: any,
+ * }} BreadClient
+ */
+const client = /** @type {BreadClient} */ (new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
@@ -98,7 +111,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Channel],
-});
+}));
 
 const handleDirectMessage = createDmResponder({
   dashboardUrl: `${String(process.env.WEB_URL || 'https://breadmusic.aleksh.xyz').replace(/\/$/, '')}/dashboard`,
@@ -274,7 +287,7 @@ client.lavalink = new LavalinkManager({
   },
   autoSkip: true,
   playerOptions: {
-    defaultSearchPlatform: config.lavalink.defaultSource,
+    defaultSearchPlatform: /** @type {import('lavalink-client', { with: { 'resolution-mode': 'import' } }).SearchPlatform} */ (config.lavalink.defaultSource),
     volumeDecrementer: 0.75,
   },
 });
@@ -302,7 +315,7 @@ client.on('raw', (data) => {
   setImmediate(() => {
     if (handledDirectMessageIds.has(data.d.id)) return;
     client.channels.fetch(data.d.channel_id)
-      .then((channel) => channel?.messages?.fetch(data.d.id))
+      .then((channel) => (channel?.isTextBased() ? channel.messages.fetch(data.d.id) : null))
       .then((message) => message && processDirectMessage(message))
       .catch((error) => console.warn('[DirectMessage] Raw fallback failed:', error.message));
   });
@@ -346,7 +359,7 @@ client.once(Events.ClientReady, safeEventHandler('ClientReady', async (readyClie
     if (challenge.channelId && challenge.messageId) {
       try {
         const channel = await client.channels.fetch(challenge.channelId);
-        if (channel) {
+        if (channel?.isTextBased()) {
           const message = await channel.messages.fetch(challenge.messageId);
           if (message) {
             const expiredMessage = await buildRPSExpiredMessage(challenge);
@@ -915,6 +928,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') return;
+  const { code } = /** @type {NodeJS.ErrnoException} */ (error);
+  if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNREFUSED') return;
   gracefulShutdown('uncaughtException');
 });

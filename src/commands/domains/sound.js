@@ -1,3 +1,4 @@
+// @ts-check
 const {
   EQ_GROUPS,
   EQ_RANGE_DB,
@@ -16,6 +17,7 @@ const COMPONENT_PREFIX = 'sound:';
 const EQ_STEP_DB = 1;
 const TEMPO_STEP = 0.05;
 const BAR_HALF = EQ_RANGE_DB;
+/** @type {Array<{ id: string, label: string, kind: string, index?: number }>} */
 const KNOBS = [
   ...EQ_GROUPS.map((group, index) => ({ id: group.id, label: group.label, kind: 'eq', index })),
   { id: 'speed', label: 'Speed', kind: 'tempo' },

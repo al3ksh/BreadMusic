@@ -1,3 +1,4 @@
+// @ts-check
 const { classifyQuery, tagOrigin } = require('../../music/trackOrigin');
 const { queueRequestedTracks, fitQueueLimit, findQueuedCopy, describeQueuedCopy } = require('../../music/queueInsert');
 const { createSelection } = require('../../state/searchCache');

@@ -1,3 +1,4 @@
+// @ts-check
 const { FileStore } = require('../state/fileStore');
 
 const economyStore = new FileStore('economy.json', {});

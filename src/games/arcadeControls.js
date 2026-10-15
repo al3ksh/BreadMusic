@@ -1,3 +1,4 @@
+// @ts-check
 const crypto = require('node:crypto');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 

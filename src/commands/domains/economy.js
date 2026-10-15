@@ -1,3 +1,4 @@
+// @ts-check
 const createEconomyCommands = (context) => {
   const {
     SlashCommandBuilder,

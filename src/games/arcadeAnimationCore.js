@@ -1,3 +1,4 @@
+// @ts-check
 const sharp = require('sharp');
 const { GIFEncoder, quantize, applyPalette } = require('gifenc');
 const { buildArcadeSvg } = require('./arcadeRenderer');

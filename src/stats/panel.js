@@ -1,3 +1,4 @@
+// @ts-check
 const { AttachmentBuilder } = require('discord.js');
 const { getGuildInsights, getOriginInsights, getUserInsights } = require('../state/analyticsStore');
 const { getArcadeStats, getGuildArcadeStats } = require('../games/arcadeStats');
@@ -154,6 +155,11 @@ async function loadModel({ guild, guildId, target, view, range, getBalance, data
 }
 
 // Builds the whole reply: image when sharp works, otherwise the same numbers as an embed.
+/**
+ * @param {any} context
+ * @param {any} state
+ * @param {{ guild?: any, target?: any, getBalance?: Function, data?: any }} [options]
+ */
 async function buildStatsReply(context, state, { guild, target, getBalance, data } = {}) {
   const { EmbedBuilder, BRAND_COLORS } = context;
   const model = await loadModel({ guild, guildId: state.guildId, target, view: state.view, range: state.range, getBalance, data });

@@ -1,3 +1,4 @@
+// @ts-check
 const userTaste = require('../../music/autoplay/userTaste');
 
 const COMPONENT_PREFIX = 'autoplay:dislikes:';
@@ -26,6 +27,11 @@ function buildOptions({ artists, tracks }) {
   return options.slice(0, MAX_OPTIONS);
 }
 
+/**
+ * @param {any} context
+ * @param {string} userId
+ * @param {{ notice?: string }} [options]
+ */
 function buildDislikedPanel(context, userId, { notice } = {}) {
   const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, BRAND_COLORS } = context;
   const dislikes = userTaste.getDislikes(userId);

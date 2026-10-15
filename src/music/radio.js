@@ -1,3 +1,4 @@
+// @ts-check
 // Live radio lookup: Radio Browser (community station directory) plus Radio Garden links.
 const RADIO_BROWSER_HOSTS = ['de1.api.radio-browser.info', 'de2.api.radio-browser.info', 'fi1.api.radio-browser.info'];
 const USER_AGENT = 'BreadMusic/1.0 (+https://github.com/al3ksh/BreadMusic)';
@@ -11,7 +12,7 @@ const PLAYABLE_CODECS = new Set(['MP3', 'AAC', 'AAC+', 'OGG', 'FLAC', 'OPUS', 'U
 
 class RadioError extends Error {}
 
-function createRadio({ fetchImpl = (...args) => fetch(...args), now = () => Date.now() } = {}) {
+function createRadio({ fetchImpl = (url, init) => fetch(url, init), now = () => Date.now() } = {}) {
   const searchCache = new Map();
 
   function request(url, options = {}) {
@@ -92,7 +93,7 @@ function createRadio({ fetchImpl = (...args) => fetch(...args), now = () => Date
   async function resolveRadioGarden(channelId) {
     const response = await request(`https://radio.garden/api/ara/content/channel/${encodeURIComponent(channelId)}`);
     if (!response.ok) throw new RadioError('That Radio Garden station could not be found.');
-    const { data } = await response.json();
+    const { data } = /** @type {any} */ (await response.json());
     const listenUrl = `https://radio.garden/api/ara/content/listen/${encodeURIComponent(channelId)}/channel.mp3`;
     let streamUrl = listenUrl;
     try {

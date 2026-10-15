@@ -1,3 +1,4 @@
+// @ts-check
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const NOT_FOUND_CACHE_TTL_MS = 15 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 500;
@@ -120,7 +121,7 @@ async function fetchJson(url, options = {}) {
       });
       if (response.status === 404) return null;
       if (!response.ok) {
-        const error = new Error(`Lyrics provider returned HTTP ${response.status}`);
+        const error = /** @type {Error & { status?: number, retryAfter?: string | null }} */ (new Error(`Lyrics provider returned HTTP ${response.status}`));
         error.status = response.status;
         error.retryAfter = response.headers.get('retry-after');
         throw error;
@@ -153,6 +154,7 @@ function isIsrc(value) {
 async function resolveIsrcMetadata(isrc) {
   if (!isIsrc(isrc)) return null;
   const params = new URLSearchParams({ fmt: 'json', inc: 'artist-credits' });
+  /** @type {any} */
   const data = await fetchJson(`${MUSICBRAINZ_BASE_URL}/isrc/${encodeURIComponent(isrc.toUpperCase())}?${params}`, {
     attempts: 1,
     userAgent: 'Bread Discord Music Bot (github.com/al3ksh/BreadMusic)',

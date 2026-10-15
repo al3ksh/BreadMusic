@@ -1,3 +1,4 @@
+// @ts-check
 const { getConfig, hasDJPermissions } = require('../state/guildConfig');
 const { CommandError } = require('../utils/commandError');
 

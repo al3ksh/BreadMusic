@@ -1,3 +1,4 @@
+// @ts-check
 const votes = new Map();
 
 function resetVotes(guildId) {

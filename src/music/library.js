@@ -1,3 +1,4 @@
+// @ts-check
 const crypto = require('crypto');
 const { SqliteStore } = require('../state/sqliteStore');
 const { normalizeTrack, isLocalUploadTrack, isStreamTrack } = require('./autoplay/normalize');

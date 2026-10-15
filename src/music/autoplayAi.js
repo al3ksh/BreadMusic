@@ -1,3 +1,4 @@
+// @ts-check
 const crypto = require('node:crypto');
 
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
@@ -451,7 +452,7 @@ async function requestStructuredJson(systemInstruction, payload, schema, config,
       } catch {
         // The status code is enough when Google returns a non-JSON error page.
       }
-      const error = new Error(`Gemini HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+      const error = /** @type {Error & { status?: number }} */ (new Error(`Gemini HTTP ${response.status}${detail ? `: ${detail}` : ''}`));
       error.status = response.status;
       throw error;
     }

@@ -1,3 +1,4 @@
+// @ts-check
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { getBalance, addBalance, removeBalance, hasBalance, checkGamblingCooldown } = require('./economy');
 const { renderArcadeImage, compactNumber } = require('./arcadeRenderer');

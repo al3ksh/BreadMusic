@@ -1,3 +1,4 @@
+// @ts-check
 const defaultRadio = require('../../music/radio');
 const defaultLibrary = require('../../music/library');
 const { playStation } = require('../../music/radioPlayback');

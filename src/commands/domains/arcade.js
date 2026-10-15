@@ -1,3 +1,4 @@
+// @ts-check
 function arcadeOutcome(result) {
   return result === 'win' ? 'win' : result === 'draw' ? 'draw' : 'loss';
 }

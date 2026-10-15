@@ -1,3 +1,4 @@
+// @ts-check
 const { cleanTrackTitle, cleanArtist } = require('./lyrics');
 
 const FALLBACK_WINDOW_MS = 10 * 60 * 1000;
@@ -41,6 +42,9 @@ function buildMirrorQueries(track) {
   return queries.slice(0, 3);
 }
 
+/**
+ * @param {{ search?: Function, maxAttempts?: number, windowMs?: number, searchTimeoutMs?: number, now?: () => number }} [options]
+ */
 function createPlaybackFallback({
   search,
   maxAttempts = FALLBACK_MAX_ATTEMPTS,

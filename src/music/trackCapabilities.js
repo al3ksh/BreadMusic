@@ -1,3 +1,4 @@
+// @ts-check
 const MIRROR_SOURCES = new Set(['spotify', 'applemusic', 'apple-music', 'tidal']);
 
 function getMirrorSource(track) {

@@ -1,3 +1,4 @@
+// @ts-check
 const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES } = require('../../music/autoplay');
 const { buildDislikedPanel, handleDislikedComponent } = require('./autoplayDisliked');
 

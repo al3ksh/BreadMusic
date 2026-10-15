@@ -1,3 +1,4 @@
+// @ts-check
 const { clearStoredQueue } = require('../state/queueStore');
 const { getConfig } = require('../state/guildConfig');
 const { clearAutoplayState } = require('./autoplay');

@@ -1,3 +1,4 @@
+// @ts-check
 const net = require('node:net');
 const sharp = require('sharp');
 

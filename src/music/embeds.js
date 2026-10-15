@@ -1,3 +1,4 @@
+// @ts-check
 const { EmbedBuilder } = require('discord.js');
 const { formatDuration, buildProgressBar } = require('../utils/time');
 const { isAutoplayEnabled, getAutoplayNext } = require('./autoplay');

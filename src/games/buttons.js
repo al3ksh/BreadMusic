@@ -1,3 +1,4 @@
+// @ts-check
 const { MessageFlags } = require('discord.js');
 const {
   startGame: startBlackjack,

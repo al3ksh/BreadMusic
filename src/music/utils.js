@@ -1,3 +1,4 @@
+// @ts-check
 const { hydratePlayer } = require('../state/queueStore');
 const { getConfig } = require('../state/guildConfig');
 const { CommandError } = require('../utils/commandError');

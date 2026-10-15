@@ -1,3 +1,4 @@
+// @ts-check
 const createConfigCommands = (context) => {
   const {
     SlashCommandBuilder,

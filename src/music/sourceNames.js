@@ -1,3 +1,4 @@
+// @ts-check
 function normalizeSourceName(info = {}) {
   const explicit = typeof info.sourceName === 'string' ? info.sourceName.trim() : '';
   if (explicit) return explicit;

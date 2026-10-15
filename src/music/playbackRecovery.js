@@ -1,3 +1,4 @@
+// @ts-check
 function createPlaybackRecovery({
   recoverySet,
   isPlayerStopping,
@@ -7,7 +8,7 @@ function createPlaybackRecovery({
   refreshPlayer,
   scheduleIdleLeave,
   broadcastPlayerUpdate,
-  suspendAutoplay = () => {},
+  suspendAutoplay = (_guildId, _context) => {},
   findReplacement = null,
   notifyReplacement = null,
   onError = (error, label, guildId) => console.error(`[${label}] Failed to recover guild ${guildId}:`, error),

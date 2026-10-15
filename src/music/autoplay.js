@@ -1,3 +1,4 @@
+// @ts-check
 const { getConfig, setConfig } = require('../state/guildConfig');
 const { getDiscoveryArtists, pickCandidateWithGemini, resetGeminiAutoplayState } = require('./autoplayAi');
 const {

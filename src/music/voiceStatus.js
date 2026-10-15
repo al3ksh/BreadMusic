@@ -1,3 +1,4 @@
+// @ts-check
 const { getConfig } = require('../state/guildConfig');
 
 const statusCache = new Map();

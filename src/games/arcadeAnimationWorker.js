@@ -1,3 +1,4 @@
+// @ts-check
 const { parentPort } = require('node:worker_threads');
 const { renderAnimation } = require('./arcadeAnimationCore');
 

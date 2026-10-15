@@ -1,3 +1,4 @@
+// @ts-check
 // One source of truth for what the player sounds like: a preset, six EQ bands, speed and pitch.
 // Every change rebuilds the whole Lavalink filter payload from this state, so presets never
 // stack on top of each other and the dashboard, Activity and /sound always agree.
@@ -99,7 +100,7 @@ function normalizePreset(preset) {
 }
 
 function normalizeSoundState(input = {}, base = defaultSoundState()) {
-  const source = input && typeof input === 'object' ? input : {};
+  const source = /** @type {any} */ (input && typeof input === 'object' ? input : {});
   const eqInput = Array.isArray(source.eq) ? source.eq : base.eq;
   return {
     preset: 'preset' in source ? normalizePreset(source.preset) : normalizePreset(base.preset),

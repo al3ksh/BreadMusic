@@ -1,3 +1,4 @@
+// @ts-check
 const defaultRadio = require('./radio');
 const { isStreamTrack } = require('./autoplay/normalize');
 const { queueRequestedTracks } = require('./queueInsert');

@@ -1,3 +1,4 @@
+// @ts-check
 const YOUTUBE_PREFIX = 'ytsearch';
 const SPOTIFY_PREFIX = 'spsearch';
 const SOUNDCLOUD_PREFIX = 'scsearch';

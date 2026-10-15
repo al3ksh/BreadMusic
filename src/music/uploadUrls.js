@@ -1,3 +1,4 @@
+// @ts-check
 const crypto = require('crypto');
 
 const UPLOAD_URL_TTL_MS = 24 * 60 * 60 * 1000;

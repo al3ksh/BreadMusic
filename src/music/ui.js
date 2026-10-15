@@ -1,3 +1,4 @@
+// @ts-check
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { buildNowPlayingEmbed } = require('./embeds');
 const { buildPlaybackErrorEmbed, buildReplacementEmbed } = require('./playbackErrors');

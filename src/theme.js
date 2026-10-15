@@ -1,3 +1,5 @@
+// @ts-check
+/** @type {Record<'primary' | 'secondary' | 'muted', `#${string}`>} */
 const BRAND_COLORS = {
   primary: '#5a5494',
   secondary: '#213d7c',

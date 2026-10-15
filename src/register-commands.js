@@ -1,3 +1,4 @@
+// @ts-check
 const { REST, Routes } = require('discord.js');
 const { loadConfig } = require('./config');
 const { commands } = require('./commands');

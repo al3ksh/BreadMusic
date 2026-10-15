@@ -1,3 +1,4 @@
+// @ts-check
 const { tagOrigin } = require('../../music/trackOrigin');
 const { queueRequestedTracks, fitQueueLimit } = require('../../music/queueInsert');
 const library = require('../../music/library');
