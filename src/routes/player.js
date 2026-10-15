@@ -141,6 +141,8 @@ function createPlayerRouter(deps) {
   });
 
   router.post('/api/guilds/:guildId/player/:action', requireAuth, requirePlayerAccess, requireTrustedOrigin, requireDashboardActionRateLimit, async (req, res) => {
+    // Express 5 leaves the body undefined when a request carries no JSON.
+    req.body ??= {};
     const guildId = req.params.guildId;
     const action = req.params.action;
     let player = client.lavalink?.players?.get(guildId);
