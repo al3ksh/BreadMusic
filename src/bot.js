@@ -618,6 +618,7 @@ client.lavalink.nodeManager.on('error', (node, error) => {
 });
 
 const { createApiServer, broadcastPlayerUpdate } = require('./server');
+const { resolvePlayerTextChannelId } = require('./api/playerSnapshot');
 const { handleMusicButton, handleQueueButton, handleVoteSkipButton } = createMusicButtons({ client, broadcastPlayerUpdate });
 
 const AUTOPLAY_EXHAUSTED_MESSAGE = "Autoplay couldn't find a fitting track — add a song to keep going.";
@@ -822,29 +823,6 @@ async function restoreTwentyFourSevenPlayers() {
       console.error(`Failed to restore 24/7 player for ${guildId}:`, error.message);
     }
   }
-}
-
-function resolvePlayerTextChannelId(guild, preferredChannelId = null) {
-  if (!guild) return null;
-
-  if (preferredChannelId === 'disabled') {
-    return null;
-  }
-
-  if (preferredChannelId) {
-    const preferred = guild.channels.cache.get(preferredChannelId);
-    if (isUsableTextChannel(preferred)) {
-      return preferred.id;
-    }
-  }
-
-  return null;
-}
-
-function isUsableTextChannel(channel) {
-  if (!channel || !channel.isTextBased()) return false;
-  if (typeof channel.isSendable === 'function') return channel.isSendable();
-  return channel.viewable !== false;
 }
 
 async function handleInteractionError(interaction, error) {
