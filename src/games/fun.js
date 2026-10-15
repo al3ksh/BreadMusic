@@ -282,16 +282,6 @@ function buildRPSChoiceComponents(challengerId, targetId, bet = 0) {
   ];
 }
 
-function buildRPSWaitingEmbed(challenge, userId) {
-  const isChallenger = userId === challenge.challengerId;
-  const waiting = isChallenger ? challenge.targetName : challenge.challengerName;
-  
-  return new EmbedBuilder()
-    .setTitle('⏳ Waiting...')
-    .setColor('#6b7280')
-    .setDescription(`Waiting for **${waiting}** to choose...`);
-}
-
 function buildRPSDuelResultEmbed(challenge, outcome) {
   const { challengerChoice, targetChoice, challengerName, targetName, bet } = challenge;
   

@@ -154,7 +154,7 @@ function createControlActions({
       return res.json({ success: true, filter: sound.preset, sound });
     },
     async autoplay({ req, res, guildId, player, guildConfig }) {
-      const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : !Boolean(guildConfig.autoplay);
+      const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : !guildConfig.autoplay;
       setAutoplay(guildId, enabled);
       await client.musicUI?.refresh(player).catch(() => {});
       return res.json({ success: true, autoplay: enabled });

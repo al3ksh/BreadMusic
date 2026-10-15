@@ -1,4 +1,3 @@
-const path = require('node:path');
 
 async function main() {
   const token = process.env.DISCORD_TOKEN;

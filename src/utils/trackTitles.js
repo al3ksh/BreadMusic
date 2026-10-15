@@ -1,8 +1,8 @@
-const BRACKET_NOISE_PATTERN = /[\[(][^\])]*(official|video|audio|lyric|visualizer|m\/v|\bmv\b|\bhd\b|\bhq\b|4k|color\s*coded|performance|stage\s*(mix|video)|comeback)[^\])]*[\])]/gi;
+const BRACKET_NOISE_PATTERN = /[[(][^\])]*(official|video|audio|lyric|visualizer|m\/v|\bmv\b|\bhd\b|\bhq\b|4k|color\s*coded|performance|stage\s*(mix|video)|comeback)[^\])]*[\])]/gi;
 const DASHED_VIDEO_PATTERN = /\s*[-–—|]\s*(official\s+)?(music\s+)?(video|audio|lyric(s)?(\s+video)?|visualizer|performance\s+video)\s*$/i;
-const PROD_BRACKET_PATTERN = /\s*[\[(]\s*prod(?:uced)?\.?(?:\s*by\b)?[^\])]*[\])]/gi;
+const PROD_BRACKET_PATTERN = /\s*[[(]\s*prod(?:uced)?\.?(?:\s*by\b)?[^\])]*[\])]/gi;
 const PROD_DASH_PATTERN = /\s+[-–—]\s+prod(?:uced)?\.?(?:\s*by\b)?.*$/i;
-const FEAT_PATTERN = /\s*[\[(]?\s*\b(?:ft|feat|featuring)\b\.?\s+[^\])]+[\])]?/gi;
+const FEAT_PATTERN = /\s*[[(]?\s*\b(?:ft|feat|featuring)\b\.?\s+[^\])]+[\])]?/gi;
 const CHANNEL_SUFFIXES = [
   /\s+-\s+topic$/i,
   /\s*vevo$/i,
@@ -42,7 +42,7 @@ function primaryArtistName(value) {
 
 function stripBracketedContent(value) {
   return String(value || '')
-    .replace(/[\[(][^\])]*[\])]/g, ' ')
+    .replace(/[[(][^\])]*[\])]/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }

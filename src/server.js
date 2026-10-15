@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { artworkPath, groupUploadFiles, uploadArtworkUrl } = require('./music/uploadArtworkUrls');
 const { Transform } = require('stream');
-const { getConfig, setConfig, deleteConfig, DEFAULT_CONFIG, isDJListening } = require('./state/guildConfig');
+const { getConfig, setConfig, deleteConfig, isDJListening } = require('./state/guildConfig');
 const { getGuildInsights, getGuildHistory } = require('./state/analyticsStore');
 const { getBalance, addBalance, removeBalance, getLeaderboard } = require('./games/economy');
 const {

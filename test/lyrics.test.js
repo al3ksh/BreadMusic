@@ -4,7 +4,6 @@ const {
   cleanArtist,
   cleanTrackTitle,
   stripFeaturedArtists,
-  stripBracketedContent,
   primaryArtistName,
   buildQueryVariants,
   isIsrc,
