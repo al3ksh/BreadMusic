@@ -40,7 +40,7 @@ function classifyPlaybackError(payload = {}) {
     };
   }
 
-  if (/not available in your country|region.?block|geo.?restrict/.test(raw)) {
+  if (/available in your country|region.?block|geo.?restrict/.test(raw)) {
     return {
       code: 'region_blocked',
       title: 'Track unavailable in this region',

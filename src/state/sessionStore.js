@@ -107,7 +107,13 @@ function createFileSessionStore(session, options = {}) {
         }
         const parsed = JSON.parse(raw);
         if (typeof parsed.session === 'string' && encryptionKey) {
-          parsed.session = decryptSession(parsed.session, encryptionKey);
+          try {
+            parsed.session = decryptSession(parsed.session, encryptionKey);
+          } catch {
+            // Written under another SESSION_SECRET or damaged: the user just signs in again.
+            await fs.promises.unlink(filePath).catch(() => {});
+            return null;
+          }
         }
         return parsed;
       } catch (error) {
