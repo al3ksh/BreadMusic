@@ -75,25 +75,7 @@ test('seekability follows Lavalink track metadata', () => {
 });
 
 test('mirror sources seek through Lavalink despite conservative source metadata', async () => {
-  const updates = [];
-  let regularSeekCalled = false;
-  const player = {
-    guildId: 'seek-test',
-    queue: { current: { info: { sourceName: 'spotify', isSeekable: false, isStream: false, duration: 180000 } } },
-    node: { updatePlayer: async (payload) => updates.push(payload) },
-    seek: async () => { regularSeekCalled = true; },
-    triggerPlayerClientUpdate: () => {},
-  };
-
-  await seekTrack(player, 999999);
-
-  assert.equal(regularSeekCalled, false);
-  assert.equal(player.lastPosition, 180000);
-  assert.deepEqual(updates, [{ guildId: 'seek-test', playerOptions: { position: 180000 } }]);
-});
-
-test('Apple Music and Tidal mirrors use the same safe seek path', async () => {
-  for (const sourceName of ['applemusic', 'tidal']) {
+  for (const sourceName of ['spotify', 'applemusic', 'tidal']) {
     const updates = [];
     const player = {
       guildId: `seek-${sourceName}`,
@@ -103,8 +85,9 @@ test('Apple Music and Tidal mirrors use the same safe seek path', async () => {
       triggerPlayerClientUpdate: () => {},
     };
 
-    await seekTrack(player, 42000);
-    assert.deepEqual(updates, [{ guildId: `seek-${sourceName}`, playerOptions: { position: 42000 } }]);
+    await seekTrack(player, 999999);
+    assert.equal(player.lastPosition, 180000, 'the position is clamped to the track length');
+    assert.deepEqual(updates, [{ guildId: `seek-${sourceName}`, playerOptions: { position: 180000 } }]);
   }
 });
 

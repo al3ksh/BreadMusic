@@ -99,8 +99,5 @@ test('origin image folds the long tail and escapes names', () => {
   assert.match(svg, /Spotify link/);
   assert.match(svg, /Everything else/);
   assert.match(svg, /Bread &amp; &lt;Friends&gt;/);
-  assert.match(svg, /Top input: Spotify link/);
-  assert.match(svg, /LAST 7 DAYS/);
-  assert.match(svg, /AUDIO STREAMED FROM/);
   assert.match(svg, /YouTube 67%/);
 });

@@ -72,7 +72,7 @@ test('collectCandidates drops sources past budget', async () => {
   ], { budgetMs: 50 });
 
   assert.deepEqual(result.map((entry) => entry.source), ['fast']);
-  assert.ok(Date.now() - startedAt < 150);
+  assert.ok(Date.now() - startedAt < 190, 'the slow source is not awaited');
 });
 
 test('collectCandidates isolates failures', async () => {

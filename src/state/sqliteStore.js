@@ -4,6 +4,8 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 const databaseByPath = new Map();
+// Stores with a debounced save still waiting, so closing can write them first.
+const storesWithPendingSave = new Set();
 
 function cloneDefault(value) {
   if (Array.isArray(value)) return [...value];
@@ -55,6 +57,7 @@ function getDatabase(databasePath = resolveDatabasePath()) {
 }
 
 function closeDatabases() {
+  for (const store of [...storesWithPendingSave]) store.saveImmediate();
   for (const database of databaseByPath.values()) {
     try {
       database.close();
@@ -133,8 +136,10 @@ class SqliteStore {
   save() {
     if (this.saveTimeout) clearTimeout(this.saveTimeout);
 
+    storesWithPendingSave.add(this);
     this.saveTimeout = setTimeout(() => {
       this.saveTimeout = null;
+      storesWithPendingSave.delete(this);
       this._performSave();
     }, 1000);
     this.saveTimeout.unref?.();
@@ -145,6 +150,7 @@ class SqliteStore {
       clearTimeout(this.saveTimeout);
       this.saveTimeout = null;
     }
+    storesWithPendingSave.delete(this);
     this._performSave();
   }
 

@@ -48,7 +48,6 @@ test('play events are exposed as paginated history', async () => {
     assert.equal(guildInsights.details.estimatedDuration, 180000);
     assert.equal(guildInsights.details.autoplayPlays, 1);
     assert.equal(guildInsights.details.topSources[0].name, 'youtube');
-    await new Promise((resolve) => setTimeout(resolve, 1100));
   } finally {
     closeDatabases();
     process.chdir(originalCwd);

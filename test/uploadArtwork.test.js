@@ -95,7 +95,8 @@ test('single process has no backlog, coalesces duplicates, and really terminates
   const duplicate = prepareUploadArtwork(file);
   const busy = prepareUploadArtwork(other);
   assert.deepEqual(await first, await duplicate);
-  assert.equal(await busy, null);
+  // Whichever cache lookup finishes first takes the single slot; the other upload goes without art.
+  assert.equal([await first, await busy].filter((result) => result === null).length, 1);
   const start = Date.now();
   assert.equal(await runExtraction(file, { timeoutMs: 1 }), null);
   assert.ok(Date.now() - start < 2000);
@@ -211,6 +212,4 @@ test('cleanup and quota protect active and stored audio-cover pairs, evict toget
   await cleanupExpiredAudioUploads(client);
   assert.equal(fs.existsSync(artworkPath(file)), false);
   await flushQueueStore();
-  // Let the existing config store's debounced write finish before closing SQLite.
-  await new Promise((resolve) => setTimeout(resolve, 1100));
 });
