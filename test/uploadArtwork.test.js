@@ -60,7 +60,8 @@ test('extracts front-cover JPEG thumbnails from MP3, FLAC and M4A without modify
   for (const [extension, input] of [['mp3', mp3([{ data: back, type: 4 }, { data: picture }])], ['flac', flac(picture)], ['m4a', m4a(picture)]]) {
     const file = path.join(directory, `cover.${extension}`);
     fs.writeFileSync(file, input);
-    const result = await prepareUploadArtwork(file);
+    // A cold worker can exceed the production timeout while the whole suite runs in parallel.
+    const result = await prepareUploadArtwork(file, { timeoutMs: 30_000 });
     assert.equal(result?.hasCover, true, extension);
     const metadata = await sharp(result.data).metadata();
     assert.equal(metadata.format, 'jpeg');
@@ -79,7 +80,7 @@ test('no cover, invalid pictures, SVG, oversized images and corrupt files safely
   for (const [index, input] of candidates.entries()) {
     const file = path.join(directory, `no-cover-${index}.mp3`);
     fs.writeFileSync(file, input);
-    const result = await prepareUploadArtwork(file);
+    const result = await prepareUploadArtwork(file, { timeoutMs: 30_000 });
     assert.equal(result?.hasCover, false, String(index));
     await storeUploadArtwork(file, result.data);
     assert.deepEqual(await prepareUploadArtwork(file), { cached: true, hasCover: false });
@@ -98,7 +99,7 @@ test('single process has no backlog, coalesces duplicates, and really terminates
   const start = Date.now();
   assert.equal(await runExtraction(file, { timeoutMs: 1 }), null);
   assert.ok(Date.now() - start < 2000);
-  assert.equal((await prepareUploadArtwork(other)).hasCover, false);
+  assert.equal((await prepareUploadArtwork(other, { timeoutMs: 30_000 })).hasCover, false);
 });
 
 test('quota groups derivative bytes with audio and keeps the parent expiry/protection identity', () => {

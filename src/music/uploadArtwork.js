@@ -35,7 +35,7 @@ function runExtraction(filePath, { timeoutMs = 4000, workerPath = path.join(__di
   });
 }
 
-async function prepareUploadArtwork(audioPath) {
+async function prepareUploadArtwork(audioPath, extractionOptions) {
   const key = path.resolve(audioPath);
   if (pending.has(key)) return pending.get(key);
   const work = (async () => {
@@ -45,7 +45,7 @@ async function prepareUploadArtwork(audioPath) {
     if (active) return null;
     active = true;
     try {
-      const data = await runExtraction(key);
+      const data = await runExtraction(key, extractionOptions);
       return data === null ? null : { cached: false, hasCover: data.length > 0, data };
     } finally { active = false; }
   })();
