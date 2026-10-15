@@ -37,6 +37,8 @@ function createPublicRouter({ client }) {
 
   router.get('/api/bot-info', (_req, res) => {
     const u = client.user;
+    // The API listens before the Discord login finishes.
+    if (!u) return res.status(503).json({ error: 'Bot is starting' });
     res.json({
       id: u.id,
       name: u.username,
