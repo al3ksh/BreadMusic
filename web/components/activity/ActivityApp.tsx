@@ -14,6 +14,7 @@ import {
   Mic2,
   PlugZap,
   RefreshCw,
+  Server,
   ShieldAlert,
   Trash2,
   VolumeX,
@@ -22,6 +23,7 @@ import {
 import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, QueueTrack, SoundState } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 import { ActivityPlayerControls } from '@/components/activity/ActivityPlayerControls';
+import { ActivityRunnerGame } from '@/components/activity/ActivityRunnerGame';
 import { ActivityAutoplayBadge } from '@/components/activity/ActivityAutoplayBadge';
 import { ActivityHeartButton } from '@/components/activity/ActivityHeartButton';
 import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
@@ -57,16 +59,20 @@ declare global {
 }
 
 type ActivityPhase = 'starting' | 'ready' | 'error' | 'unsupported';
-type ActivityErrorKind = 'discord' | 'lavalink' | 'voice' | 'auth' | 'access' | 'generic';
+type ActivityErrorKind = 'discord' | 'lavalink' | 'voice' | 'private' | 'auth' | 'access' | 'generic';
 
 const ACTIVITY_ERROR_VISUALS: Record<ActivityErrorKind, { icon: typeof Bot; title: string }> = {
   discord: { icon: Bot, title: 'Bot is offline' },
   lavalink: { icon: AudioLines, title: 'Audio engine offline' },
   voice: { icon: VolumeX, title: 'Bread is not in a voice channel' },
+  private: { icon: Server, title: 'Bread plays on servers' },
   auth: { icon: KeyRound, title: 'Session expired' },
   access: { icon: ShieldAlert, title: 'Access denied' },
   generic: { icon: AlertTriangle, title: 'Activity unavailable' },
 };
+// Screens where the user can only wait or retry get the minigame; auth and access need action instead.
+const ACTIVITY_GAME_KINDS = new Set<ActivityErrorKind>(['discord', 'lavalink', 'voice', 'private', 'generic']);
+const BOT_UNREACHABLE_MESSAGE = 'Bread is not responding right now. Try again in a moment.';
 type ActivityPanel = 'queue' | 'search' | 'lyrics' | 'sound' | 'library' | null;
 const ACTIVITY_PANEL_TITLES: Record<Exclude<ActivityPanel, null>, string> = {
   queue: 'Queue',
@@ -183,6 +189,8 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
   const lastSearchRef = useRef<{ query: string; at: number } | null>(null);
   const lastRichPresenceRef = useRef('');
   const lyricsRequestRef = useRef(0);
+  // Track whose lyrics are already in state, so reopening lyrics or karaoke does not refetch them.
+  const loadedLyricsUriRef = useRef('');
   const drawerGestureRef = useRef<{ pointerId: number; startY: number; lastY: number; lastAt: number; velocity: number } | null>(null);
   const clockRef = useRef<PlayerClock>({ trackKey: '', base: 0, startedAt: Date.now(), paused: true });
   const lyricsListRef = useRef<HTMLDivElement | null>(null);
@@ -228,6 +236,8 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
   const [uploading, setUploading] = useState(false);
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
   const [lyricsLoading, setLyricsLoading] = useState(false);
+  // Karaoke waits on the player until lyrics for this track arrive, instead of opening and bouncing back.
+  const [karaokePendingUri, setKaraokePendingUri] = useState('');
   const [lyricsError, setLyricsError] = useState('');
   const [lyricsTrackUri, setLyricsTrackUri] = useState('');
   const [lyricsSyncEnabled, setLyricsSyncEnabled] = useState(false);
@@ -427,7 +437,15 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
       let failureKind: ActivityErrorKind = 'generic';
       try {
         setMessage('Preparing Bread...');
-        const config = await request('/api/activity/config').then(async (response) => {
+        // The web proxy answers 5xx (or the fetch itself fails) when the bot process is down.
+        const config = await request('/api/activity/config').catch(() => {
+          failureKind = 'discord';
+          throw new Error(BOT_UNREACHABLE_MESSAGE);
+        }).then(async (response) => {
+          if (response.status >= 500) {
+            failureKind = 'discord';
+            throw new Error(BOT_UNREACHABLE_MESSAGE);
+          }
           if (!response.ok) throw new Error('Activity is not configured');
           return response.json() as Promise<{ enabled: boolean; clientId: string | null; debugFailure?: string | null }>;
         });
@@ -475,7 +493,8 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
         }).then(async (response) => {
           const body = await response.json().catch(() => ({}));
           if (!response.ok) {
-            failureKind = 'auth';
+            // A 5xx is the bot failing, not the session; diagnostics below tell which part is down.
+            if (response.status < 500) failureKind = 'auth';
             throw new Error(body.error || 'Activity authorization failed');
           }
           return body as { access_token: string };
@@ -489,8 +508,8 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
         setMessage('Loading your server...');
         activityTokenRef.current = auth.access_token || tokenResponse.access_token;
         if (!sdk.guildId) {
-          failureKind = 'voice';
-          throw new Error('Open the Activity from a server voice channel');
+          failureKind = 'private';
+          throw new Error('Private calls and DMs are not supported. Open the Activity from a voice channel on a server with Bread.');
         }
         if (cancelled) return;
 
@@ -549,18 +568,21 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
 
         if (failureKind === 'generic') {
           try {
-            const health = await request('/api/healthz').then((response) => response.json()) as {
+            const healthResponse = await request('/api/healthz');
+            const health = healthResponse.ok ? await healthResponse.json() as {
               discord?: { ok?: boolean };
               lavalink?: { ok?: boolean };
-            };
-            if (health?.discord && health.discord.ok === false) failureKind = 'discord';
+            } : null;
+            if (!health) failureKind = 'discord';
+            else if (health.discord && health.discord.ok === false) failureKind = 'discord';
             else if (health?.lavalink && health.lavalink.ok === false) failureKind = 'lavalink';
             else if (guildId) {
               const status = await activityFetch<PlayerStatus>(`/api/guilds/${guildId}/status`).catch(() => null);
               if (status && status.connected === false) failureKind = 'voice';
             }
           } catch {
-            // Diagnostics are best effort; the generic screen still applies.
+            // The health check itself failing means the bot cannot be reached at all.
+            failureKind = 'discord';
           }
         }
 
@@ -1168,11 +1190,13 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
     setLyrics(null);
     setLyricsError('');
     setLyricsTrackUri('');
+    loadedLyricsUriRef.current = '';
     try {
       const result = await activityFetch<LyricsResult>(`/api/guilds/${guildId}/lyrics`);
       if (requestId !== lyricsRequestRef.current) return;
       setLyrics(result);
       setLyricsTrackUri(requestedTrackUri);
+      loadedLyricsUriRef.current = requestedTrackUri;
     } catch (error) {
       if (requestId !== lyricsRequestRef.current) return;
       setLyrics(null);
@@ -1184,9 +1208,10 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
   }, [activityFetch, currentTrackUri, guildId]);
 
   useEffect(() => {
-    if (activePanel === 'lyrics' || karaokeEnabled) loadLyrics();
-    else setLyricsError('');
-  }, [activePanel, karaokeEnabled, loadLyrics]);
+    if (activePanel === 'lyrics' || karaokeEnabled) {
+      if (loadedLyricsUriRef.current !== currentTrackUri) loadLyrics();
+    } else setLyricsError('');
+  }, [activePanel, currentTrackUri, karaokeEnabled, loadLyrics]);
 
   useEffect(() => {
     if (!activePanel) return;
@@ -1377,13 +1402,37 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
     });
   }, []);
 
+  const enterKaraoke = useCallback(() => switchKaraoke(true, () => {
+    setLyricsSyncEnabled(true);
+    closePanel();
+  }), [closePanel, switchKaraoke]);
+
+  const openKaraoke = useCallback(() => {
+    if (!currentTrackUri) return;
+    setKaraokePendingUri(currentTrackUri);
+    if (loadedLyricsUriRef.current !== currentTrackUri && !lyricsLoading) void loadLyrics();
+  }, [currentTrackUri, loadLyrics, lyricsLoading]);
+
+  useEffect(() => {
+    if (!karaokePendingUri) return;
+    if (karaokePendingUri !== currentTrackUri) {
+      setKaraokePendingUri('');
+      return;
+    }
+    if (lyricsLoading || lyricsTrackUri !== currentTrackUri) return;
+    setKaraokePendingUri('');
+    if (syncedLyrics.length > 0) enterKaraoke();
+    else notify('Synced lyrics are unavailable for this track.', 'warning');
+  }, [currentTrackUri, enterKaraoke, karaokePendingUri, lyricsLoading, lyricsTrackUri, notify, syncedLyrics.length]);
+  const karaokePending = Boolean(karaokePendingUri) && karaokePendingUri === currentTrackUri;
+
+  // The next track may have no synced lyrics; leave karaoke with the same morph that opened it.
   useEffect(() => {
     if (!karaokeEnabled || lyricsLoading) return;
     if (lyricsTrackUri !== currentTrackUri || syncedLyrics.length > 0) return;
-    setKaraokeEnabled(false);
-    setLyricsSyncEnabled(false);
+    switchKaraoke(false, () => setLyricsSyncEnabled(false));
     notify('Synced lyrics are unavailable for this track. Karaoke was closed.', 'warning');
-  }, [currentTrackUri, karaokeEnabled, lyricsLoading, lyricsTrackUri, notify, syncedLyrics.length]);
+  }, [currentTrackUri, karaokeEnabled, lyricsLoading, lyricsTrackUri, notify, switchKaraoke, syncedLyrics.length]);
 
   const stopQueueAutoScroll = useCallback(() => {
     queueAutoScrollSpeedRef.current = 0;
@@ -1619,6 +1668,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
             <RefreshCw size={16} />Retry
           </button>
         </div>
+        {ACTIVITY_GAME_KINDS.has(errorKind) && <ActivityRunnerGame />}
       </main>
     );
   }
@@ -1744,16 +1794,18 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
             type="button"
             className="activity-track-art"
             disabled={!hasTrack}
-            onClick={() => switchKaraoke(true, () => {
-              setLyricsSyncEnabled(true);
-              closePanel();
-            })}
+            aria-busy={karaokePending}
+            onClick={openKaraoke}
             aria-label="Open karaoke"
             title="Open karaoke"
           >
             <ActivityArtwork key={trackKey} src={status.currentTrack?.artwork} large />
             {hasTrack && <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />}
-            {hasTrack && <span className="activity-track-art-hint" aria-hidden="true"><Mic2 size={15} /> Karaoke</span>}
+            {hasTrack && (
+              <span className={`activity-track-art-hint${karaokePending ? ' is-pending' : ''}`} aria-hidden="true">
+                {karaokePending ? <><ActivitySpinner /> Finding lyrics</> : <><Mic2 size={15} /> Karaoke</>}
+              </span>
+            )}
           </button>
 
           <div className="activity-player-main">
@@ -1993,9 +2045,12 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
                     activeLyricRef={activeLyricRef}
                     onToggleSync={() => setLyricsSyncEnabled((enabled) => !enabled)}
                     onToggleKaraoke={() => {
-                      const nextEnabled = !karaokeEnabled;
-                      switchKaraoke(nextEnabled, () => {
-                        setLyricsSyncEnabled(nextEnabled);
+                      if (!karaokeEnabled) {
+                        openKaraoke();
+                        return;
+                      }
+                      switchKaraoke(false, () => {
+                        setLyricsSyncEnabled(false);
                         closePanel();
                       });
                     }}

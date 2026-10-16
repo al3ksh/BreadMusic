@@ -555,6 +555,66 @@ a { color: inherit; text-decoration: none; }
   border-color: #7169b9;
 }
 
+.activity-runner {
+  position: relative;
+  width: min(560px, 100%);
+  margin-top: 26px;
+  padding: 14px 14px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: #121215;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.activity-runner canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 200 / 64;
+  image-rendering: pixelated;
+}
+
+.activity-runner-score {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  display: flex;
+  gap: 12px;
+  color: #8d8aa8;
+  font: 700 11px/1 ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  letter-spacing: 0.08em;
+}
+
+.activity-runner-score span:first-child:not(:last-child) { color: #5f5c78; }
+
+.activity-runner-hint {
+  min-height: 16px;
+  margin: 6px 0 0;
+  color: #8d8aa8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.activity-runner[data-state='idle'] .activity-runner-hint,
+.activity-runner[data-state='paused'] .activity-runner-hint {
+  animation: activity-runner-blink 1.4s steps(2, jump-none) infinite;
+}
+
+@keyframes activity-runner-blink {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-runner-hint { animation: none !important; }
+}
+
+@media (max-height: 520px) {
+  .activity-runner { margin-top: 12px; padding: 10px 10px 6px; }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .activity-error-button.primary:hover:not(:disabled) {
     background: #6760a7;
@@ -2921,10 +2981,13 @@ button.activity-track-art:focus-visible {
   outline-offset: 3px;
 }
 
-button.activity-track-art:focus-visible .activity-track-art-hint {
+button.activity-track-art:focus-visible .activity-track-art-hint,
+.activity-track-art-hint.is-pending {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+button.activity-track-art[aria-busy='true'] { cursor: progress; }
 
 @media (hover: hover) and (pointer: fine) {
   button.activity-track-art:hover:not(:disabled) {
