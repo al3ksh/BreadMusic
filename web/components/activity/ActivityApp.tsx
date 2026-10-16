@@ -23,7 +23,7 @@ import {
 import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, QueueTrack, SoundState } from '@/lib/api';
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 import { ActivityPlayerControls } from '@/components/activity/ActivityPlayerControls';
-import { ActivityRunnerGame } from '@/components/activity/ActivityRunnerGame';
+import { ActivityOutageScreen } from '@/components/activity/ActivityOutageScreen';
 import { ActivityAutoplayBadge } from '@/components/activity/ActivityAutoplayBadge';
 import { ActivityHeartButton } from '@/components/activity/ActivityHeartButton';
 import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
@@ -72,6 +72,8 @@ const ACTIVITY_ERROR_VISUALS: Record<ActivityErrorKind, { icon: typeof Bot; titl
 };
 // Screens where the user can only wait or retry get the minigame; auth and access need action instead.
 const ACTIVITY_GAME_KINDS = new Set<ActivityErrorKind>(['discord', 'lavalink', 'voice', 'private', 'generic']);
+// Outages the screen watches for in the background, so it can return to the player by itself.
+const ACTIVITY_RECOVERABLE_KINDS = new Set<ActivityErrorKind>(['discord', 'lavalink']);
 const BOT_UNREACHABLE_MESSAGE = 'Bread is not responding right now. Try again in a moment.';
 type ActivityPanel = 'queue' | 'search' | 'lyrics' | 'sound' | 'library' | null;
 const ACTIVITY_PANEL_TITLES: Record<Exclude<ActivityPanel, null>, string> = {
@@ -1011,6 +1013,13 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
     return activityFetch<HistoryPage>(`/api/guilds/${guildId}/history?page=${page}&limit=25`);
   }, [activityFetch, guildId]);
 
+  const checkBotRecovered = useCallback(async () => {
+    const response = await request('/api/healthz');
+    if (!response.ok) return false;
+    const health = await response.json() as { discord?: { ok?: boolean }; lavalink?: { ok?: boolean } };
+    return health.discord?.ok !== false && health.lavalink?.ok !== false;
+  }, [request]);
+
   const summonBot = useCallback(async () => {
     if (!guildId || summoning) return;
     setSummoning(true);
@@ -1653,23 +1662,25 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
     const visual = ACTIVITY_ERROR_VISUALS[errorKind];
     const VisualIcon = visual.icon;
     return (
-      <main className="activity-shell activity-centered">
-        <div className="activity-status-mark"><VisualIcon size={30} /></div>
-        <p className="activity-kicker">Bread Activity</p>
-        <h1>{visual.title}</h1>
-        <p className="activity-muted">{message}</p>
-        <div className="activity-error-actions">
-          {errorKind === 'voice' && guildId && (
-            <button type="button" className="activity-error-button primary" onClick={summonBot} disabled={summoning}>
-              <PlugZap size={16} />{summoning ? 'Summoning…' : 'Summon bot'}
+      <ActivityOutageScreen
+        icon={<VisualIcon size={30} />}
+        title={visual.title}
+        message={message}
+        game={ACTIVITY_GAME_KINDS.has(errorKind)}
+        checkRecovery={ACTIVITY_RECOVERABLE_KINDS.has(errorKind) ? checkBotRecovered : undefined}
+        actions={(
+          <>
+            {errorKind === 'voice' && guildId && (
+              <button type="button" className="activity-error-button primary" onClick={summonBot} disabled={summoning}>
+                <PlugZap size={16} /><span>{summoning ? 'Summoning…' : 'Summon bot'}</span>
+              </button>
+            )}
+            <button type="button" className="activity-error-button" onClick={() => window.location.reload()}>
+              <RefreshCw size={16} /><span>Retry</span>
             </button>
-          )}
-          <button type="button" className="activity-error-button" onClick={() => window.location.reload()}>
-            <RefreshCw size={16} />Retry
-          </button>
-        </div>
-        {ACTIVITY_GAME_KINDS.has(errorKind) && <ActivityRunnerGame />}
-      </main>
+          </>
+        )}
+      />
     );
   }
 

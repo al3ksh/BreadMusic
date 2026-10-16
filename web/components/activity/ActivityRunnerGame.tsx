@@ -1,371 +1,375 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Volume2, VolumeX } from 'lucide-react';
+import { RunnerAudio, type RunnerSound } from './runner/audio';
+import { bpmAt, createWorld, inFever, multiplier, press, step, type RunnerCue, type RunnerWorld } from './runner/engine';
+import { applyCues, clearFx, createFx, drawScene, smoulder, updateFx, type RunnerMode } from './runner/render';
 
-// A small endless runner for the Activity error screens: a slice of toast jumps over kitchen hazards.
-// Everything is drawn on a low-resolution canvas that CSS scales up with pixelated rendering.
+// A rhythm runner for the Activity outage screens: a slice of toast jumps kitchen hazards and
+// equalizer bars to a chiptune loop. Jumps on the beat build a combo; the tempo climbs as you go.
 
-const WIDTH = 200;
-const HEIGHT = 64;
-const GROUND = 54;
-const GRAVITY = 1400;
-const JUMP_VELOCITY = -330;
-const JUMP_CUT_VELOCITY = -120;
-const START_SPEED = 95;
-const MAX_SPEED = 210;
-const SPEED_RAMP = 3;
 const BEST_KEY = 'bread-activity-runner-best';
+const MUTED_KEY = 'bread-activity-runner-muted';
+const MAX_WIDTH = 300;
+const MIN_HEIGHT = 72;
+const MAX_HEIGHT = 120;
+// Stops a jump meant for the toast from instantly restarting the run it just ended.
+const RESTART_LOCK_MS = 450;
 
-const PALETTE: Record<string, string> = {
-  C: '#8a5a2b', // crust
-  B: '#e8b765', // crumb
-  b: '#f6d898', // crumb highlight
-  E: '#2a1b10', // eyes, mouth, feet
-  P: '#f19a9a', // cheeks
-  K: '#3b3c47', // outline
-  S: '#b9bccb', // steel
-  s: '#e6e8f2', // steel shine
-  D: '#17171b', // slot
-  R: '#d9534f', // lever
-  W: '#7b4a26', // wooden handle
-  N: '#5a5494', // notes
-  G: '#2c2c33', // ground speckle
-};
+type Size = 'invite' | 'stage';
 
-type Sprite = { rows: string[]; width: number; height: number };
-
-function sprite(rows: string[]): Sprite {
-  return { rows, width: rows[0].length, height: rows.length };
-}
-
-const TOAST_BODY = [
-  '..CCCCCCCC..',
-  '.CbbBBBBBBC.',
-  'CbBBBBBBBBBC',
-  'CBBBBBBBBBBC',
-  'CBBEBBBBEBBC',
-  'CBPEBBBBEPBC',
-  'CBBBBEEBBBBC',
-  'CBBBBBBBBBBC',
-  '.CBBBBBBBBC.',
-  '.CCCCCCCCCC.',
-];
-const TOAST_RUN_A = sprite([...TOAST_BODY, '..E......E..', '..E.......E.']);
-const TOAST_RUN_B = sprite([...TOAST_BODY, '...E....E...', '..E.....E...']);
-const TOAST_JUMP = sprite([...TOAST_BODY, '..E......E..', '.E........E.']);
-const TOAST_HIT = sprite([
-  '..CCCCCCCC..',
-  '.CbbBBBBBBC.',
-  'CbBBBBBBBBBC',
-  'CBBBBBBBBBBC',
-  'CBEBEBBEBEBC',
-  'CBBEBBBBEBBC',
-  'CBEBEBBEBEBC',
-  'CBBBBEEBBBBC',
-  '.CBBBEEBBBC.',
-  '.CCCCCCCCCC.',
-  '..E......E..',
-  '..E......E..',
-]);
-
-const TOASTER = sprite([
-  '.KKKKKKKKKKKK.',
-  'KsssssssssssSK',
-  'KsDDDDSSDDDDSK',
-  'KSSSSSSSSSSSSK',
-  'KsSSSSSSSSSRSK',
-  'KsSSSSSSSSSRSK',
-  'KsSSSSSSSSSSSK',
-  'KSSSSSSSSSSSSK',
-  'KKKKKKKKKKKKKK',
-  '.K..........K.',
-]);
-
-const KNIFE = sprite([
-  '..s..',
-  '.sS..',
-  '.sSS.',
-  '.sSS.',
-  '.sSS.',
-  '.sSS.',
-  '.sSS.',
-  '.sSS.',
-  '.KKK.',
-  '.WWW.',
-  '.WWW.',
-  '.WWW.',
-  '.WWW.',
-]);
-
-const NOTE = sprite([
-  '...NN.',
-  '...N.N',
-  '...N..',
-  '...N..',
-  '.NNN..',
-  'NNNN..',
-  '.NN...',
-]);
-
-const OBSTACLES = [
-  { sprite: TOASTER, count: 1 },
-  { sprite: KNIFE, count: 1 },
-  { sprite: KNIFE, count: 2 },
-  { sprite: TOASTER, count: 2 },
-];
-
-type Obstacle = { x: number; sprite: Sprite; count: number };
-type Note = { x: number; y: number };
-type GameState = 'idle' | 'running' | 'paused' | 'over';
-
-function drawSprite(ctx: CanvasRenderingContext2D, image: Sprite, x: number, y: number) {
-  const left = Math.round(x);
-  const top = Math.round(y);
-  image.rows.forEach((row, rowIndex) => {
-    for (let column = 0; column < row.length; column += 1) {
-      const color = PALETTE[row[column]];
-      if (!color) continue;
-      ctx.fillStyle = color;
-      ctx.fillRect(left + column, top + rowIndex, 1, 1);
-    }
-  });
-}
-
-function readBest() {
+function readStored(key: string) {
   try {
-    return Number(window.localStorage.getItem(BEST_KEY)) || 0;
+    return window.localStorage.getItem(key);
   } catch {
-    return 0;
+    return null;
   }
 }
 
-function writeBest(value: number) {
+function writeStored(key: string, value: string) {
   try {
-    window.localStorage.setItem(BEST_KEY, String(value));
+    window.localStorage.setItem(key, value);
   } catch {
-    // Storage can be blocked inside the Discord iframe; the best score then lasts for the session.
+    // Storage can be blocked inside the Discord iframe; the value then lasts for the session.
   }
 }
 
-const HINTS: Record<GameState, string> = {
-  idle: 'Press space or tap to play',
-  running: '',
-  paused: 'Paused. Tap to continue',
-  over: 'Burnt! Tap to try again',
-};
+function soundFor(cue: RunnerCue): RunnerSound | null {
+  if (cue.type === 'judge') return cue.grade;
+  if (cue.type === 'jump' || cue.type === 'note' || cue.type === 'crash') return cue.type;
+  if (cue.type === 'fever') return cue.on ? 'fever' : 'feverEnd';
+  return null;
+}
 
-export function ActivityRunnerGame() {
+function hintFor(mode: RunnerMode, newBest: boolean) {
+  switch (mode) {
+    case 'idle':
+      return 'Jump on the beat. Space or tap to play';
+    case 'paused':
+      return 'Paused. Tap to continue';
+    case 'over':
+      return newBest ? 'Burnt! New best. Tap to try again' : 'Burnt! Tap to try again';
+    default:
+      return '';
+  }
+}
+
+/**
+ * Picks a whole number of device pixels per game pixel, so the art stays crisp, then sizes the
+ * game to the space it was given. On the stage the pixels grow along with the view.
+ */
+function measure(cssWidth: number, cssHeight: number, size: Size) {
+  const ratio = window.devicePixelRatio || 1;
+  const width = cssWidth * ratio;
+  const height = cssHeight * ratio;
+  // Narrow views trade a little look-ahead for pixels big enough to read.
+  const minWidth = cssWidth < 480 ? 150 : 200;
+  let scale: number;
+  let gameHeight: number;
+  if (size === 'stage') {
+    scale = Math.max(1, Math.min(Math.floor(width / minWidth), Math.floor(height / MIN_HEIGHT)));
+    gameHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.floor(height / scale)));
+  } else {
+    scale = Math.max(1, Math.min(Math.round(2 * ratio), Math.floor(width / Math.min(minWidth, 160))));
+    gameHeight = MIN_HEIGHT;
+  }
+  const gameWidth = Math.max(1, Math.min(MAX_WIDTH, Math.floor(width / scale)));
+  return { scale, ratio, width: gameWidth, height: gameHeight };
+}
+
+export function ActivityRunnerGame({ size, onStart }: { size: Size; onStart?: () => void }) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const screenRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const scoreRef = useRef<HTMLSpanElement | null>(null);
+  const comboRef = useRef<HTMLSpanElement | null>(null);
+  const comboCountRef = useRef<HTMLSpanElement | null>(null);
+  const comboMultRef = useRef<HTMLElement | null>(null);
+  const onStartRef = useRef(onStart);
+  const viewRef = useRef({ scale: 1, width: 200, height: MIN_HEIGHT });
   const pressRef = useRef<(() => void) | null>(null);
-  const releaseRef = useRef<(() => void) | null>(null);
-  const [state, setState] = useState<GameState>('idle');
+  const pauseRef = useRef<(() => void) | null>(null);
+  const redrawRef = useRef<(() => void) | null>(null);
+  const mutedRef = useRef(false);
+  const audioRef = useRef<RunnerAudio | null>(null);
+  const [mode, setMode] = useState<RunnerMode>('idle');
   const [best, setBest] = useState(0);
+  const [newBest, setNewBest] = useState(false);
+  const [muted, setMuted] = useState(false);
+
+  useEffect(() => {
+    onStartRef.current = onStart;
+  }, [onStart]);
+
+  useEffect(() => {
+    const storedMuted = readStored(MUTED_KEY) === '1';
+    mutedRef.current = storedMuted;
+    setMuted(storedMuted);
+    setBest(Number(readStored(BEST_KEY)) || 0);
+  }, []);
+
+  useLayoutEffect(() => {
+    const wrapper = wrapperRef.current;
+    const board = boardRef.current;
+    const screen = screenRef.current;
+    const canvas = canvasRef.current;
+    if (!wrapper || !board || !screen || !canvas) return;
+    const resize = () => {
+      // On the stage the board may use the height the wrapper was given, less the HUD and hint.
+      const room = size === 'stage' ? wrapper.clientHeight - (board.offsetHeight - screen.offsetHeight) : 0;
+      const next = measure(screen.clientWidth, room, size);
+      viewRef.current = next;
+      const pixelWidth = next.width * next.scale;
+      const pixelHeight = next.height * next.scale;
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+      canvas.style.width = `${pixelWidth / next.ratio}px`;
+      canvas.style.height = `${pixelHeight / next.ratio}px`;
+      redrawRef.current?.();
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(wrapper);
+    observer.observe(screen);
+    // Zooming or moving to another screen changes the device pixel ratio without a resize.
+    const query = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    query.addEventListener('change', resize);
+    return () => {
+      observer.disconnect();
+      query.removeEventListener('change', resize);
+    };
+  }, [size]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
 
-    let gameState: GameState = 'idle';
-    let y = GROUND - TOAST_RUN_A.height;
-    let velocity = 0;
-    let speed = START_SPEED;
-    let distance = 0;
-    let nextSpawn = 0;
-    let obstacles: Obstacle[] = [];
-    let notes: Note[] = [{ x: 40, y: 12 }, { x: 110, y: 22 }, { x: 170, y: 8 }];
-    let groundOffset = 0;
-    let bestScore = readBest();
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let gameMode: RunnerMode = 'idle';
+    let world: RunnerWorld = createWorld();
+    let idleTime = 0;
+    const fx = createFx();
+    let bestScore = Number(readStored(BEST_KEY)) || 0;
+    let shownScore = -1;
+    let shownCombo = -1;
+    let shownFever = false;
+    let lockedUntil = 0;
     let frame = 0;
     let last = 0;
-    setBest(bestScore);
 
-    const toastX = 18;
-    const grounded = () => y >= GROUND - TOAST_RUN_A.height;
-    const score = () => Math.floor(distance / 10);
-    const changeState = (next: GameState) => {
-      gameState = next;
-      setState(next);
+    const changeMode = (next: RunnerMode) => {
+      gameMode = next;
+      setMode(next);
     };
 
-    const reset = () => {
-      y = GROUND - TOAST_RUN_A.height;
-      velocity = 0;
-      speed = START_SPEED;
-      distance = 0;
-      nextSpawn = 0;
-      obstacles = [];
+    // Score and combo change many times a second, so they skip React and write to the DOM.
+    const showScore = () => {
+      if (world.score !== shownScore && scoreRef.current) {
+        shownScore = world.score;
+        scoreRef.current.textContent = String(world.score).padStart(5, '0');
+      }
+      const fever = inFever(world);
+      if (world.combo === shownCombo && fever === shownFever) return;
+      // Fever doubles every point, so the pill shows the multiplier that is really paid.
+      const previousMult = multiplier(Math.max(0, shownCombo)) * (shownFever ? 2 : 1);
+      shownCombo = world.combo;
+      shownFever = fever;
+      const mult = multiplier(world.combo) * (fever ? 2 : 1);
+      const pill = comboRef.current;
+      if (comboCountRef.current) comboCountRef.current.textContent = String(world.combo);
+      if (comboMultRef.current) comboMultRef.current.textContent = `x${mult}`;
+      if (!pill) return;
+      pill.toggleAttribute('data-active', world.combo >= 2);
+      pill.toggleAttribute('data-fever', fever);
+      if (mult > previousMult) {
+        // Restart the pop each time the multiplier steps up.
+        pill.removeAttribute('data-pop');
+        void pill.offsetWidth;
+        pill.setAttribute('data-pop', '');
+      }
     };
 
     const draw = () => {
-      ctx.clearRect(0, 0, WIDTH, HEIGHT);
-      notes.forEach((note) => {
-        ctx.globalAlpha = 0.45;
-        drawSprite(ctx, NOTE, note.x, note.y);
-      });
-      ctx.globalAlpha = 1;
+      const view = viewRef.current;
+      ctx.setTransform(view.scale, 0, 0, view.scale, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      drawScene(ctx, { world, fx, mode: gameMode, width: view.width, height: view.height, reducedMotion: motionQuery.matches });
+    };
+    redrawRef.current = draw;
 
-      ctx.fillStyle = '#5a5a6a';
-      ctx.fillRect(0, GROUND, WIDTH, 1);
-      ctx.fillStyle = PALETTE.G;
-      for (let x = -(groundOffset % 17); x < WIDTH; x += 17) {
-        ctx.fillRect(Math.round(x), GROUND + 3, 2, 1);
-        ctx.fillRect(Math.round(x + 9), GROUND + 5, 1, 1);
+    const finish = () => {
+      audioRef.current?.stopMusic();
+      lockedUntil = performance.now() + RESTART_LOCK_MS;
+      const beaten = world.score > bestScore;
+      setNewBest(beaten && bestScore > 0);
+      if (beaten) {
+        bestScore = world.score;
+        writeStored(BEST_KEY, String(bestScore));
+        setBest(bestScore);
       }
-
-      obstacles.forEach((obstacle) => {
-        for (let index = 0; index < obstacle.count; index += 1) {
-          drawSprite(ctx, obstacle.sprite, obstacle.x + index * (obstacle.sprite.width + 1), GROUND - obstacle.sprite.height);
-        }
-      });
-
-      const toast = gameState === 'over'
-        ? TOAST_HIT
-        : !grounded()
-          ? TOAST_JUMP
-          : gameState === 'running' && Math.floor(distance / 8) % 2 ? TOAST_RUN_B : TOAST_RUN_A;
-      drawSprite(ctx, toast, toastX, y + (TOAST_RUN_A.height - toast.height));
+      changeMode('over');
     };
 
-    const update = (dt: number) => {
-      speed = Math.min(MAX_SPEED, speed + SPEED_RAMP * dt);
-      const step = speed * dt;
-      distance += step;
-      groundOffset += step;
-
-      velocity += GRAVITY * dt;
-      y = Math.min(GROUND - TOAST_RUN_A.height, y + velocity * dt);
-      if (grounded()) velocity = 0;
-
-      notes = notes.map((note) => ({ ...note, x: note.x - step * 0.25 }));
-      notes = notes.map((note) => (note.x < -NOTE.width ? { x: WIDTH + Math.random() * 30, y: 6 + Math.random() * 18 } : note));
-
-      obstacles = obstacles
-        .map((obstacle) => ({ ...obstacle, x: obstacle.x - step }))
-        .filter((obstacle) => obstacle.x + obstacle.count * (obstacle.sprite.width + 1) > 0);
-
-      nextSpawn -= step;
-      if (nextSpawn <= 0) {
-        const options = speed < 130 ? OBSTACLES.slice(0, 3) : OBSTACLES;
-        const pick = options[Math.floor(Math.random() * options.length)];
-        obstacles.push({ x: WIDTH + 4, sprite: pick.sprite, count: pick.count });
-        nextSpawn = speed * (0.7 + Math.random() * 0.8) + 30;
+    const handleCues = (cues: RunnerCue[]) => {
+      if (!cues.length) return;
+      applyCues(fx, cues, world, viewRef.current.height);
+      for (const cue of cues) {
+        const sound = soundFor(cue);
+        if (sound) audioRef.current?.play(sound);
+        if (cue.type === 'crash') finish();
       }
-
-      const toastBox = { left: toastX + 2, right: toastX + TOAST_RUN_A.width - 2, top: y + 1, bottom: y + TOAST_RUN_A.height - 1 };
-      const hit = obstacles.some((obstacle) => {
-        const left = obstacle.x + 1;
-        const right = obstacle.x + obstacle.count * (obstacle.sprite.width + 1) - 2;
-        const top = GROUND - obstacle.sprite.height + 1;
-        return toastBox.right > left && toastBox.left < right && toastBox.bottom > top;
-      });
-      if (hit) {
-        const final = score();
-        if (final > bestScore) {
-          bestScore = final;
-          writeBest(final);
-          setBest(final);
-        }
-        changeState('over');
-      }
-
-      if (scoreRef.current) scoreRef.current.textContent = String(score()).padStart(5, '0');
     };
 
     const loop = (time: number) => {
-      // Clamp the step so a stalled tab or slow frame cannot teleport the toast through an obstacle.
-      const dt = last ? Math.min(0.034, (time - last) / 1000) : 0;
+      const dt = last ? Math.min(0.1, (time - last) / 1000) : 0;
       last = time;
-      if (gameState === 'running') update(dt);
+      if (gameMode === 'running') {
+        handleCues(step(world, dt, viewRef.current.width));
+        if (gameMode === 'running') audioRef.current?.update(world.songTime, { combo: world.combo, fever: inFever(world) });
+        showScore();
+      } else if (gameMode === 'idle') {
+        // The idle screen keeps a gentle pulse going on a loop of its own.
+        idleTime += dt;
+        world.songTime = idleTime;
+        world.beat = (idleTime * bpmAt(0)) / 60;
+      } else if (gameMode === 'over' && !motionQuery.matches) {
+        smoulder(fx, viewRef.current.height, dt);
+      }
+      updateFx(fx, dt);
       draw();
-      frame = gameState === 'running' ? window.requestAnimationFrame(loop) : 0;
+      frame = gameMode === 'paused' ? 0 : window.requestAnimationFrame(loop);
     };
 
-    const start = () => {
+    const run = () => {
       last = 0;
       if (!frame) frame = window.requestAnimationFrame(loop);
     };
 
-    pressRef.current = () => {
-      if (gameState === 'over' || gameState === 'idle') {
-        reset();
-        changeState('running');
-        velocity = JUMP_VELOCITY;
-        start();
-        return;
-      }
-      if (gameState === 'paused') {
-        changeState('running');
-        start();
-        return;
-      }
-      if (grounded()) velocity = JUMP_VELOCITY;
+    const begin = () => {
+      world = createWorld();
+      clearFx(fx);
+      showScore();
+      // Created inside the gesture: browsers only allow sound to start from one.
+      if (!audioRef.current) audioRef.current = RunnerAudio.create(mutedRef.current);
+      changeMode('running');
+      wrapperRef.current?.focus({ preventScroll: true });
+      run();
     };
-    releaseRef.current = () => {
-      if (gameState === 'running' && velocity < JUMP_CUT_VELOCITY) velocity = JUMP_CUT_VELOCITY;
+
+    pressRef.current = () => {
+      if (performance.now() < lockedUntil) return;
+      if (gameMode === 'idle') {
+        onStartRef.current?.();
+        begin();
+      } else if (gameMode === 'over') {
+        begin();
+      } else if (gameMode === 'paused') {
+        changeMode('running');
+        run();
+      } else {
+        handleCues(press(world));
+      }
+    };
+
+    pauseRef.current = () => {
+      if (gameMode !== 'running') return;
+      audioRef.current?.stopMusic();
+      changeMode('paused');
     };
 
     const handleVisibility = () => {
-      if (document.hidden && gameState === 'running') changeState('paused');
+      if (document.hidden) pauseRef.current?.();
     };
 
-    draw();
+    run();
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       if (frame) window.cancelAnimationFrame(frame);
       pressRef.current = null;
-      releaseRef.current = null;
+      pauseRef.current = null;
+      redrawRef.current = null;
+      audioRef.current?.close();
+      audioRef.current = null;
     };
+  }, []);
+
+  const toggleMuted = useCallback(() => {
+    const next = !mutedRef.current;
+    mutedRef.current = next;
+    setMuted(next);
+    writeStored(MUTED_KEY, next ? '1' : '0');
+    audioRef.current?.setMuted(next);
   }, []);
 
   useEffect(() => {
-    const isJumpKey = (event: KeyboardEvent) => event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW';
     const ownsKeyboard = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return false;
       // Space on a focused button should still press that button.
       const target = event.target as HTMLElement | null;
-      return !target?.closest('button, a, input, textarea, select');
+      return !target?.closest('button, a, input, textarea, select, [contenteditable="true"]');
     };
     const handleDown = (event: KeyboardEvent) => {
-      if (!isJumpKey(event) || !ownsKeyboard(event)) return;
-      event.preventDefault();
-      if (!event.repeat) pressRef.current?.();
-    };
-    const handleUp = (event: KeyboardEvent) => {
-      if (isJumpKey(event) && ownsKeyboard(event)) releaseRef.current?.();
+      if (!ownsKeyboard(event)) return;
+      if (event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW') {
+        event.preventDefault();
+        if (!event.repeat) pressRef.current?.();
+      } else if (event.code === 'KeyM' && !event.repeat) {
+        toggleMuted();
+      } else if (event.code === 'Escape' || event.code === 'KeyP') {
+        pauseRef.current?.();
+      }
     };
     window.addEventListener('keydown', handleDown);
-    window.addEventListener('keyup', handleUp);
-    return () => {
-      window.removeEventListener('keydown', handleDown);
-      window.removeEventListener('keyup', handleUp);
-    };
-  }, []);
+    return () => window.removeEventListener('keydown', handleDown);
+  }, [toggleMuted]);
 
   return (
     <div
+      ref={wrapperRef}
       className="activity-runner"
-      data-state={state}
+      data-state={mode}
+      data-size={size}
+      tabIndex={0}
+      role="group"
+      aria-label="Toast runner minigame"
       onPointerDown={(event) => {
+        if (event.button !== 0) return;
         event.preventDefault();
         pressRef.current?.();
       }}
-      onPointerUp={() => releaseRef.current?.()}
-      onPointerCancel={() => releaseRef.current?.()}
     >
-      <div className="activity-runner-score" aria-hidden="true">
-        {best > 0 && <span>HI {String(best).padStart(5, '0')}</span>}
-        <span ref={scoreRef}>00000</span>
+      <div ref={boardRef} className="activity-runner-board">
+      <div className="activity-runner-hud">
+        <button
+          type="button"
+          className="activity-runner-mute"
+          aria-label={muted ? 'Unmute game sound' : 'Mute game sound'}
+          aria-pressed={muted}
+          title={muted ? 'Unmute (M)' : 'Mute (M)'}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={toggleMuted}
+        >
+          {muted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+        </button>
+        <span ref={comboRef} className="activity-runner-combo" aria-hidden="true">
+          <span ref={comboCountRef}>0</span> combo <b ref={comboMultRef}>x1</b>
+        </span>
+        <span className="activity-runner-score" aria-hidden="true">
+          {best > 0 && <span>HI {String(best).padStart(5, '0')}</span>}
+          <span ref={scoreRef}>00000</span>
+        </span>
       </div>
-      <canvas
-        ref={canvasRef}
-        width={WIDTH}
-        height={HEIGHT}
-        role="img"
-        aria-label="Toast runner minigame. Press space or tap to jump."
-      />
-      <p className="activity-runner-hint" aria-live="polite">{HINTS[state]}</p>
+      <div ref={screenRef} className="activity-runner-screen">
+        <canvas ref={canvasRef} role="img" aria-label="Toast rhythm runner. Jump on the beat with space or a tap." />
+      </div>
+      <p className="activity-runner-hint" aria-live="polite">{hintFor(mode, newBest)}</p>
+      </div>
     </div>
   );
 }

@@ -555,40 +555,258 @@ a { color: inherit; text-decoration: none; }
   border-color: #7169b9;
 }
 
-.activity-runner {
-  position: relative;
-  width: min(560px, 100%);
-  margin-top: 26px;
-  padding: 14px 14px 10px;
+/* ---- Outage screen: message on top, the toast runner below; the game takes over once played ---- */
+
+.activity-outage-head,
+.activity-outage-copy {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+
+.activity-outage[data-recovered] .activity-status-mark {
+  color: #7fd6a4;
+  border-color: rgba(127, 214, 164, 0.45);
+}
+
+.activity-shell.activity-outage.is-stage {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  gap: 12px;
+  padding: 14px clamp(12px, 3vw, 28px);
+  overflow: hidden;
+  text-align: left;
+}
+
+.activity-outage.is-stage .activity-outage-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 8px 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: #121215;
+}
+
+.activity-outage.is-stage .activity-status-mark {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.activity-outage.is-stage .activity-status-mark svg {
+  width: 20px;
+  height: 20px;
+}
+
+.activity-outage.is-stage .activity-outage-copy {
+  flex: 1;
+  min-width: 0;
+  justify-items: start;
+  gap: 2px;
+}
+
+.activity-outage.is-stage .activity-kicker { display: none; }
+
+.activity-outage.is-stage h1 {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.activity-outage.is-stage .activity-muted {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-outage.is-stage .activity-error-actions {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.activity-outage.is-stage .activity-error-button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+@media (max-width: 560px) {
+  .activity-outage.is-stage .activity-error-button { width: 34px; padding: 0; }
+
+  /* Icon-only on narrow screens; the label stays as the button's accessible name. */
+  .activity-outage.is-stage .activity-error-button > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* The runner is the tap target and the slot the layout gives the game; the board inside it is the
+   visible panel, sized to the picture so a tall phone does not get an empty box around it. */
+.activity-runner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  margin-top: 26px;
   cursor: pointer;
+  outline: none;
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-.activity-runner canvas {
-  display: block;
+.activity-runner-board {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: #121215;
+  transition: border-color 160ms ease;
+}
+
+/* The board's border shows focus; the slot around it would ring the whole empty stage. */
+.activity-runner:focus-visible { outline: none; }
+.activity-runner:focus-visible .activity-runner-board { border-color: rgba(162, 156, 229, 0.6); }
+
+@media (hover: hover) and (pointer: fine) {
+  .activity-runner[data-state='idle']:hover .activity-runner-board { border-color: rgba(162, 156, 229, 0.35); }
+}
+
+.activity-outage.is-stage .activity-runner {
+  flex: 1;
+  justify-content: center;
   width: 100%;
-  aspect-ratio: 200 / 64;
-  image-rendering: pixelated;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.activity-outage.is-stage .activity-runner-board { padding: 10px 14px 12px; }
+
+.activity-runner-hud {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.activity-runner-mute {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #8d8aa8;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.activity-runner-mute svg { width: 16px; height: 16px; }
+.activity-runner-mute[aria-pressed='true'] { color: #5f5c78; }
+
+.activity-runner-mute:focus-visible {
+  outline: 2px solid rgba(162, 156, 229, 0.7);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .activity-runner-mute:hover {
+    color: #d9dbe5;
+    background: #1b1b1e;
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+}
+
+.activity-runner-combo {
+  padding: 4px 9px;
+  color: #c9c4ff;
+  background: rgba(162, 156, 229, 0.14);
+  border-radius: 999px;
+  font: 700 11px/1 ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.activity-runner-combo b { color: #f5c84c; }
+
+.activity-runner-combo[data-active] {
+  opacity: 1;
+  transform: none;
+}
+
+.activity-runner-combo[data-active][data-pop] {
+  animation: activity-runner-pop 420ms var(--activity-spring) both;
+}
+
+@keyframes activity-runner-pop {
+  from { transform: scale(1.3); }
+  to { transform: none; }
+}
+
+.activity-runner-combo[data-fever] {
+  color: #2a1606;
+  background: linear-gradient(90deg, #ffd36b, #ff9a4a);
+  animation: activity-runner-fever 520ms ease-in-out infinite alternate;
+}
+
+.activity-runner-combo[data-fever] b { color: #2a1606; }
+
+.activity-runner-combo[data-fever][data-pop] {
+  animation:
+    activity-runner-pop 420ms var(--activity-spring) both,
+    activity-runner-fever 520ms ease-in-out infinite alternate;
+}
+
+@keyframes activity-runner-fever {
+  from { box-shadow: 0 0 0 0 rgba(255, 179, 87, 0.15); }
+  to { box-shadow: 0 0 14px 2px rgba(255, 179, 87, 0.55); }
 }
 
 .activity-runner-score {
-  position: absolute;
-  top: 10px;
-  right: 14px;
   display: flex;
   gap: 12px;
+  margin-left: auto;
   color: #8d8aa8;
   font: 700 11px/1 ui-monospace, 'SFMono-Regular', Menlo, monospace;
   letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
 }
 
 .activity-runner-score span:first-child:not(:last-child) { color: #5f5c78; }
+
+.activity-runner-screen {
+  display: flex;
+  justify-content: center;
+}
+
+.activity-runner canvas {
+  display: block;
+  border-radius: 8px;
+  image-rendering: pixelated;
+}
 
 .activity-runner-hint {
   min-height: 16px;
@@ -596,7 +814,10 @@ a { color: inherit; text-decoration: none; }
   color: #8d8aa8;
   font-size: 12px;
   font-weight: 600;
+  text-align: center;
 }
+
+.activity-outage.is-stage .activity-runner-hint { font-size: 13px; }
 
 .activity-runner[data-state='idle'] .activity-runner-hint,
 .activity-runner[data-state='paused'] .activity-runner-hint {
@@ -607,12 +828,46 @@ a { color: inherit; text-decoration: none; }
   50% { opacity: 0.35; }
 }
 
+/* Starting a run: the message folds into the bar while the game grows into the space it leaves. */
+html.activity-vt-outage .activity-outage .activity-status-mark { view-transition-name: activity-outage-mark; }
+html.activity-vt-outage .activity-outage h1 { view-transition-name: activity-outage-title; }
+html.activity-vt-outage .activity-outage .activity-error-actions { view-transition-name: activity-outage-actions; }
+html.activity-vt-outage .activity-outage .activity-runner-board { view-transition-name: activity-outage-game; }
+
+::view-transition-group(activity-outage-mark),
+::view-transition-group(activity-outage-title),
+::view-transition-group(activity-outage-actions),
+::view-transition-group(activity-outage-game) {
+  animation-duration: 520ms;
+  animation-timing-function: var(--activity-spring-soft);
+}
+
+html.activity-vt-outage::view-transition-old(root),
+html.activity-vt-outage::view-transition-new(root) {
+  animation-duration: 260ms;
+}
+
+/* The board keeps its shape while the frame grows: the old picture fades, the live one fills it. */
+::view-transition-old(activity-outage-game),
+::view-transition-new(activity-outage-game) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+::view-transition-old(activity-outage-game) { animation-duration: 200ms; }
+
 @media (prefers-reduced-motion: reduce) {
-  .activity-runner-hint { animation: none !important; }
+  .activity-runner-hint,
+  .activity-runner-combo { animation: none !important; transition: none; }
 }
 
 @media (max-height: 520px) {
-  .activity-runner { margin-top: 12px; padding: 10px 10px 6px; }
+  .activity-runner { margin-top: 12px; }
+  .activity-runner-board { padding: 8px 10px 6px; }
+  .activity-shell.activity-outage.is-stage { gap: 8px; padding-block: 8px; }
+  .activity-outage.is-stage .activity-outage-head { padding-block: 5px; }
+  .activity-outage.is-stage .activity-muted { display: none; }
 }
 
 @media (hover: hover) and (pointer: fine) {

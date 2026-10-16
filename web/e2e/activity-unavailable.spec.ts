@@ -32,14 +32,92 @@ test('Activity reports the bot offline when the config proxy fails and offers th
   await expect(activity.getByText('Activity is not configured')).toHaveCount(0);
   const runner = activity.locator('.activity-runner');
   await expect(runner).toHaveAttribute('data-state', 'idle');
-  await expect(runner.getByText('Press space or tap to play')).toBeVisible();
+  await expect(runner.getByText('Jump on the beat. Space or tap to play')).toBeVisible();
+  const invite = await runner.locator('canvas').boundingBox();
 
   await runner.click();
   await expect(runner).toHaveAttribute('data-state', 'running');
+  // Starting a run folds the message into a bar and gives the game the room, Retry included.
+  await expect(activity.locator('.activity-outage.is-stage')).toBeVisible();
+  await expect(activity.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect.poll(async () => (await runner.locator('canvas').boundingBox())?.width ?? 0).toBeGreaterThan(invite?.width ?? 0);
   await expect.poll(() => runner.locator('.activity-runner-score span').last().textContent()).not.toBe('00000');
-  // The toast eventually burns on an obstacle when nobody jumps.
-  await expect(runner).toHaveAttribute('data-state', 'over', { timeout: 15_000 });
-  await expect(runner.getByText('Burnt! Tap to try again')).toBeVisible();
+  // The toast eventually burns when nobody jumps.
+  await expect(runner).toHaveAttribute('data-state', 'over', { timeout: 30_000 });
+  await expect(runner.getByText(/Burnt!/)).toBeVisible();
+});
+
+test('Runner mute does not start a run and is remembered', async ({ page }) => {
+  await mockApi(page);
+  await page.route('**/api/activity/config', (route) => route.fulfill({ status: 500, body: 'Internal Server Error' }));
+  await page.route('**/api/healthz', (route) => route.fulfill({ status: 500, body: 'Internal Server Error' }));
+  let activity = await openActivity(page);
+
+  const mute = activity.getByRole('button', { name: 'Mute game sound' });
+  await mute.click();
+  await expect(activity.getByRole('button', { name: 'Unmute game sound' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(activity.locator('.activity-runner')).toHaveAttribute('data-state', 'idle');
+  await expect(activity.locator('.activity-outage.is-stage')).toHaveCount(0);
+
+  activity = await openActivity(page);
+  await expect(activity.getByRole('button', { name: 'Unmute game sound' })).toBeVisible({ timeout: 30_000 });
+});
+
+/** Reports the bot down until `recover` is called, the way /api/healthz does during an outage. */
+async function botOutage(page: Page) {
+  let healthy = false;
+  await page.route('**/api/activity/config', (route) => route.fulfill({ status: 500, body: 'Internal Server Error' }));
+  await page.route('**/api/healthz', (route) => json(route, { discord: { ok: healthy }, lavalink: { ok: true } }));
+  return { recover: () => { healthy = true; } };
+}
+
+test('Activity reloads into the player once the bot is back', async ({ page }) => {
+  await page.clock.install();
+  await mockApi(page);
+  const outage = await botOutage(page);
+  let loads = 0;
+  page.on('request', (request) => {
+    if (request.url().includes('/activity?frame_id=')) loads += 1;
+  });
+  const activity = await openActivity(page);
+  await expect(activity.getByRole('heading', { name: 'Bot is offline' })).toBeVisible({ timeout: 30_000 });
+  expect(loads).toBe(1);
+
+  outage.recover();
+  await page.clock.fastForward(10_000);
+  await expect.poll(() => loads).toBe(2);
+});
+
+test('Activity asks instead of reloading twice in a row', async ({ page }) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    if (window.location.port === '3100') window.sessionStorage.setItem('bread-activity-recovery-at', String(Date.now()));
+  });
+  await mockApi(page);
+  const outage = await botOutage(page);
+  const activity = await openActivity(page);
+  await expect(activity.getByRole('heading', { name: 'Bot is offline' })).toBeVisible({ timeout: 30_000 });
+
+  outage.recover();
+  await page.clock.fastForward(10_000);
+  await expect(activity.getByRole('heading', { name: 'Bread is back' })).toBeVisible();
+  await expect(activity.getByRole('button', { name: 'Open player' })).toBeVisible();
+});
+
+test('Activity lets a run finish when the bot comes back mid-game', async ({ page }) => {
+  await page.clock.install();
+  await mockApi(page);
+  const outage = await botOutage(page);
+  const activity = await openActivity(page);
+  await expect(activity.getByRole('heading', { name: 'Bot is offline' })).toBeVisible({ timeout: 30_000 });
+  await activity.locator('.activity-runner').click();
+  await expect(activity.locator('.activity-outage.is-stage')).toBeVisible();
+
+  outage.recover();
+  await page.clock.fastForward(10_000);
+  await expect(activity.getByRole('heading', { name: 'Bread is back' })).toBeVisible();
+  await expect(activity.getByRole('button', { name: 'Open player' })).toBeVisible();
+  await expect(activity.locator('.activity-runner')).toBeVisible();
 });
 
 test('Activity does not call a failing token exchange an expired session', async ({ page }) => {
