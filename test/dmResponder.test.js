@@ -120,10 +120,24 @@ test('DM responder sends the support embed again after its longer cooldown', asy
   assert.equal(message.sends.length, 2);
 });
 
-test('DM responder uses persona reply, sends typing before replying, and passes taste hints on ~1 in 3 replies', async () => {
+test('DM responder uses persona reply, passes nowPlaying and taste hints, and sends dmrec buttons only when there are picks', async () => {
   const personaCalls = [];
+  const selections = [];
   let timestamp = 10_000;
   let roll = 0.1;
+  let picksToReturn = [
+    { title: 'Digital Love', artist: 'Daft Punk' },
+    { title: 'Something About Us', artist: 'Daft Punk' },
+  ];
+
+  const fakeVoiceContext = {
+    guildName: 'Bread HQ',
+    channelName: 'Bakery VC',
+    currentTrack: 'One More Time - Daft Punk',
+    queueLength: 2,
+    listeners: 3,
+    paused: false,
+  };
 
   const respond = createDmResponder({
     cooldownMs: 1,
@@ -131,16 +145,25 @@ test('DM responder uses persona reply, sends typing before replying, and passes 
     random: () => roll,
     wait: async () => {},
     getTasteHints: (userId) => [`Track for ${userId} - Artist`],
+    getVoiceContext: () => fakeVoiceContext,
+    createSelection: (tracks, userId, guildId, ttl) => {
+      const id = `sel-${selections.length + 1}`;
+      selections.push({ id, tracks, userId, guildId, ttl });
+      return id;
+    },
     persona: {
       async reply(input) {
         personaCalls.push(input);
-        return 'Crispy persona reply.';
+        return {
+          text: 'Crispy persona reply.',
+          picks: picksToReturn,
+        };
       },
     },
   });
 
   const first = createMessage({
-    content: 'yo bread play my song',
+    content: 'yo bread recommend me something',
     author: { id: 'user-1', username: 'listener1', bot: false },
   });
   assert.equal(await respond(first), true);
@@ -148,19 +171,34 @@ test('DM responder uses persona reply, sends typing before replying, and passes 
   assert.deepEqual(first.replies[0].allowedMentions, { parse: [] });
   assert.deepEqual(first.typing, [true, true]);
   assert.deepEqual(personaCalls[0], {
-    text: 'yo bread play my song',
+    text: 'yo bread recommend me something',
     userName: 'listener1',
     tasteHints: ['Track for user-1 - Artist'],
+    nowPlaying: fakeVoiceContext,
   });
+
+  assert.equal(Array.isArray(first.replies[0].components), true);
+  assert.equal(first.replies[0].components.length, 1);
+  const rowJson = first.replies[0].components[0].toJSON();
+  assert.equal(rowJson.components.length, 2);
+  assert.equal(rowJson.components[0].custom_id, 'dmrec:sel-1');
+  assert.equal(rowJson.components[0].label, 'Digital Love - Daft Punk');
+  assert.equal(rowJson.components[1].custom_id, 'dmrec:sel-2');
+  assert.equal(rowJson.components[1].label, 'Something About Us - Daft Punk');
+  assert.equal(selections.length, 2);
+  assert.equal(selections[0].userId, 'user-1');
+  assert.equal(selections[0].ttl, 10 * 60 * 1000);
 
   timestamp += 10;
   roll = 0.8;
+  picksToReturn = [];
   const second = createMessage({
-    content: 'second dm',
+    content: 'second dm without picks',
     author: { id: 'user-2', username: 'listener2', bot: false },
   });
   assert.equal(await respond(second), true);
   assert.deepEqual(personaCalls[1].tasteHints, []);
+  assert.equal(second.replies[0].components, undefined);
 });
 
 test('DM responder falls back to a community reply when persona returns null or throws', async () => {
@@ -183,6 +221,7 @@ test('DM responder falls back to a community reply when persona returns null or 
   const first = createMessage({ author: { id: 'user-1', bot: false } });
   assert.equal(await respond(first), true);
   assert.match(first.replies[0].content, /Chat/);
+  assert.equal(first.replies[0].components, undefined);
 
   timestamp += 10;
   shouldThrow = true;
@@ -190,5 +229,6 @@ test('DM responder falls back to a community reply when persona returns null or 
   assert.equal(await respond(second), true);
   assert.equal(second.replies.length, 1);
   assert.ok(second.replies[0].content.length > 0);
+  assert.equal(second.replies[0].components, undefined);
 });
 

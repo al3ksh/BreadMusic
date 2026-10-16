@@ -1,15 +1,23 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  RESPONSE_SCHEMA,
   SAFETY_SETTINGS,
   collectTasteHints,
   createDmPersona,
   getDmPersonaStatus,
+  getVoiceContext,
   sanitizePersonaOutput,
+  validatePersonaPicks,
 } = require('../src/utils/dmPersona');
 const { getGeminiStatus } = require('../src/music/autoplayAi');
 
-function geminiTextResponse(text, extra = {}) {
+function geminiJsonResponse(payload, extra = {}) {
+  const text = typeof payload === 'string'
+    ? payload
+    : payload == null
+      ? null
+      : JSON.stringify(payload);
   return {
     ok: true,
     status: 200,
@@ -27,7 +35,7 @@ function geminiTextResponse(text, extra = {}) {
   };
 }
 
-test('createDmPersona sends plain-text Gemini request with header, safetySettings, and user text as data', async () => {
+test('createDmPersona sends structured JSON Gemini request with header, safetySettings, responseSchema, and nowPlaying', async () => {
   let capturedUrl = '';
   let capturedRequest = null;
 
@@ -37,18 +45,33 @@ test('createDmPersona sends plain-text Gemini request with header, safetySetting
     fetchImpl: async (url, request) => {
       capturedUrl = url;
       capturedRequest = request;
-      return geminiTextResponse('Run /help in a server, I am just a loaf.');
+      return geminiJsonResponse({
+        reply: 'Run /help in a server, I am just a loaf.',
+        picks: [{ title: 'Harder, Better, Faster, Stronger', artist: 'Daft Punk' }],
+      });
     },
   });
 
-  const longMessage = `play despacito ${'x'.repeat(600)}`;
+  const longMessage = `recommend something ${'x'.repeat(600)}`;
+  const nowPlaying = {
+    guildName: 'Bread HQ',
+    channelName: 'Kitchen VC',
+    currentTrack: 'One More Time - Daft Punk',
+    queueLength: 4,
+    listeners: 3,
+    paused: false,
+  };
   const reply = await persona.reply({
     text: longMessage,
     userName: 'Baker',
     tasteHints: ['Numb - Linkin Park', 'One More Time - Daft Punk'],
+    nowPlaying,
   });
 
-  assert.equal(reply, 'Run /help in a server, I am just a loaf.');
+  assert.deepEqual(reply, {
+    text: 'Run /help in a server, I am just a loaf.',
+    picks: [{ title: 'Harder, Better, Faster, Stronger', artist: 'Daft Punk' }],
+  });
   assert.equal(
     capturedUrl,
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
@@ -60,16 +83,19 @@ test('createDmPersona sends plain-text Gemini request with header, safetySetting
   const body = JSON.parse(capturedRequest.body);
   assert.equal(typeof body.systemInstruction?.parts?.[0]?.text, 'string');
   assert.match(body.systemInstruction.parts[0].text, /loaf of bread/i);
+  assert.match(body.systemInstruction.parts[0].text, /nowPlaying/);
   assert.deepEqual(body.safetySettings, SAFETY_SETTINGS);
   assert.equal(body.generationConfig.temperature, 0.9);
-  assert.equal(body.generationConfig.maxOutputTokens, 120);
-  assert.equal(body.generationConfig.responseMimeType, undefined);
+  assert.equal(body.generationConfig.maxOutputTokens, 300);
+  assert.equal(body.generationConfig.responseMimeType, 'application/json');
+  assert.deepEqual(body.generationConfig.responseSchema, RESPONSE_SCHEMA);
 
   const userPayload = JSON.parse(body.contents[0].parts[0].text);
   assert.equal(userPayload.userName, 'Baker');
   assert.equal(userPayload.message.length, 500);
   assert.equal(userPayload.message, longMessage.slice(0, 500));
   assert.deepEqual(userPayload.recentRequests, ['Numb - Linkin Park', 'One More Time - Daft Punk']);
+  assert.deepEqual(userPayload.nowPlaying, nowPlaying);
 });
 
 test('sanitizePersonaOutput strips mentions, replaces em dashes, rejects URLs, and caps at a word boundary', () => {
@@ -93,17 +119,129 @@ test('sanitizePersonaOutput strips mentions, replaces em dashes, rejects URLs, a
   assert.equal(words.startsWith(`${capped} `), true);
 });
 
+test('validatePersonaPicks drops URLs, trims to 3 picks, and removes case-insensitive duplicates', () => {
+  const picks = validatePersonaPicks([
+    { title: '  Digital Love  ', artist: ' Daft Punk ' },
+    { title: 'digital love', artist: 'daft punk' },
+    { title: 'https://malicious.example/song', artist: 'Hacker' },
+    { title: 'Normal Song', artist: 'discord.gg/invite' },
+    { title: 'Too Long '.repeat(15), artist: 'Artist' },
+    { title: '', artist: 'Missing Title' },
+    { title: 'Track Two', artist: 'Artist Two' },
+    { title: 'Track Three', artist: 'Artist Three' },
+    { title: 'Track Four', artist: 'Artist Four' },
+  ]);
+
+  assert.deepEqual(picks, [
+    { title: 'Digital Love', artist: 'Daft Punk' },
+    { title: 'Track Two', artist: 'Artist Two' },
+    { title: 'Track Three', artist: 'Artist Three' },
+  ]);
+});
+
+test('getVoiceContext returns matching guild context, ignores guilds where Bread is elsewhere, and never leaks listener names', () => {
+  const otherGuild = {
+    id: 'guild-other',
+    name: 'Other Guild',
+    voiceStates: {
+      cache: new Map([
+        ['user-1', { id: 'user-1', channelId: 'vc-user' }],
+      ]),
+    },
+    channels: {
+      cache: new Map([
+        ['vc-user', { id: 'vc-user', name: 'General VC' }],
+      ]),
+    },
+  };
+
+  const matchingGuild = {
+    id: 'guild-match',
+    name: 'Bakery Server',
+    voiceStates: {
+      cache: new Map([
+        ['user-1', { id: 'user-1', channelId: 'vc-bread', member: { id: 'user-1', displayName: 'SecretAlice', user: { id: 'user-1', username: 'SecretAlice', bot: false } } }],
+        ['user-2', { id: 'user-2', channelId: 'vc-bread', member: { id: 'user-2', displayName: 'SecretBob', user: { id: 'user-2', username: 'SecretBob', bot: false } } }],
+        ['bot-id', { id: 'bot-id', channelId: 'vc-bread', member: { id: 'bot-id', displayName: 'BreadBot', user: { id: 'bot-id', username: 'BreadBot', bot: true } } }],
+        ['user-3', { id: 'user-3', channelId: 'vc-other', member: { id: 'user-3', displayName: 'SecretCharlie', user: { id: 'user-3', username: 'SecretCharlie', bot: false } } }],
+      ]),
+    },
+    channels: {
+      cache: new Map([
+        ['vc-bread', { id: 'vc-bread', name: 'Dough Lounge' }],
+      ]),
+    },
+  };
+
+  const client = {
+    user: { id: 'bot-id' },
+    guilds: {
+      cache: new Map([
+        ['guild-other', otherGuild],
+        ['guild-match', matchingGuild],
+      ]),
+    },
+    lavalink: {
+      players: new Map([
+        ['guild-other', { guildId: 'guild-other', voiceChannelId: 'vc-different', paused: false, queue: { current: null, tracks: [] } }],
+        [
+          'guild-match',
+          {
+            guildId: 'guild-match',
+            voiceChannelId: 'vc-bread',
+            paused: true,
+            queue: {
+              current: { info: { title: 'Veridis Quo', author: 'Daft Punk' } },
+              tracks: [{}, {}, {}],
+            },
+          },
+        ],
+      ]),
+    },
+  };
+
+  const context = getVoiceContext(client, 'user-1');
+  assert.deepEqual(context, {
+    guildName: 'Bakery Server',
+    channelName: 'Dough Lounge',
+    currentTrack: 'Veridis Quo - Daft Punk',
+    queueLength: 3,
+    listeners: 2,
+    paused: true,
+  });
+
+  const serialized = JSON.stringify(context);
+  assert.equal(serialized.includes('SecretAlice'), false);
+  assert.equal(serialized.includes('SecretBob'), false);
+  assert.equal(serialized.includes('SecretCharlie'), false);
+  assert.equal(serialized.includes('user-1'), false);
+  assert.equal(serialized.includes('user-2'), false);
+
+  const clientElsewhereOnly = {
+    user: { id: 'bot-id' },
+    guilds: {
+      cache: new Map([['guild-other', otherGuild]]),
+    },
+    lavalink: {
+      players: new Map([
+        ['guild-other', { guildId: 'guild-other', voiceChannelId: 'vc-different', paused: false, queue: { current: null, tracks: [] } }],
+      ]),
+    },
+  };
+  assert.equal(getVoiceContext(clientElsewhereOnly, 'user-1'), null);
+});
+
 test('createDmPersona returns null when Gemini finishes with SAFETY or promptFeedback blockReason', async () => {
   const safetyPersona = createDmPersona({
     apiKey: 'test-key',
-    fetchImpl: async () => geminiTextResponse('unsafe text', { finishReason: 'SAFETY' }),
+    fetchImpl: async () => geminiJsonResponse({ reply: 'unsafe text', picks: [] }, { finishReason: 'SAFETY' }),
   });
   assert.equal(await safetyPersona.reply({ text: 'hello' }), null);
   assert.equal(safetyPersona.getStatus().circuitOpen, false);
 
   const blockedPersona = createDmPersona({
     apiKey: 'test-key',
-    fetchImpl: async () => geminiTextResponse('blocked text', {
+    fetchImpl: async () => geminiJsonResponse({ reply: 'blocked text', picks: [] }, {
       promptFeedback: { blockReason: 'SAFETY' },
     }),
   });
@@ -129,7 +267,7 @@ test('createDmPersona opens its own circuit breaker on 429 without affecting aut
           },
         };
       }
-      return geminiTextResponse('Back online.');
+      return geminiJsonResponse({ reply: 'Back online.', picks: [] });
     },
   });
 
@@ -143,7 +281,10 @@ test('createDmPersona opens its own circuit breaker on 429 without affecting aut
   assert.equal(calls, 1);
 
   now += 31_000;
-  assert.equal(await persona.reply({ text: 'after breaker delay' }), 'Back online.');
+  assert.deepEqual(await persona.reply({ text: 'after breaker delay' }), {
+    text: 'Back online.',
+    picks: [],
+  });
   assert.equal(calls, 2);
   assert.equal(getDmPersonaStatus(now).circuitOpen, false);
   assert.equal(getDmPersonaStatus(now).healthy, true);
@@ -159,17 +300,17 @@ test('createDmPersona enforces the per-UTC-day call cap and resets on the next U
     now: () => now,
     fetchImpl: async () => {
       calls += 1;
-      return geminiTextResponse(`Reply ${calls}`);
+      return geminiJsonResponse({ reply: `Reply ${calls}`, picks: [] });
     },
   });
 
-  assert.equal(await persona.reply({ text: 'one' }), 'Reply 1');
-  assert.equal(await persona.reply({ text: 'two' }), 'Reply 2');
+  assert.deepEqual(await persona.reply({ text: 'one' }), { text: 'Reply 1', picks: [] });
+  assert.deepEqual(await persona.reply({ text: 'two' }), { text: 'Reply 2', picks: [] });
   assert.equal(await persona.reply({ text: 'three (capped)' }), null);
   assert.equal(calls, 2);
 
   now = Date.UTC(2026, 9, 17, 0, 0, 1);
-  assert.equal(await persona.reply({ text: 'next UTC day' }), 'Reply 3');
+  assert.deepEqual(await persona.reply({ text: 'next UTC day' }), { text: 'Reply 3', picks: [] });
   assert.equal(calls, 3);
 });
 
@@ -183,7 +324,7 @@ test('createDmPersona is disabled when no API key is set or GEMINI_DM_ENABLED is
       apiKey: '',
       fetchImpl: async () => {
         calls += 1;
-        return geminiTextResponse('Should not happen');
+        return geminiJsonResponse({ reply: 'Should not happen', picks: [] });
       },
     });
     assert.equal(await noKeyPersona.reply({ text: 'hi' }), null);
@@ -193,7 +334,7 @@ test('createDmPersona is disabled when no API key is set or GEMINI_DM_ENABLED is
       enabled: false,
       fetchImpl: async () => {
         calls += 1;
-        return geminiTextResponse('Should not happen');
+        return geminiJsonResponse({ reply: 'Should not happen', picks: [] });
       },
     });
     assert.equal(await disabledPersona.reply({ text: 'hi' }), null);

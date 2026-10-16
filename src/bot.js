@@ -30,7 +30,8 @@ const { createSelection } = require('./state/searchCache');
 const { deleteInteractionReply } = require('./utils/interactions');
 const { buildDashboardUrl } = require('./dashboard/url');
 const { createDmResponder } = require('./utils/dmResponder');
-const { collectTasteHints, createDmPersona } = require('./utils/dmPersona');
+const { collectTasteHints, createDmPersona, getVoiceContext } = require('./utils/dmPersona');
+const { DM_RECOMMEND_PREFIX, handleDmRecommendButton } = require('./utils/dmRecommendQueue');
 const { createPresenceRotation } = require('./utils/presenceRotation');
 const { QUEUE_BUTTON_PREFIX } = require('./music/queueFormatter');
 const { applyPreferredSource } = require('./music/searchUtils');
@@ -120,6 +121,7 @@ const handleDirectMessage = createDmResponder({
   contact: process.env.PRIVATE_ACCESS_CONTACT || 'aleksh8',
   persona: dmPersona,
   getTasteHints: (userId) => collectTasteHints(client, userId, getUserInsights),
+  getVoiceContext: (userId) => getVoiceContext(client, userId),
 });
 
 const activityRotation = [
@@ -486,6 +488,11 @@ client.on(Events.InteractionCreate, safeEventHandler('InteractionCreate', async 
 
       if (interaction.customId.startsWith(RPS_BUTTON_PREFIX)) {
         await handleRPSButton(interaction);
+        return;
+      }
+
+      if (interaction.customId.startsWith(DM_RECOMMEND_PREFIX)) {
+        await handleDmRecommendButton(interaction, { client, broadcastPlayerUpdate });
         return;
       }
     }

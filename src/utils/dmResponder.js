@@ -5,6 +5,13 @@ const {
   ButtonStyle,
   EmbedBuilder,
 } = require('discord.js');
+const { createSelection: defaultCreateSelection } = require('../state/searchCache');
+const { getVoiceContext: defaultGetVoiceContext, validatePersonaPicks } = require('./dmPersona');
+const {
+  DM_RECOMMEND_PREFIX,
+  DM_RECOMMEND_TTL_MS,
+  formatPickButtonLabel,
+} = require('./dmRecommendQueue');
 
 const DEFAULT_COOLDOWN_MS = 30_000;
 const DEFAULT_SUPPORT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
@@ -39,6 +46,17 @@ function waitFor(delayMs) {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
+function buildRecommendationRow(picks, userId, createSelection) {
+  const buttons = picks.slice(0, 3).map((pick) => {
+    const selectionId = createSelection([pick], userId, null, DM_RECOMMEND_TTL_MS);
+    return new ButtonBuilder()
+      .setCustomId(`${DM_RECOMMEND_PREFIX}${selectionId}`)
+      .setLabel(formatPickButtonLabel(pick))
+      .setStyle(ButtonStyle.Secondary);
+  });
+  return new ActionRowBuilder().addComponents(buttons);
+}
+
 function createDmResponder({
   cooldownMs = DEFAULT_COOLDOWN_MS,
   supportCooldownMs = DEFAULT_SUPPORT_COOLDOWN_MS,
@@ -50,6 +68,8 @@ function createDmResponder({
   wait = waitFor,
   persona = null,
   getTasteHints = null,
+  getVoiceContext = null,
+  createSelection = defaultCreateSelection,
 } = {}) {
   const userReplies = new Map();
   let previousCommunityReply = '';
@@ -90,6 +110,7 @@ function createDmResponder({
     });
 
     let replyContent = null;
+    let replyPicks = [];
     if (replyWithPersona) {
       await message.channel?.sendTyping?.().catch(() => {});
       let tasteHints = [];
@@ -101,6 +122,15 @@ function createDmResponder({
           tasteHints = [];
         }
       }
+      let nowPlaying = null;
+      const resolveVoiceContext = typeof getVoiceContext === 'function'
+        ? getVoiceContext
+        : (uid) => defaultGetVoiceContext(message.client, uid);
+      try {
+        nowPlaying = await resolveVoiceContext(userId);
+      } catch {
+        nowPlaying = null;
+      }
       try {
         const userName =
           message.author?.globalName ||
@@ -111,24 +141,43 @@ function createDmResponder({
           text: typeof message.content === 'string' ? message.content : '',
           userName,
           tasteHints,
+          nowPlaying: nowPlaying ?? null,
         });
         if (typeof personaReply === 'string' && personaReply.trim()) {
           replyContent = personaReply.trim();
+        } else if (personaReply && typeof personaReply === 'object') {
+          const textCandidate = typeof personaReply.text === 'string'
+            ? personaReply.text.trim()
+            : typeof personaReply.reply === 'string'
+              ? personaReply.reply.trim()
+              : '';
+          if (textCandidate) {
+            replyContent = textCandidate;
+            replyPicks = validatePersonaPicks(personaReply.picks);
+          }
         }
       } catch {
         replyContent = null;
+        replyPicks = [];
       }
     }
 
     if (!replyContent) {
       replyContent = pickCommunityReply();
+      replyPicks = [];
+    }
+
+    /** @type {Record<string, any>} */
+    const replyPayload = {
+      content: replyContent,
+      allowedMentions: { parse: [] },
+    };
+    if (replyPicks.length > 0) {
+      replyPayload.components = [buildRecommendationRow(replyPicks, userId, createSelection)];
     }
 
     try {
-      await message.reply({
-        content: replyContent,
-        allowedMentions: { parse: [] },
-      });
+      await message.reply(replyPayload);
     } catch (error) {
       const current = userReplies.get(userId);
       if (current?.jokeAt === timestamp) {
