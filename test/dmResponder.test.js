@@ -119,3 +119,76 @@ test('DM responder sends the support embed again after its longer cooldown', asy
   assert.equal(message.replies.length, 3);
   assert.equal(message.sends.length, 2);
 });
+
+test('DM responder uses persona reply, sends typing before replying, and passes taste hints on ~1 in 3 replies', async () => {
+  const personaCalls = [];
+  let timestamp = 10_000;
+  let roll = 0.1;
+
+  const respond = createDmResponder({
+    cooldownMs: 1,
+    now: () => timestamp,
+    random: () => roll,
+    wait: async () => {},
+    getTasteHints: (userId) => [`Track for ${userId} - Artist`],
+    persona: {
+      async reply(input) {
+        personaCalls.push(input);
+        return 'Crispy persona reply.';
+      },
+    },
+  });
+
+  const first = createMessage({
+    content: 'yo bread play my song',
+    author: { id: 'user-1', username: 'listener1', bot: false },
+  });
+  assert.equal(await respond(first), true);
+  assert.equal(first.replies[0].content, 'Crispy persona reply.');
+  assert.deepEqual(first.replies[0].allowedMentions, { parse: [] });
+  assert.deepEqual(first.typing, [true, true]);
+  assert.deepEqual(personaCalls[0], {
+    text: 'yo bread play my song',
+    userName: 'listener1',
+    tasteHints: ['Track for user-1 - Artist'],
+  });
+
+  timestamp += 10;
+  roll = 0.8;
+  const second = createMessage({
+    content: 'second dm',
+    author: { id: 'user-2', username: 'listener2', bot: false },
+  });
+  assert.equal(await respond(second), true);
+  assert.deepEqual(personaCalls[1].tasteHints, []);
+});
+
+test('DM responder falls back to a community reply when persona returns null or throws', async () => {
+  let timestamp = 10_000;
+  let shouldThrow = false;
+
+  const respond = createDmResponder({
+    cooldownMs: 1,
+    now: () => timestamp,
+    random: () => 0,
+    wait: async () => {},
+    persona: {
+      async reply() {
+        if (shouldThrow) throw new Error('Gemini exploded');
+        return null;
+      },
+    },
+  });
+
+  const first = createMessage({ author: { id: 'user-1', bot: false } });
+  assert.equal(await respond(first), true);
+  assert.match(first.replies[0].content, /Chat/);
+
+  timestamp += 10;
+  shouldThrow = true;
+  const second = createMessage({ author: { id: 'user-2', bot: false } });
+  assert.equal(await respond(second), true);
+  assert.equal(second.replies.length, 1);
+  assert.ok(second.replies[0].content.length > 0);
+});
+

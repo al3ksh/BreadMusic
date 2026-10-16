@@ -22,7 +22,7 @@ const { MusicUI, BUTTON_PREFIX } = require('./music/ui');
 const { clearVoteSkip, VOTE_SKIP_BUTTON_PREFIX } = require('./music/skipManager');
 const { isPlayerStopping } = require('./music/playerLifecycle');
 const { savePlayerState, hydratePlayer, flushQueueStore } = require('./state/queueStore');
-const { recordTrackPlay } = require('./state/analyticsStore');
+const { recordTrackPlay, getUserInsights } = require('./state/analyticsStore');
 const { isStreamTrack } = require('./music/autoplay/normalize');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
 const { getConfig, listConfigs } = require('./state/guildConfig');
@@ -30,6 +30,7 @@ const { createSelection } = require('./state/searchCache');
 const { deleteInteractionReply } = require('./utils/interactions');
 const { buildDashboardUrl } = require('./dashboard/url');
 const { createDmResponder } = require('./utils/dmResponder');
+const { collectTasteHints, createDmPersona } = require('./utils/dmPersona');
 const { createPresenceRotation } = require('./utils/presenceRotation');
 const { QUEUE_BUTTON_PREFIX } = require('./music/queueFormatter');
 const { applyPreferredSource } = require('./music/searchUtils');
@@ -113,9 +114,12 @@ const client = /** @type {BreadClient} */ (new Client({
   partials: [Partials.Channel],
 }));
 
+const dmPersona = createDmPersona();
 const handleDirectMessage = createDmResponder({
   dashboardUrl: `${String(process.env.WEB_URL || 'https://breadmusic.aleksh.xyz').replace(/\/$/, '')}/dashboard`,
   contact: process.env.PRIVATE_ACCESS_CONTACT || 'aleksh8',
+  persona: dmPersona,
+  getTasteHints: (userId) => collectTasteHints(client, userId, getUserInsights),
 });
 
 const activityRotation = [

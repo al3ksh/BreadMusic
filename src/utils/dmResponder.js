@@ -48,9 +48,16 @@ function createDmResponder({
   now = Date.now,
   random = Math.random,
   wait = waitFor,
+  persona = null,
+  getTasteHints = null,
 } = {}) {
   const userReplies = new Map();
   let previousCommunityReply = '';
+  const replyWithPersona = typeof persona?.reply === 'function'
+    ? persona.reply.bind(persona)
+    : typeof persona === 'function'
+      ? persona
+      : null;
 
   function pickCommunityReply() {
     let index = Math.floor(random() * COMMUNITY_REPLIES.length);
@@ -82,9 +89,44 @@ function createDmResponder({
       supportAt: shouldSendSupport ? timestamp : previous.supportAt,
     });
 
+    let replyContent = null;
+    if (replyWithPersona) {
+      await message.channel?.sendTyping?.().catch(() => {});
+      let tasteHints = [];
+      if (typeof getTasteHints === 'function' && random() < 1 / 3) {
+        try {
+          const resolvedHints = await getTasteHints(userId);
+          if (Array.isArray(resolvedHints)) tasteHints = resolvedHints;
+        } catch {
+          tasteHints = [];
+        }
+      }
+      try {
+        const userName =
+          message.author?.globalName ||
+          message.author?.displayName ||
+          message.author?.username ||
+          '';
+        const personaReply = await replyWithPersona({
+          text: typeof message.content === 'string' ? message.content : '',
+          userName,
+          tasteHints,
+        });
+        if (typeof personaReply === 'string' && personaReply.trim()) {
+          replyContent = personaReply.trim();
+        }
+      } catch {
+        replyContent = null;
+      }
+    }
+
+    if (!replyContent) {
+      replyContent = pickCommunityReply();
+    }
+
     try {
       await message.reply({
-        content: pickCommunityReply(),
+        content: replyContent,
         allowedMentions: { parse: [] },
       });
     } catch (error) {
