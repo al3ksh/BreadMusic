@@ -117,14 +117,25 @@ type PlayerClock = {
   paused: boolean;
 };
 
-// Entrance animations the karaoke morph replaces (see .activity-vt-karaoke in globals.css).
-const KARAOKE_ENTRANCES = new Set([
+// Entrance animations the karaoke and game morphs replace (see .activity-vt-karaoke and
+// .activity-vt-game in globals.css).
+const STAGE_ENTRANCES = new Set([
   'activity-player-arrive',
   'activity-karaoke-arrive',
   'activity-karaoke-content-in',
   'activity-art-swap',
   'activity-title-swap',
 ]);
+
+// The morph already showed the new layout; jump its entrance animations to the end in the same
+// frame so they do not replay as a flash.
+function finishStageEntrances(selector: string) {
+  document.querySelectorAll(selector).forEach((stage) => {
+    stage.getAnimations({ subtree: true }).forEach((animation) => {
+      if (animation instanceof CSSAnimation && STAGE_ENTRANCES.has(animation.animationName)) animation.finish();
+    });
+  });
+}
 
 const EMPTY_STATUS: PlayerStatus = {
   connected: false,
@@ -1407,13 +1418,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
     const transition = document.startViewTransition(() => flushSync(apply));
     transition.finished.finally(() => {
       root.classList.remove('activity-vt-karaoke');
-      // The morph already showed the new layout; jump its entrance animations to the end in the
-      // same frame so they do not replay as a flash.
-      document.querySelectorAll('.activity-player-stage, .activity-karaoke-stage').forEach((stage) => {
-        stage.getAnimations({ subtree: true }).forEach((animation) => {
-          if (animation instanceof CSSAnimation && KARAOKE_ENTRANCES.has(animation.animationName)) animation.finish();
-        });
-      });
+      finishStageEntrances('.activity-player-stage, .activity-karaoke-stage');
     });
   }, []);
 
@@ -1445,11 +1450,31 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
   const [gameOpen, setGameOpen] = useState(false);
   const [gameMode, setGameMode] = useState<RunnerMode>('idle');
   const trackArtRef = useRef<HTMLButtonElement | null>(null);
-  const closeGame = useCallback(() => {
-    setGameOpen(false);
-    setGameMode('idle');
-    window.requestAnimationFrame(() => trackArtRef.current?.focus({ preventScroll: true }));
+
+  // The cover grows into the game board and the board folds back into it where View Transitions exist.
+  const switchGame = useCallback((open: boolean) => {
+    const apply = () => {
+      flushSync(() => {
+        setGameOpen(open);
+        if (!open) setGameMode('idle');
+      });
+      if (!open) trackArtRef.current?.focus({ preventScroll: true });
+    };
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion || typeof document.startViewTransition !== 'function') {
+      apply();
+      return;
+    }
+    const root = document.documentElement;
+    root.classList.add('activity-vt-game');
+    const transition = document.startViewTransition(apply);
+    transition.finished.finally(() => {
+      root.classList.remove('activity-vt-game');
+      finishStageEntrances('.activity-player-stage, .activity-game-stage');
+    });
   }, []);
+  const openGame = useCallback(() => switchGame(true), [switchGame]);
+  const closeGame = useCallback(() => switchGame(false), [switchGame]);
 
   // A song starting hands the view back to the player, but never pulls a run out from under someone.
   useEffect(() => {
@@ -1826,10 +1851,10 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
         {gameOpen ? (
         <section className="activity-game-stage">
           <div className="activity-game-bar" data-live={hasTrack || undefined}>
-            <div className="activity-game-mark">
-              {hasTrack ? <ActivityArtwork key={trackKey} src={status.currentTrack?.artwork} /> : <Gamepad2 size={20} aria-hidden="true" />}
+            <div key={hasTrack ? `mark-${trackKey}` : 'mark-idle'} className="activity-game-mark">
+              {hasTrack ? <ActivityArtwork src={status.currentTrack?.artwork} /> : <Gamepad2 size={20} aria-hidden="true" />}
             </div>
-            <div className="activity-game-copy" aria-live="polite">
+            <div key={hasTrack ? 'copy-live' : 'copy-idle'} className="activity-game-copy" aria-live="polite">
               <strong>{hasTrack ? 'Now playing' : 'Nothing is playing yet'}</strong>
               <span>{hasTrack ? status.currentTrack?.title : 'Add music any time and the game steps aside.'}</span>
             </div>
@@ -1854,7 +1879,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
             type="button"
             className="activity-track-art"
             aria-busy={karaokePending}
-            onClick={hasTrack ? openKaraoke : () => setGameOpen(true)}
+            onClick={hasTrack ? openKaraoke : openGame}
             aria-label={hasTrack ? 'Open karaoke' : 'Play a round'}
             title={hasTrack ? 'Open karaoke' : 'Play a round'}
           >
