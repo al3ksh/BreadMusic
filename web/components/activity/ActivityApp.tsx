@@ -8,10 +8,12 @@ import {
   Bot,
   CheckCircle2,
   Disc3,
+  Gamepad2,
   GripVertical,
   Info,
   KeyRound,
   Mic2,
+  Play,
   PlugZap,
   RefreshCw,
   Server,
@@ -24,6 +26,8 @@ import type { DashboardCapabilities, HistoryPage, LyricsResult, PlayerStatus, Qu
 import { ActivityArtwork, ActivitySpinner } from '@/components/activity/ActivityArtwork';
 import { ActivityPlayerControls } from '@/components/activity/ActivityPlayerControls';
 import { ActivityOutageScreen } from '@/components/activity/ActivityOutageScreen';
+import { ActivityRunnerGame } from '@/components/activity/ActivityRunnerGame';
+import type { RunnerMode } from '@/components/activity/runner/render';
 import { ActivityAutoplayBadge } from '@/components/activity/ActivityAutoplayBadge';
 import { ActivityHeartButton } from '@/components/activity/ActivityHeartButton';
 import { ActivityPanelNav } from '@/components/activity/ActivityPanelNav';
@@ -74,6 +78,8 @@ const ACTIVITY_ERROR_VISUALS: Record<ActivityErrorKind, { icon: typeof Bot; titl
 const ACTIVITY_GAME_KINDS = new Set<ActivityErrorKind>(['discord', 'lavalink', 'voice', 'private', 'generic']);
 // Outages the screen watches for in the background, so it can return to the player by itself.
 const ACTIVITY_RECOVERABLE_KINDS = new Set<ActivityErrorKind>(['discord', 'lavalink']);
+// How long the "Burnt!" screen stays up before a song that started mid-run takes the view back.
+const GAME_HANDBACK_MS = 1400;
 const BOT_UNREACHABLE_MESSAGE = 'Bread is not responding right now. Try again in a moment.';
 type ActivityPanel = 'queue' | 'search' | 'lyrics' | 'sound' | 'library' | null;
 const ACTIVITY_PANEL_TITLES: Record<Exclude<ActivityPanel, null>, string> = {
@@ -1435,6 +1441,23 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
   }, [currentTrackUri, enterKaraoke, karaokePendingUri, lyricsLoading, lyricsTrackUri, notify, syncedLyrics.length]);
   const karaokePending = Boolean(karaokePendingUri) && karaokePendingUri === currentTrackUri;
 
+  // With nothing playing, the cover opens the runner in the player's place.
+  const [gameOpen, setGameOpen] = useState(false);
+  const [gameMode, setGameMode] = useState<RunnerMode>('idle');
+  const trackArtRef = useRef<HTMLButtonElement | null>(null);
+  const closeGame = useCallback(() => {
+    setGameOpen(false);
+    setGameMode('idle');
+    window.requestAnimationFrame(() => trackArtRef.current?.focus({ preventScroll: true }));
+  }, []);
+
+  // A song starting hands the view back to the player, but never pulls a run out from under someone.
+  useEffect(() => {
+    if (!gameOpen || !hasTrack || gameMode === 'running' || gameMode === 'paused') return;
+    const timer = window.setTimeout(closeGame, gameMode === 'over' ? GAME_HANDBACK_MS : 0);
+    return () => window.clearTimeout(timer);
+  }, [closeGame, gameMode, gameOpen, hasTrack]);
+
   // The next track may have no synced lyrics; leave karaoke with the same morph that opened it.
   useEffect(() => {
     if (!karaokeEnabled || lyricsLoading) return;
@@ -1800,23 +1823,46 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
           </div>
         </section>
 
+        {gameOpen ? (
+        <section className="activity-game-stage">
+          <div className="activity-game-bar" data-live={hasTrack || undefined}>
+            <div className="activity-game-mark">
+              {hasTrack ? <ActivityArtwork key={trackKey} src={status.currentTrack?.artwork} /> : <Gamepad2 size={20} aria-hidden="true" />}
+            </div>
+            <div className="activity-game-copy" aria-live="polite">
+              <strong>{hasTrack ? 'Now playing' : 'Nothing is playing yet'}</strong>
+              <span>{hasTrack ? status.currentTrack?.title : 'Add music any time and the game steps aside.'}</span>
+            </div>
+            <button type="button" className={`activity-error-button${hasTrack ? ' primary' : ''}`} onClick={closeGame}>
+              {hasTrack ? <Play size={16} aria-hidden="true" /> : <X size={16} aria-hidden="true" />}
+              <span>{hasTrack ? 'Open player' : 'Back to player'}</span>
+            </button>
+          </div>
+          <ActivityRunnerGame
+            size="stage"
+            autoFocus
+            ducked={hasTrack}
+            suspended={Boolean(activePanel)}
+            onModeChange={setGameMode}
+            onExit={closeGame}
+          />
+        </section>
+        ) : (
         <section className={`activity-player-stage ${status.paused ? 'is-paused' : 'is-playing'}`}>
           <button
+            ref={trackArtRef}
             type="button"
             className="activity-track-art"
-            disabled={!hasTrack}
             aria-busy={karaokePending}
-            onClick={openKaraoke}
-            aria-label="Open karaoke"
-            title="Open karaoke"
+            onClick={hasTrack ? openKaraoke : () => setGameOpen(true)}
+            aria-label={hasTrack ? 'Open karaoke' : 'Play a round'}
+            title={hasTrack ? 'Open karaoke' : 'Play a round'}
           >
             <ActivityArtwork key={trackKey} src={status.currentTrack?.artwork} large />
             {hasTrack && <span className={`activity-playing-indicator ${status.paused ? 'paused' : ''}`} />}
-            {hasTrack && (
-              <span className={`activity-track-art-hint${karaokePending ? ' is-pending' : ''}`} aria-hidden="true">
-                {karaokePending ? <><ActivitySpinner /> Finding lyrics</> : <><Mic2 size={15} /> Karaoke</>}
-              </span>
-            )}
+            <span className={`activity-track-art-hint${karaokePending ? ' is-pending' : ''}`} aria-hidden="true">
+              {!hasTrack ? <><Gamepad2 size={15} /> Play a round</> : karaokePending ? <><ActivitySpinner /> Finding lyrics</> : <><Mic2 size={15} /> Karaoke</>}
+            </span>
           </button>
 
           <div className="activity-player-main">
@@ -1868,6 +1914,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
             {hasTrack && renderPlayerControls(true)}
           </div>
         </section>
+        )}
         </>
         )}
 

@@ -3258,6 +3258,110 @@ button.activity-track-art[aria-busy='true'] { cursor: progress; }
 
 button.activity-track-art:active:not(:disabled) { transform: scale(0.98); }
 
+/* With nothing playing the cover opens the runner, which takes the player's place above the dock. */
+.activity-game-stage {
+  display: flex;
+  width: min(100%, 1040px);
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  animation: activity-player-arrive 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.activity-game-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: #121215;
+  transition: border-color 220ms ease;
+}
+
+.activity-game-bar[data-live] { border-color: rgba(162, 156, 229, 0.35); }
+
+.activity-game-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  color: #aaa4ed;
+  background: #1b1b1f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.activity-game-mark > * { width: 100%; height: 100%; }
+.activity-game-mark > svg { width: 20px; height: 20px; }
+
+.activity-game-copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.activity-game-copy strong {
+  color: #f3f3f7;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.activity-game-bar[data-live] .activity-game-copy strong { color: #c9c4ff; }
+
+.activity-game-copy span {
+  overflow: hidden;
+  color: #8d8aa8;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-game-bar .activity-error-button {
+  flex: none;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.activity-game-stage .activity-runner {
+  flex: 1;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.activity-game-stage .activity-runner-board { padding: 10px 14px 12px; }
+.activity-game-stage .activity-runner-hint { font-size: 13px; }
+
+@media (max-width: 560px) {
+  .activity-game-bar .activity-error-button { width: 34px; padding: 0; }
+
+  /* On a tall phone the board sits under the bar instead of floating mid-screen. */
+  .activity-game-stage .activity-runner { justify-content: flex-start; }
+
+  /* Icon-only on narrow screens; the label stays as the button's accessible name. */
+  .activity-game-bar .activity-error-button > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* The glanceable compact surface has no room for a game. */
+@media (max-width: 600px) and (max-height: 360px) {
+  .activity-game-stage { display: none; }
+}
+
 /* A dot on the volume trigger shows the sound is shaped. */
 .activity-volume-control.has-sound .activity-volume-trigger::after {
   position: absolute;

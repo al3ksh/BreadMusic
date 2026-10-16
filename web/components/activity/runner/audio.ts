@@ -15,6 +15,10 @@ import { arrange, chordAt, chordTone, LAYERS, layersFor, STEPS_PER_BEAT, type La
 const LOOKAHEAD = 0.18;
 const DRIFT_LIMIT = 0.03;
 const MASTER_LEVEL = 0.26;
+const MUSIC_LEVEL = 0.8;
+const EFFECTS_LEVEL = 4;
+/** What is left of the effects while the bot is playing: there to feel the jumps, not to compete. */
+const DUCKED_EFFECTS = 0.45;
 const STEPS_PER_SECTION = BEATS_PER_SECTION * STEPS_PER_BEAT;
 /** The echo repeats a dotted eighth later, so it lands between the notes instead of on them. */
 const ECHO_BEATS = 0.75;
@@ -72,11 +76,13 @@ export class RunnerAudio {
   private muted: boolean;
 
   /** Must be called from a user gesture, or the browser keeps the context suspended. */
-  static create(muted: boolean): RunnerAudio | null {
+  static create(muted: boolean, ducked = false): RunnerAudio | null {
     const Context = audioContextClass();
     if (!Context) return null;
     try {
-      return new RunnerAudio(new Context({ latencyHint: 'interactive' }), muted);
+      const audio = new RunnerAudio(new Context({ latencyHint: 'interactive' }), muted);
+      if (ducked) audio.setDucked(true, 0);
+      return audio;
     } catch {
       return null;
     }
@@ -93,10 +99,10 @@ export class RunnerAudio {
     this.master.gain.value = muted ? 0 : MASTER_LEVEL;
     this.master.connect(compressor);
     this.music = ctx.createGain();
-    this.music.gain.value = 0.8;
+    this.music.gain.value = MUSIC_LEVEL;
     this.music.connect(this.master);
     this.effects = ctx.createGain();
-    this.effects.gain.value = 4;
+    this.effects.gain.value = EFFECTS_LEVEL;
     this.effects.connect(this.master);
 
     // Echo: each repeat a little quieter and darker than the last.
@@ -129,6 +135,21 @@ export class RunnerAudio {
     this.pulse = pulseWave(ctx, 0.25);
     this.thinPulse = pulseWave(ctx, 0.125);
     void ctx.resume().catch(() => undefined);
+  }
+
+  /**
+   * Steps aside for the bot: the loop fades out and the effects drop back, so a song started in
+   * the voice channel is not fighting the game. The loop keeps time underneath, ready to return.
+   */
+  setDucked(ducked: boolean, fade = 0.6) {
+    const now = this.ctx.currentTime;
+    const ramp = (param: AudioParam, value: number) => {
+      param.cancelScheduledValues(now);
+      if (fade > 0) param.setTargetAtTime(value, now, fade / 3);
+      else param.setValueAtTime(value, now);
+    };
+    ramp(this.music.gain, ducked ? 0 : MUSIC_LEVEL);
+    ramp(this.effects.gain, ducked ? EFFECTS_LEVEL * DUCKED_EFFECTS : EFFECTS_LEVEL);
   }
 
   setMuted(muted: boolean) {

@@ -6,8 +6,9 @@ import { RunnerAudio, type RunnerSound } from './runner/audio';
 import { bpmAt, createWorld, inFever, multiplier, press, step, type RunnerCue, type RunnerWorld } from './runner/engine';
 import { applyCues, clearFx, createFx, drawScene, smoulder, updateFx, type RunnerMode } from './runner/render';
 
-// A rhythm runner for the Activity outage screens: a slice of toast jumps kitchen hazards and
-// equalizer bars to a chiptune loop. Jumps on the beat build a combo; the tempo climbs as you go.
+// A rhythm runner for the Activity outage screens and the idle player: a slice of toast jumps
+// kitchen hazards and equalizer bars to a chiptune loop. Jumps on the beat build a combo; the tempo
+// climbs as you go.
 
 const BEST_KEY = 'bread-activity-runner-best';
 const MUTED_KEY = 'bread-activity-runner-muted';
@@ -78,7 +79,20 @@ function measure(cssWidth: number, cssHeight: number, size: Size) {
   return { scale, ratio, width: gameWidth, height: gameHeight };
 }
 
-export function ActivityRunnerGame({ size, onStart }: { size: Size; onStart?: () => void }) {
+type RunnerGameProps = {
+  size: Size;
+  onStart?: () => void;
+  onModeChange?: (mode: RunnerMode) => void;
+  /** Escape while no run is going asks to leave the game. */
+  onExit?: () => void;
+  /** The bot is playing: the loop steps aside so the game does not talk over the song. */
+  ducked?: boolean;
+  /** Something sits on top of the game; the run pauses and keys are left alone. */
+  suspended?: boolean;
+  autoFocus?: boolean;
+};
+
+export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked = false, suspended = false, autoFocus = false }: RunnerGameProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const screenRef = useRef<HTMLDivElement | null>(null);
@@ -88,6 +102,11 @@ export function ActivityRunnerGame({ size, onStart }: { size: Size; onStart?: ()
   const comboCountRef = useRef<HTMLSpanElement | null>(null);
   const comboMultRef = useRef<HTMLElement | null>(null);
   const onStartRef = useRef(onStart);
+  const onModeChangeRef = useRef(onModeChange);
+  const onExitRef = useRef(onExit);
+  const duckedRef = useRef(ducked);
+  const suspendedRef = useRef(suspended);
+  const modeRef = useRef<RunnerMode>('idle');
   const viewRef = useRef({ scale: 1, width: 200, height: MIN_HEIGHT });
   const pressRef = useRef<(() => void) | null>(null);
   const pauseRef = useRef<(() => void) | null>(null);
@@ -101,7 +120,23 @@ export function ActivityRunnerGame({ size, onStart }: { size: Size; onStart?: ()
 
   useEffect(() => {
     onStartRef.current = onStart;
-  }, [onStart]);
+    onModeChangeRef.current = onModeChange;
+    onExitRef.current = onExit;
+  }, [onStart, onModeChange, onExit]);
+
+  useEffect(() => {
+    duckedRef.current = ducked;
+    audioRef.current?.setDucked(ducked);
+  }, [ducked]);
+
+  useEffect(() => {
+    suspendedRef.current = suspended;
+    if (suspended) pauseRef.current?.();
+  }, [suspended]);
+
+  useEffect(() => {
+    if (autoFocus) wrapperRef.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
 
   useEffect(() => {
     const storedMuted = readStored(MUTED_KEY) === '1';
@@ -164,7 +199,9 @@ export function ActivityRunnerGame({ size, onStart }: { size: Size; onStart?: ()
 
     const changeMode = (next: RunnerMode) => {
       gameMode = next;
+      modeRef.current = next;
       setMode(next);
+      onModeChangeRef.current?.(next);
     };
 
     // Score and combo change many times a second, so they skip React and write to the DOM.
@@ -255,7 +292,7 @@ export function ActivityRunnerGame({ size, onStart }: { size: Size; onStart?: ()
       clearFx(fx);
       showScore();
       // Created inside the gesture: browsers only allow sound to start from one.
-      if (!audioRef.current) audioRef.current = RunnerAudio.create(mutedRef.current);
+      if (!audioRef.current) audioRef.current = RunnerAudio.create(mutedRef.current, duckedRef.current);
       changeMode('running');
       wrapperRef.current?.focus({ preventScroll: true });
       run();
@@ -315,12 +352,14 @@ export function ActivityRunnerGame({ size, onStart }: { size: Size; onStart?: ()
       return !target?.closest('button, a, input, textarea, select, [contenteditable="true"]');
     };
     const handleDown = (event: KeyboardEvent) => {
-      if (!ownsKeyboard(event)) return;
+      if (suspendedRef.current || !ownsKeyboard(event)) return;
       if (event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW') {
         event.preventDefault();
         if (!event.repeat) pressRef.current?.();
       } else if (event.code === 'KeyM' && !event.repeat) {
         toggleMuted();
+      } else if (event.code === 'Escape' && modeRef.current !== 'running' && onExitRef.current) {
+        onExitRef.current();
       } else if (event.code === 'Escape' || event.code === 'KeyP') {
         pauseRef.current?.();
       }
