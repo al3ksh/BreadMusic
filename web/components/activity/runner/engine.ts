@@ -7,7 +7,8 @@
 //
 // The run is shaped like a song. After a short intro the sections go verse, chorus, breakdown,
 // drop and round again: the breakdown trades obstacles for a run of notes and a build, and the
-// drop comes back harder. Hits in a row charge fever, a few bars of double points.
+// drop comes back harder; the back half of a breakdown slips obstacles in among the notes.
+// Hits in a row charge fever, a few bars of double points.
 //
 // Sections are built from authored eight-beat phrases rather than random gaps: a phrase plays
 // twice so it can be learned, then a twist and a fill. Pans hang from above and must be run
@@ -22,14 +23,15 @@ export const TOAST_CENTER = TOAST_X + TOAST_WIDTH / 2;
 export const GROUND_MARGIN = 10;
 export const BEATS_PER_SECTION = 32;
 
-const START_BPM = 112;
-const BPM_STEP = 4;
-const MAX_BPM = 168;
+const START_BPM = 124;
+const BPM_STEP = 6;
+const MAX_BPM = 172;
 const MAX_SECTION = (MAX_BPM - START_BPM) / BPM_STEP;
 
-const GRAVITY = 1400;
+// A quick, heavy arc, so jumps a beat and a half apart still fit at full tempo.
+const GRAVITY = 1900;
 // Every jump has the same arc, so a press on the beat always peaks over the obstacle.
-const JUMP_VELOCITY = 340;
+const JUMP_VELOCITY = 396;
 export const AIRTIME = (2 * JUMP_VELOCITY) / GRAVITY;
 export const JUMP_HEIGHT = (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * GRAVITY);
 
@@ -45,13 +47,16 @@ const GLIDE_AIRTIME = (() => {
 })();
 // A grill's near edge meets the toast this long after the ideal press, safely off the ground.
 const GRILL_LEAD = 0.15;
+// Room a pan leaves after the jump before it, enough for a press that is late but still good.
+const PAN_MARGIN = 0.09;
 
 const PERFECT_WINDOW = 0.055;
 const GOOD_WINDOW = 0.1;
 const JUMP_BUFFER = 0.1;
-const FIRST_PRESS_BEAT = 8;
+const FIRST_PRESS_BEAT = 4;
 // Time a player needs between two jumps: the airtime plus a moment on the ground.
-const MIN_GAP_SECONDS = AIRTIME + 0.16;
+const GROUND_TIME = 0.1;
+const MIN_GAP_SECONDS = AIRTIME + GROUND_TIME;
 const SUBSTEP = 1 / 240;
 const MAX_FRAME = 0.05;
 
@@ -60,6 +65,8 @@ export const FEVER_CHARGE = 24;
 export const FEVER_BEATS = 16;
 // Notes stop this many beats into a breakdown; the rest of it is the build into the drop.
 const BREAKDOWN_NOTES_UNTIL = 26;
+// From this many beats in, a breakdown mixes obstacles and pans in among the notes.
+const BREAKDOWN_MIX_FROM = 14;
 
 export type SectionKind = 'intro' | 'verse' | 'chorus' | 'breakdown' | 'drop';
 const SONG_CYCLE: SectionKind[] = ['verse', 'chorus', 'breakdown', 'drop'];
@@ -139,7 +146,9 @@ export type RunnerWorld = {
   velocity: number;
   bufferedUntil: number;
   landedAt: number;
-  /** Button held down: past the top of a jump the toast floats. */
+  /** The button is down. */
+  pressing: boolean;
+  /** The button has been down since take-off, so past the top of the jump the toast floats. */
   holding: boolean;
   glideTime: number;
   events: RunnerEvent[];
@@ -189,6 +198,7 @@ export function createWorld(seed = Math.floor(Math.random() * 2 ** 32)): RunnerW
     velocity: 0,
     bufferedUntil: -Infinity,
     landedAt: -Infinity,
+    pressing: false,
     holding: false,
     glideTime: 0,
     events: [],
@@ -268,48 +278,49 @@ type PhrasePool = { a: string[]; b: string[]; c: string[] };
 type Phrase = { pattern: string; kinds: (ObstacleKind | null)[] };
 
 const INTRO: PhrasePool = {
-  a: ['o.......o.......', 'o.......o...n...'],
-  b: ['o...o.......o...', 'o.......n...o...'],
-  c: ['o...n...o...o...', 'o...o...o.......'],
+  a: ['o...o...o...o...', 'o...o...o..o....'],
+  b: ['o...o..o....n...', 'o..o....o...n...'],
+  c: ['o...n...o..o....', 'o..o..o.....n...'],
 };
 
 // Indexed by lap: pans first turn up in the first chorus and grills in the first drop, then
-// everything mixes from the second time round.
+// everything mixes from the second time round. Most gaps are a beat and a half, so the toast
+// is rarely on the ground for long.
 const PHRASES: Record<'verse' | 'chorus' | 'drop', PhrasePool[]> = {
   verse: [
     {
-      a: ['o...o...o...n...', 'o.......o...o...', 'o...n...o.......', 'O.......o...n...'],
-      b: ['o...o..o....n...', 'O.......n...O...', 'o...n...n...o...'],
-      c: ['o...o...o...o...', 'O.......o..o....', 'n...n...o.......'],
+      a: ['o..o....o..o....', 'o...o..o....n...', 'O...o..o..o.....', 'o..o..o.....n...'],
+      b: ['o..o..o..o......', 'O.....o..o..n...', 'o...n..n..o.....'],
+      c: ['o..o..o..o..o...', 'O...O..o..n..n..', 'n..n..o..o......'],
     },
     {
-      a: ['o...h.o.o...n...', 'O.......h.o.o...', 'o...o...g.......', 'o...n...O...h.o.'],
-      b: ['h.o.....h.o.n...', 'g.........o...o.', 'O...o...h...O...'],
-      c: ['o...o...o...O...', 'G...........n...', 'h.o.h.o.o...o...'],
+      a: ['o..h.o..h.o..n..', 'o..o..h.o..o....', 'g.......o..h.o..', 'O..h.o..o..n....'],
+      b: ['h.o..h.o..h.o...', 'G.........o..n..', 'o..h.o..g.......'],
+      c: ['o..o..o..o..o...', 'h.o..h.o..o..n..', 'G.........h.o...'],
     },
   ],
   chorus: [
     {
-      a: ['o...h...o...h...', 'o.......h.o.....', 'o...o...h...o...', 'O...n...h.o.....'],
-      b: ['h.o.....h.o.....', 'o...h.o.n...o...', 'O.......h...n...'],
-      c: ['O...n...h...h.o.', 'o...o...h.o.n...', 'h...h...o...O...'],
+      a: ['o..h.o..o..h.o..', 'o...h.o..o..n...', 'O..h.o..h.o.....', 'o..o..h.o..n....'],
+      b: ['h.o..h.o..h.o...', 'o..h.o..o..o....', 'h.h.o..h.o..n...'],
+      c: ['O..h.o..O..h.o..', 'o..o..o..h.o....', 'h.h.o..o..o..n..'],
     },
     {
-      a: ['h.o.O...h.o.n...', 'o...h.o.O...h...', 'g.........h.o...', 'O...h...h.o.n...'],
-      b: ['G...........h.o.', 'h.o.h.o.O...n...', 'o...g...........'],
-      c: ['h.o.O...h.o.O...', 'g.........o...o.', 'O...h...n...h.o.'],
+      a: ['h.o..h..g.......', 'o..h.o..O..h.o..', 'g.......h.o..n..', 'O..h.o..h.o..n..'],
+      b: ['G.........h.o...', 'h.h.o..o..g.....', 'o..o..h.o..h.o..'],
+      c: ['h.o..h.o..h.o...', 'g.......O..h.o..', 'o..h.o..h.o..h..'],
     },
   ],
   drop: [
     {
-      a: ['g...........o...', 'o...o...g.......', 'O...o...O...n...', 'g.........o...o.'],
-      b: ['O...h.o.O...h.o.', 'o...n...g.......', 'G...........o...'],
-      c: ['g.......o...o...', 'O...o...O...o...', 'h.o.O...n...O...'],
+      a: ['g.......o..o....', 'o..o..g.........', 'O..o..O..o..n...', 'g.......o..h.o..'],
+      b: ['O..h.o..O..h.o..', 'o..o..o..g......', 'G.........o..n..'],
+      c: ['o..o..o..o..o...', 'g.......O..o....', 'h.o..o..o..o....'],
     },
     {
-      a: ['G.........h.o...', 'O...h.o.g.......', 'g.........O...n.', 'h.o.O...h.o.O...'],
-      b: ['G...........O...', 'O...h.o.h.o.n...', 'g.........h.o.n.'],
-      c: ['O...O...h.o.O...', 'G.........o...n.', 'h.o.g...........'],
+      a: ['G.........o..o..', 'O..h.o..g.......', 'g.........O..o..', 'h.o..h.o..o..o..'],
+      b: ['O..o..O..h.o....', 'G.........h.o...', 'o..o..o..o..g...'],
+      c: ['o..o..o..o..o...', 'O..h.o..h.o..h..', 'g.........h.o...'],
     },
   ],
 };
@@ -363,7 +374,7 @@ function placeStep(world: RunnerWorld, step: string, kind: ObstacleKind | null, 
   if (step === 'h') {
     const reach = passing(beat, OBSTACLE_SPRITES.pan.width);
     // Back on the ground before the pan arrives, and no jump until it has gone.
-    if (time - reach < world.lastPressTime + world.airtime + 0.06) return;
+    if (time - reach < world.lastPressTime + world.airtime + PAN_MARGIN) return;
     addEvent(world, 'overhead', 'pan', beat);
     world.freeAt = Math.max(world.freeAt, time + reach + 0.04);
     return;
@@ -375,16 +386,20 @@ function placeStep(world: RunnerWorld, step: string, kind: ObstacleKind | null, 
   else addEvent(world, 'obstacle', kind, beat);
   world.lastPressTime = time;
   world.airtime = grill ? GLIDE_AIRTIME : AIRTIME;
-  world.freeAt = time + world.airtime + (MIN_GAP_SECONDS - AIRTIME);
+  world.freeAt = time + world.airtime + GROUND_TIME;
 }
 
-/** A breakdown has no obstacles: a run of notes to jump for, then a few empty beats of build. */
+/** A breakdown is a run of notes that turns into a gauntlet, then a few empty beats of build. */
 function planBreakdown(world: RunnerWorld, section: number) {
   const start = section * BEATS_PER_SECTION;
   let beat = Math.ceil(Math.max(beatAtTime(world.freeAt), start + 2) * 2) / 2;
+  let gap = 2;
   while (beat <= start + BREAKDOWN_NOTES_UNTIL) {
-    placeStep(world, 'n', null, beat);
-    let gap = weighted(world.random, [[2, 3], [1.5, 2], [1, 2], [3, 1]]);
+    let step = beat < start + BREAKDOWN_MIX_FROM ? 'n' : weighted(world.random, [['n', 3], ['o', 2], ['h', 2]]);
+    // A pan right after a jump leaves no room for a late one.
+    if (step === 'h' && gap < 1.5) step = 'n';
+    placeStep(world, step, step === 'o' ? pickObstacle(world.random, section, false) : null, beat);
+    gap = weighted(world.random, [[1.5, 4], [2, 2], [1, 1]]);
     while (gap < minGapBeats(beat)) gap += 0.5;
     beat += gap;
   }
@@ -401,13 +416,12 @@ function plan(world: RunnerWorld, untilBeat: number) {
       continue;
     }
     if (world.phrases?.section !== section) world.phrases = { section, set: phrasesFor(world, section) };
-    // The intro's first phrase stays empty so there is time to find the beat.
-    if (start >= FIRST_PRESS_BEAT) {
-      const phrase = world.phrases.set[Math.floor((start - section * BEATS_PER_SECTION) / 8)];
-      [...phrase.pattern].forEach((step, position) => {
-        if (step !== '.') placeStep(world, step, phrase.kinds[position], start + position / 2);
-      });
-    }
+    // The first beats of the run stay empty so there is time to find the beat.
+    const phrase = world.phrases.set[Math.floor((start - section * BEATS_PER_SECTION) / 8)];
+    [...phrase.pattern].forEach((step, position) => {
+      const beat = start + position / 2;
+      if (step !== '.' && beat >= FIRST_PRESS_BEAT) placeStep(world, step, phrase.kinds[position], beat);
+    });
     world.nextPhraseBeat = start + 8;
   }
 }
@@ -424,6 +438,8 @@ export function noteLift() {
 function takeOff(world: RunnerWorld, cues: RunnerCue[]) {
   world.velocity = JUMP_VELOCITY;
   world.glideTime = 0;
+  // Only a jump held from take-off floats; a press while falling is just a buffered jump.
+  world.holding = world.pressing;
   world.bufferedUntil = -Infinity;
   cues.push({ type: 'jump' });
 
@@ -444,7 +460,7 @@ function takeOff(world: RunnerWorld, cues: RunnerCue[]) {
 export function press(world: RunnerWorld): RunnerCue[] {
   const cues: RunnerCue[] = [];
   if (world.over) return cues;
-  world.holding = true;
+  world.pressing = true;
   if (grounded(world)) takeOff(world, cues);
   // Pressed just before landing: jump the moment the toast touches down.
   else world.bufferedUntil = world.songTime + JUMP_BUFFER;
@@ -453,6 +469,7 @@ export function press(world: RunnerWorld): RunnerCue[] {
 
 /** Button let go: the float, if any, ends and the toast falls. */
 export function release(world: RunnerWorld) {
+  world.pressing = false;
   world.holding = false;
 }
 

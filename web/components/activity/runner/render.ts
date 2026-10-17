@@ -170,6 +170,8 @@ export function applyCues(fx: RunnerFx, cues: RunnerCue[], world: RunnerWorld, h
         break;
       case 'land':
         burst(fx, TOAST_CENTER, feet - 1, 6, CRUMBS, 30, 16, 180, 0.35);
+        // In a drop or in fever every landing thumps the counter.
+        if (inFever(world) || sectionKind(Math.floor(world.beat / BEATS_PER_SECTION)) === 'drop') fx.shake = Math.max(fx.shake, 0.18);
         break;
       case 'judge': {
         const y = toastTop(world, height, TOAST_JUMP) - 9;
@@ -207,7 +209,10 @@ export function applyCues(fx: RunnerFx, cues: RunnerCue[], world: RunnerWorld, h
       }
       case 'section':
         // The drop lands with a jolt.
-        if (cue.kind === 'drop') fx.shake = Math.max(fx.shake, 0.14);
+        if (cue.kind === 'drop') {
+          fx.shake = Math.max(fx.shake, 0.28);
+          fx.flash = Math.max(fx.flash, 0.1);
+        }
         break;
       case 'crash': {
         const y = toastTop(world, height, TOAST_BURNT);
@@ -455,7 +460,9 @@ function drawBars(ctx: CanvasRenderingContext2D, scene: RunnerScene, theme: Them
   const scroll = world.beat * PX_PER_BEAT * 0.3;
   const first = Math.floor(scroll / 4);
   const tallest = Math.max(8, Math.floor(horizon * 0.3));
-  const bounce = reducedMotion ? 0.85 : fever ? 0.6 + 0.55 * pulse : 0.7 + 0.3 * pulse;
+  // The bars kick harder as the combo climbs.
+  const kick = Math.min(0.3, 0.1 * (multiplier(world.combo) - 1));
+  const bounce = reducedMotion ? 0.85 : fever ? 0.6 + 0.55 * pulse : 0.7 - kick * 0.3 + (0.3 + kick) * pulse;
   const lit = fever ? FEVER : theme.accent;
   const cap = fever ? mix(theme.barTop, FEVER, 0.6) : theme.barTop;
   for (let index = first; index * 4 - scroll < width; index += 1) {
@@ -658,6 +665,26 @@ function drawGlide(ctx: CanvasRenderingContext2D, scene: RunnerScene) {
     const drift = (world.songTime * 3 + index / 4) % 1;
     ctx.globalAlpha = (1 - drift) * 0.5;
     ctx.fillRect(Math.round(TOAST_X - 2 - drift * 22), Math.round(top + TOAST_JUMP.height + drift * 3) - (index % 2), 1, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/** In a drop or in fever, streaks rush past across the sky. */
+function drawRush(ctx: CanvasRenderingContext2D, scene: RunnerScene, theme: Theme, pulse: number, fever: boolean) {
+  const { world, width, height, mode, reducedMotion } = scene;
+  const section = Math.floor(world.beat / BEATS_PER_SECTION);
+  if (mode !== 'running' || reducedMotion || (!fever && sectionKind(section) !== 'drop')) return;
+  const horizon = groundY(height);
+  const count = Math.min(16, 7 + 3 * Math.floor(Math.max(0, section - 1) / 4));
+  ctx.fillStyle = fever ? FEVER_PALE : mix(theme.accent, '#ffffff', 0.3);
+  for (let index = 0; index < count; index += 1) {
+    const speed = 260 + hash(index + 31) * 220;
+    const span = width * 1.6;
+    const x = Math.round(width - ((world.songTime * speed + hash(index + 7) * span) % span));
+    const y = Math.round(4 + hash(index + 13) * horizon * 0.75);
+    const length = 6 + Math.floor(hash(index + 19) * 14);
+    ctx.globalAlpha = 0.12 + 0.22 * pulse * hash(index + 3) + 0.06;
+    ctx.fillRect(x, y, length, 1);
   }
   ctx.globalAlpha = 1;
 }
@@ -869,6 +896,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, scene: RunnerScene) {
   drawRecord(ctx, scene, theme);
   drawCity(ctx, scene, theme);
   drawBars(ctx, scene, theme, pulse, fever);
+  drawRush(ctx, scene, theme, pulse, fever);
 
   if (fx.shake > 0 && !reducedMotion) {
     const strength = Math.ceil(fx.shake * 8);
