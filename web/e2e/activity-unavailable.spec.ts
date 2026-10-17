@@ -32,7 +32,7 @@ test('Activity reports the bot offline when the config proxy fails and offers th
   await expect(activity.getByText('Activity is not configured')).toHaveCount(0);
   const runner = activity.locator('.activity-runner');
   await expect(runner).toHaveAttribute('data-state', 'idle');
-  await expect(runner.getByText('Jump on the beat. Space or tap to play')).toBeVisible();
+  await expect(runner.getByText('Jump on the beat, hold to float. Space or tap to play')).toBeVisible();
   const invite = await runner.locator('canvas').boundingBox();
 
   await runner.click();
