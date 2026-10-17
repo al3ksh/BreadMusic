@@ -68,7 +68,7 @@ export class RunnerAudio {
   private readonly sends: Record<Layer, GainNode>;
   private readonly noise: AudioBuffer;
   private readonly pulse: PeriodicWave;
-  private readonly thinPulse: PeriodicWave;
+  private readonly softPulse: PeriodicWave;
   private readonly sources = new Set<AudioScheduledSourceNode>();
   private layers = layersFor(0, false);
   private offset: number | null = null;
@@ -104,7 +104,13 @@ export class RunnerAudio {
     this.master.connect(compressor);
     this.music = ctx.createGain();
     this.music.gain.value = MUSIC_LEVEL;
-    this.music.connect(this.master);
+    // Takes the fizz off the top of the mix, so a long run does not tire the ears.
+    const warmth = ctx.createBiquadFilter();
+    warmth.type = 'lowpass';
+    warmth.frequency.value = 5200;
+    warmth.Q.value = 0.5;
+    this.music.connect(warmth);
+    warmth.connect(this.master);
     this.effects = ctx.createGain();
     this.effects.gain.value = EFFECTS_LEVEL;
     this.effects.connect(this.master);
@@ -137,7 +143,7 @@ export class RunnerAudio {
     const samples = this.noise.getChannelData(0);
     for (let index = 0; index < samples.length; index += 1) samples[index] = Math.random() * 2 - 1;
     this.pulse = pulseWave(ctx, 0.25);
-    this.thinPulse = pulseWave(ctx, 0.125);
+    this.softPulse = pulseWave(ctx, 0.375);
     void ctx.resume().catch(() => undefined);
   }
 
@@ -324,13 +330,13 @@ export class RunnerAudio {
         this.clap(at, velocity, out);
         break;
       case 'hat':
-        this.noiseHit(at, 0.03, 0.15 * velocity, 'highpass', 8000, [out]);
+        this.noiseHit(at, 0.03, 0.09 * velocity, 'highpass', 7000, [out]);
         break;
       case 'openHat':
-        this.noiseHit(at, 0.17, 0.1 * velocity, 'highpass', 6500, [out]);
+        this.noiseHit(at, 0.17, 0.07 * velocity, 'highpass', 6000, [out]);
         break;
       case 'crash':
-        this.noiseHit(at, 1.4, 0.2 * velocity, 'highpass', 4200, [out]);
+        this.noiseHit(at, 1.4, 0.13 * velocity, 'highpass', 4200, [out]);
         break;
       case 'tom':
         this.tom(hz, at, velocity, out);
@@ -348,7 +354,7 @@ export class RunnerAudio {
         this.lead(this.pulse, hz, at, length * 0.94, 0.15 * velocity, echoed);
         break;
       case 'harmony':
-        this.lead(this.thinPulse, hz, at, length * 0.94, 0.12 * velocity, echoed);
+        this.lead(this.softPulse, hz, at, length * 0.94, 0.12 * velocity, echoed);
         break;
       case 'sparkle':
         this.sparkle(hz, at, velocity, echoed);
@@ -495,7 +501,7 @@ export class RunnerAudio {
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.Q.value = 4;
-    filter.frequency.value = 500 + bright * bright * 6000;
+    filter.frequency.value = 500 + bright * bright * 3200;
     wave.connect(filter);
     filter.connect(this.decay(at, duration, 0.26 * velocity, destinations));
   }
