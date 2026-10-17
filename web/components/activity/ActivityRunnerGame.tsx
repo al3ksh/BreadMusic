@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX } from 'lucide-react';
-import { RunnerAudio, type RunnerSound } from './runner/audio';
+import { DEFAULT_VOLUME, RunnerAudio, type RunnerSound } from './runner/audio';
 import { bpmAt, createWorld, inFever, multiplier, press, step, type RunnerCue, type RunnerWorld } from './runner/engine';
 import { applyCues, clearFx, createFx, drawScene, smoulder, updateFx, type RunnerMode } from './runner/render';
 
@@ -12,6 +12,7 @@ import { applyCues, clearFx, createFx, drawScene, smoulder, updateFx, type Runne
 
 const BEST_KEY = 'bread-activity-runner-best';
 const MUTED_KEY = 'bread-activity-runner-muted';
+const VOLUME_KEY = 'bread-activity-runner-volume';
 const MAX_WIDTH = 300;
 const MIN_HEIGHT = 72;
 const MAX_HEIGHT = 120;
@@ -34,6 +35,12 @@ function writeStored(key: string, value: string) {
   } catch {
     // Storage can be blocked inside the Discord iframe; the value then lasts for the session.
   }
+}
+
+function readVolume() {
+  const stored = readStored(VOLUME_KEY);
+  const value = stored === null ? NaN : Number(stored);
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : DEFAULT_VOLUME;
 }
 
 function soundFor(cue: RunnerCue): RunnerSound | null {
@@ -112,11 +119,13 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
   const pauseRef = useRef<(() => void) | null>(null);
   const redrawRef = useRef<(() => void) | null>(null);
   const mutedRef = useRef(false);
+  const volumeRef = useRef(DEFAULT_VOLUME);
   const audioRef = useRef<RunnerAudio | null>(null);
   const [mode, setMode] = useState<RunnerMode>('idle');
   const [best, setBest] = useState(0);
   const [newBest, setNewBest] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(DEFAULT_VOLUME);
 
   useEffect(() => {
     onStartRef.current = onStart;
@@ -142,6 +151,8 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
     const storedMuted = readStored(MUTED_KEY) === '1';
     mutedRef.current = storedMuted;
     setMuted(storedMuted);
+    volumeRef.current = readVolume();
+    setVolume(volumeRef.current);
     setBest(Number(readStored(BEST_KEY)) || 0);
   }, []);
 
@@ -292,7 +303,7 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
       clearFx(fx);
       showScore();
       // Created inside the gesture: browsers only allow sound to start from one.
-      if (!audioRef.current) audioRef.current = RunnerAudio.create(mutedRef.current, duckedRef.current);
+      if (!audioRef.current) audioRef.current = RunnerAudio.create(mutedRef.current, volumeRef.current, duckedRef.current);
       changeMode('running');
       wrapperRef.current?.focus({ preventScroll: true });
       run();
@@ -344,6 +355,22 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
     audioRef.current?.setMuted(next);
   }, []);
 
+  const changeVolume = useCallback((next: number) => {
+    volumeRef.current = next;
+    setVolume(next);
+    writeStored(VOLUME_KEY, String(next));
+    audioRef.current?.setVolume(next);
+    // Reaching for the slider means they want to hear it.
+    if (next > 0 && mutedRef.current) {
+      mutedRef.current = false;
+      setMuted(false);
+      writeStored(MUTED_KEY, '0');
+      audioRef.current?.setMuted(false);
+    }
+  }, []);
+
+  const silent = muted || volume === 0;
+
   useEffect(() => {
     const ownsKeyboard = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
@@ -394,8 +421,21 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
           onPointerDown={(event) => event.stopPropagation()}
           onClick={toggleMuted}
         >
-          {muted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+          {silent ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
         </button>
+        <input
+          type="range"
+          className="activity-runner-volume"
+          min={0}
+          max={1}
+          step={0.05}
+          value={muted ? 0 : volume}
+          aria-label="Game volume"
+          aria-valuetext={`${Math.round((muted ? 0 : volume) * 100)}%`}
+          style={{ '--runner-volume': `${(muted ? 0 : volume) * 100}%` } as CSSProperties}
+          onPointerDown={(event) => event.stopPropagation()}
+          onChange={(event) => changeVolume(Number(event.target.value))}
+        />
         <span ref={comboRef} className="activity-runner-combo" aria-hidden="true">
           <span ref={comboCountRef}>0</span> combo <b ref={comboMultRef}>x1</b>
         </span>

@@ -15,6 +15,8 @@ import { arrange, chordAt, chordTone, LAYERS, layersFor, STEPS_PER_BEAT, type La
 const LOOKAHEAD = 0.18;
 const DRIFT_LIMIT = 0.03;
 const MASTER_LEVEL = 0.26;
+/** Where the volume slider starts: a notch under full, which is loud on laptop speakers. */
+export const DEFAULT_VOLUME = 0.7;
 const MUSIC_LEVEL = 0.8;
 const EFFECTS_LEVEL = 4;
 /** What is left of the effects while the bot is playing: there to feel the jumps, not to compete. */
@@ -74,13 +76,14 @@ export class RunnerAudio {
   private beat = 0;
   private echoBeatLength = 0;
   private muted: boolean;
+  private volume: number;
 
   /** Must be called from a user gesture, or the browser keeps the context suspended. */
-  static create(muted: boolean, ducked = false): RunnerAudio | null {
+  static create(muted: boolean, volume = DEFAULT_VOLUME, ducked = false): RunnerAudio | null {
     const Context = audioContextClass();
     if (!Context) return null;
     try {
-      const audio = new RunnerAudio(new Context({ latencyHint: 'interactive' }), muted);
+      const audio = new RunnerAudio(new Context({ latencyHint: 'interactive' }), muted, volume);
       if (ducked) audio.setDucked(true, 0);
       return audio;
     } catch {
@@ -88,15 +91,16 @@ export class RunnerAudio {
     }
   }
 
-  private constructor(ctx: AudioContext, muted: boolean) {
+  private constructor(ctx: AudioContext, muted: boolean, volume: number) {
     this.ctx = ctx;
     this.muted = muted;
+    this.volume = volume;
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -18;
     compressor.ratio.value = 4;
     compressor.connect(ctx.destination);
     this.master = ctx.createGain();
-    this.master.gain.value = muted ? 0 : MASTER_LEVEL;
+    this.master.gain.value = this.level();
     this.master.connect(compressor);
     this.music = ctx.createGain();
     this.music.gain.value = MUSIC_LEVEL;
@@ -152,11 +156,26 @@ export class RunnerAudio {
     ramp(this.effects.gain, ducked ? EFFECTS_LEVEL * DUCKED_EFFECTS : EFFECTS_LEVEL);
   }
 
-  setMuted(muted: boolean) {
-    this.muted = muted;
+  /** Squared, so the slider feels even to the ear instead of jumping at the top. */
+  private level() {
+    return this.muted ? 0 : MASTER_LEVEL * this.volume * this.volume;
+  }
+
+  private applyLevel() {
     const now = this.ctx.currentTime;
     this.master.gain.cancelScheduledValues(now);
-    this.master.gain.setTargetAtTime(muted ? 0 : MASTER_LEVEL, now, 0.03);
+    this.master.gain.setTargetAtTime(this.level(), now, 0.03);
+  }
+
+  setMuted(muted: boolean) {
+    this.muted = muted;
+    this.applyLevel();
+  }
+
+  /** 0 to 1. */
+  setVolume(volume: number) {
+    this.volume = Math.min(1, Math.max(0, volume));
+    this.applyLevel();
   }
 
   /** Context time that is reaching the speakers right now. */
