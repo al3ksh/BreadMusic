@@ -3401,12 +3401,10 @@ button.activity-track-art:active:not(:disabled) { transform: scale(0.98); }
 
 .activity-game-stage .activity-runner-board { padding: 10px 14px 12px; }
 
-/* Opening the game: the player steps back and the board settles in over it. The two are too
-   different in shape to morph one into the other without stretching either. */
-html.activity-vt-game .activity-player-stage,
-html.activity-vt-game .activity-game-stage {
-  view-transition-name: activity-stage;
-}
+/* Opening the game: the player steps back where it stands and the board settles in where it
+   lives. Separate names keep each in place; the two are too different in shape to morph. */
+html.activity-vt-game .activity-player-stage { view-transition-name: activity-player-scene; }
+html.activity-vt-game .activity-game-stage { view-transition-name: activity-game-scene; }
 /* The scene change replaces the entrance animations, as with karaoke. */
 html.activity-vt-game .activity-game-stage,
 html.activity-vt-game .activity-game-mark,
@@ -3418,13 +3416,16 @@ html.activity-vt-game .activity-track-swap {
   animation-delay: 0s;
 }
 
-::view-transition-group(activity-stage) { animation: none; }
+::view-transition-group(activity-player-scene),
+::view-transition-group(activity-game-scene) { animation: none; }
 
-::view-transition-old(activity-stage) {
+::view-transition-old(activity-player-scene),
+::view-transition-old(activity-game-scene) {
   animation: activity-stage-out 200ms ease-in both;
 }
 
-::view-transition-new(activity-stage) {
+::view-transition-new(activity-player-scene),
+::view-transition-new(activity-game-scene) {
   animation: activity-stage-in 440ms var(--activity-spring-soft) 90ms both;
 }
 
