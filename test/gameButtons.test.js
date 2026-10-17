@@ -74,7 +74,8 @@ test('blackjack controls report a finished game instead of throwing', async () =
 
 test('blackjack hit and stand update the same message', async () => {
   const userId = newUserId();
-  startGame(userId, 0, 'game-guild');
+  // A natural blackjack finishes on the deal, so redeal until the hand is still live.
+  while (startGame(userId, 0, 'game-guild').finished) endGame(userId);
   try {
     const hit = createInteraction({ customId: `bj:hit:${userId}`, userId });
     await handleBlackjackButton(hit);
