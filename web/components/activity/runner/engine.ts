@@ -10,8 +10,9 @@
 // drop comes back harder; the back half of a breakdown slips obstacles in among the notes.
 // Hits in a row charge fever, a few bars of double points.
 //
-// Sections are built from authored eight-beat phrases rather than random gaps: a phrase plays
-// twice so it can be learned, then a twist and a fill. Pans hang from above and must be run
+// Sections are built from authored eight-beat phrases rather than random gaps, and every press
+// is on a beat, so a player keeping count can jump without looking: a phrase plays twice so it
+// can be learned, then a twist and a fill. Pans hang from above and must be run
 // under, and grills are too long for a plain jump: holding the button past the top of a jump
 // turns the fall into a slow float.
 
@@ -28,7 +29,7 @@ const BPM_STEP = 6;
 const MAX_BPM = 172;
 const MAX_SECTION = (MAX_BPM - START_BPM) / BPM_STEP;
 
-// A quick, heavy arc, so jumps a beat and a half apart still fit at full tempo.
+// A quick, heavy arc, so jumps two beats apart still fit at full tempo.
 const GRAVITY = 1900;
 // Every jump has the same arc, so a press on the beat always peaks over the obstacle.
 const JUMP_VELOCITY = 396;
@@ -270,57 +271,60 @@ function pickObstacle(random: () => number, section: number, big: boolean): Obst
   return weighted(random, [['eq', 3], ['knife', 2], ['toaster', 2]]);
 }
 
-// Eight-beat phrases at half-beat resolution, sixteen steps each:
-// '.' rest, 'o' small obstacle, 'O' big obstacle, 'n' note, 'h' hanging pan, 'g' grill, 'G' long grill.
-// A section plays A, A, B, C: the first phrase twice so it can be learned, a twist, then a fill.
-// Steps the toast cannot physically make at the current tempo are dropped when laid out.
+// Eight-beat phrases, one step per beat, so every press lands on a beat and the run can be
+// played by counting: '.' rest, 'o' small obstacle, 'O' big obstacle, 'n' note, 'h' hanging pan,
+// 'g' grill, 'G' long grill. A section plays A, A, B, C: the first phrase twice so it can be
+// learned, a twist, then a fill.
+// Every phrase fits at full tempo, so nothing is ever dropped from the pattern: presses are at
+// least two beats apart and never on the last beat, a pan comes two beats after a press, and a
+// grill is followed by five quiet beats and only starts in the first half of a phrase.
 type PhrasePool = { a: string[]; b: string[]; c: string[] };
 type Phrase = { pattern: string; kinds: (ObstacleKind | null)[] };
 
 const INTRO: PhrasePool = {
-  a: ['o...o...o...o...', 'o...o...o..o....'],
-  b: ['o...o..o....n...', 'o..o....o...n...'],
-  c: ['o...n...o..o....', 'o..o..o.....n...'],
+  a: ['o...o...', 'o...o.o.'],
+  b: ['o.o.o...', 'o...o.n.'],
+  c: ['o.o.n.n.', 'o.o.o.o.'],
 };
 
 // Indexed by lap: pans first turn up in the first chorus and grills in the first drop, then
-// everything mixes from the second time round. Most gaps are a beat and a half, so the toast
-// is rarely on the ground for long.
+// everything mixes from the second time round. Three beats then three then two, as in 'o..o..o.',
+// is the busiest it gets off the half notes.
 const PHRASES: Record<'verse' | 'chorus' | 'drop', PhrasePool[]> = {
   verse: [
     {
-      a: ['o..o....o..o....', 'o...o..o....n...', 'O...o..o..o.....', 'o..o..o.....n...'],
-      b: ['o..o..o..o......', 'O.....o..o..n...', 'o...n..n..o.....'],
-      c: ['o..o..o..o..o...', 'O...O..o..n..n..', 'n..n..o..o......'],
+      a: ['o.o.o...', 'o...o.o.', 'O...o.n.', 'o.o...n.'],
+      b: ['o.o.o.o.', 'O...O.n.', 'o..o..o.'],
+      c: ['o.o.o.n.', 'n.n.o.o.', 'O.o.o.o.'],
     },
     {
-      a: ['o..h.o..h.o..n..', 'o..o..h.o..o....', 'g.......o..h.o..', 'O..h.o..o..n....'],
-      b: ['h.o..h.o..h.o...', 'G.........o..n..', 'o..h.o..g.......'],
-      c: ['o..o..o..o..o...', 'h.o..h.o..o..n..', 'G.........h.o...'],
+      a: ['o.ho.ho.', 'o.o.h.o.', 'g....o..', 'O.ho.o..'],
+      b: ['h.o.h.o.', 'G....n..', 'o..g....'],
+      c: ['o.o.o.o.', 'o.ho.ho.', 'G....o..'],
     },
   ],
   chorus: [
     {
-      a: ['o..h.o..o..h.o..', 'o...h.o..o..n...', 'O..h.o..h.o.....', 'o..o..h.o..n....'],
-      b: ['h.o..h.o..h.o...', 'o..h.o..o..o....', 'h.h.o..h.o..n...'],
-      c: ['O..h.o..O..h.o..', 'o..o..o..h.o....', 'h.h.o..o..o..n..'],
+      a: ['o.ho.ho.', 'o.o.h.o.', 'O.ho.o..', 'o...h.o.'],
+      b: ['h.o.h.o.', 'o.ho.o..', 'h.h.o.o.'],
+      c: ['O.hO.ho.', 'o.o.ho..', 'n.hn.ho.'],
     },
     {
-      a: ['h.o..h..g.......', 'o..h.o..O..h.o..', 'g.......h.o..n..', 'O..h.o..h.o..n..'],
-      b: ['G.........h.o...', 'h.h.o..o..g.....', 'o..o..h.o..h.o..'],
-      c: ['h.o..h.o..h.o...', 'g.......O..h.o..', 'o..h.o..h.o..h..'],
+      a: ['h..g....', 'o.ho.ho.', 'g....ho.', 'O.ho.ho.'],
+      b: ['G....o..', 'h.h.o.o.', 'o.ho.ho.'],
+      c: ['h.o.h.o.', 'g....ho.', 'O.hO.ho.'],
     },
   ],
   drop: [
     {
-      a: ['g.......o..o....', 'o..o..g.........', 'O..o..O..o..n...', 'g.......o..h.o..'],
-      b: ['O..h.o..O..h.o..', 'o..o..o..g......', 'G.........o..n..'],
-      c: ['o..o..o..o..o...', 'g.......O..o....', 'h.o..o..o..o....'],
+      a: ['g....o..', 'o..g....', 'O.o.O.o.', 'g....ho.'],
+      b: ['O.hO.ho.', 'o.o.o.o.', 'G....o..'],
+      c: ['o.o.o.o.', 'g....O..', 'h.o.o.o.'],
     },
     {
-      a: ['G.........o..o..', 'O..h.o..g.......', 'g.........O..o..', 'h.o..h.o..o..o..'],
-      b: ['O..o..O..h.o....', 'G.........h.o...', 'o..o..o..o..g...'],
-      c: ['o..o..o..o..o...', 'O..h.o..h.o..h..', 'g.........h.o...'],
+      a: ['G....o..', 'O.hg....', 'g....O..', 'h.o.o.o.'],
+      b: ['O.ho.ho.', 'G....ho.', 'o.o.o.o.'],
+      c: ['o.o.o.o.', 'O.hO.ho.', 'g....ho.'],
     },
   ],
 };
@@ -392,15 +396,12 @@ function placeStep(world: RunnerWorld, step: string, kind: ObstacleKind | null, 
 /** A breakdown is a run of notes that turns into a gauntlet, then a few empty beats of build. */
 function planBreakdown(world: RunnerWorld, section: number) {
   const start = section * BEATS_PER_SECTION;
-  let beat = Math.ceil(Math.max(beatAtTime(world.freeAt), start + 2) * 2) / 2;
-  let gap = 2;
+  let beat = Math.ceil(Math.max(beatAtTime(world.freeAt), start + 2));
   while (beat <= start + BREAKDOWN_NOTES_UNTIL) {
-    let step = beat < start + BREAKDOWN_MIX_FROM ? 'n' : weighted(world.random, [['n', 3], ['o', 2], ['h', 2]]);
-    // A pan right after a jump leaves no room for a late one.
-    if (step === 'h' && gap < 1.5) step = 'n';
+    const step = beat < start + BREAKDOWN_MIX_FROM ? 'n' : weighted(world.random, [['n', 3], ['o', 2], ['h', 2]]);
     placeStep(world, step, step === 'o' ? pickObstacle(world.random, section, false) : null, beat);
-    gap = weighted(world.random, [[1.5, 4], [2, 2], [1, 1]]);
-    while (gap < minGapBeats(beat)) gap += 0.5;
+    let gap = weighted(world.random, [[2, 5], [4, 1], [3, 1]]);
+    while (gap < minGapBeats(beat)) gap += 1;
     beat += gap;
   }
   world.nextPhraseBeat = start + BEATS_PER_SECTION;
@@ -419,7 +420,7 @@ function plan(world: RunnerWorld, untilBeat: number) {
     // The first beats of the run stay empty so there is time to find the beat.
     const phrase = world.phrases.set[Math.floor((start - section * BEATS_PER_SECTION) / 8)];
     [...phrase.pattern].forEach((step, position) => {
-      const beat = start + position / 2;
+      const beat = start + position;
       if (step !== '.' && beat >= FIRST_PRESS_BEAT) placeStep(world, step, phrase.kinds[position], beat);
     });
     world.nextPhraseBeat = start + 8;
