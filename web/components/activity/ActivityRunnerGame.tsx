@@ -3,7 +3,7 @@
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX } from 'lucide-react';
 import { DEFAULT_VOLUME, RunnerAudio, type RunnerSound } from './runner/audio';
-import { bpmAt, createWorld, inFever, multiplier, press, step, type RunnerCue, type RunnerWorld } from './runner/engine';
+import { bpmAt, createWorld, inFever, multiplier, press, release, step, type RunnerCue, type RunnerWorld } from './runner/engine';
 import { applyCues, clearFx, createFx, drawScene, smoulder, updateFx, type RunnerMode } from './runner/render';
 
 // A rhythm runner for the Activity outage screens and the idle player: a slice of toast jumps
@@ -45,6 +45,7 @@ function readVolume() {
 
 function soundFor(cue: RunnerCue): RunnerSound | null {
   if (cue.type === 'judge') return cue.grade;
+  if (cue.type === 'dodge') return 'good';
   if (cue.type === 'jump' || cue.type === 'note' || cue.type === 'crash') return cue.type;
   if (cue.type === 'fever') return cue.on ? 'fever' : 'feverEnd';
   return null;
@@ -53,7 +54,7 @@ function soundFor(cue: RunnerCue): RunnerSound | null {
 function hintFor(mode: RunnerMode, newBest: boolean) {
   switch (mode) {
     case 'idle':
-      return 'Jump on the beat. Space or tap to play';
+      return 'Jump on the beat, hold to float. Space or tap to play';
     case 'paused':
       return 'Paused. Tap to continue';
     case 'over':
@@ -116,6 +117,7 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
   const modeRef = useRef<RunnerMode>('idle');
   const viewRef = useRef({ scale: 1, width: 200, height: MIN_HEIGHT });
   const pressRef = useRef<(() => void) | null>(null);
+  const releaseRef = useRef<(() => void) | null>(null);
   const pauseRef = useRef<(() => void) | null>(null);
   const redrawRef = useRef<(() => void) | null>(null);
   const mutedRef = useRef(false);
@@ -324,6 +326,8 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
       }
     };
 
+    releaseRef.current = () => release(world);
+
     pauseRef.current = () => {
       if (gameMode !== 'running') return;
       audioRef.current?.stopMusic();
@@ -340,6 +344,7 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
       document.removeEventListener('visibilitychange', handleVisibility);
       if (frame) window.cancelAnimationFrame(frame);
       pressRef.current = null;
+      releaseRef.current = null;
       pauseRef.current = null;
       redrawRef.current = null;
       audioRef.current?.close();
@@ -391,8 +396,24 @@ export function ActivityRunnerGame({ size, onStart, onModeChange, onExit, ducked
         pauseRef.current?.();
       }
     };
+    const isJumpKey = (event: KeyboardEvent) => event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW';
+    const handleUp = (event: KeyboardEvent) => {
+      if (isJumpKey(event)) releaseRef.current?.();
+    };
+    // A float ends when the finger or key lets go, wherever that happens.
+    const letGo = () => releaseRef.current?.();
     window.addEventListener('keydown', handleDown);
-    return () => window.removeEventListener('keydown', handleDown);
+    window.addEventListener('keyup', handleUp);
+    window.addEventListener('pointerup', letGo);
+    window.addEventListener('pointercancel', letGo);
+    window.addEventListener('blur', letGo);
+    return () => {
+      window.removeEventListener('keydown', handleDown);
+      window.removeEventListener('keyup', handleUp);
+      window.removeEventListener('pointerup', letGo);
+      window.removeEventListener('pointercancel', letGo);
+      window.removeEventListener('blur', letGo);
+    };
   }, [toggleMuted]);
 
   return (

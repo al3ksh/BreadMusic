@@ -12,10 +12,12 @@ import {
   BEATS_PER_SECTION,
   eventOffset,
   feverLevel,
+  gliding,
   GROUND_MARGIN,
   inFever,
   multiplier,
   noteLift,
+  panBottom,
   PX_PER_BEAT,
   sectionKind,
   TOAST_CENTER,
@@ -187,6 +189,12 @@ export function applyCues(fx: RunnerFx, cues: RunnerCue[], world: RunnerWorld, h
         const y = feet - noteLift();
         burst(fx, x, y, 14, ['#ece9ff', '#a29ce5', '#8b84d8'], 54, 4, 30, 0.55, true);
         fx.popups.push({ text: `+${cue.points}`, x, y: y - 11, life: POPUP_LIFE, color: '#ece9ff' });
+        break;
+      }
+      case 'dodge': {
+        const y = toastTop(world, height, TOAST_JUMP) - 9;
+        fx.popups.push({ text: 'NICE', x: TOAST_CENTER, y, life: POPUP_LIFE, color: '#9fe3c4' });
+        burst(fx, TOAST_CENTER + 2, feet - 15, 6, ['#9fe3c4', '#ece9ff'], 36, 6, 40, 0.4);
         break;
       }
       case 'fever': {
@@ -519,7 +527,36 @@ function drawMarker(ctx: CanvasRenderingContext2D, scene: RunnerScene, event: Ru
   ctx.globalAlpha = near ? 1 : 0.6;
   ctx.fillRect(x - 1, ground + 2, 3, 1);
   ctx.fillRect(x, ground + 3, 1, 1);
+  if (event.kind === 'grill' || event.kind === 'grillLong') {
+    // A grill wants the button held: a bar runs from the press to the far end of the grill.
+    const end = Math.round(TOAST_CENTER + eventOffset(world, event) + event.width / 2);
+    ctx.globalAlpha = near ? 0.9 : 0.45;
+    ctx.fillRect(x + 2, ground + 2, Math.max(0, end - x - 2), 1);
+    ctx.fillRect(end, ground + 1, 1, 3);
+  }
   ctx.globalAlpha = 1;
+}
+
+/** A pan hanging on a chain from the top of the screen, swaying a little with the beat. */
+function drawOverhead(ctx: CanvasRenderingContext2D, scene: RunnerScene, event: RunnerEvent, pulse: number) {
+  const { world, height, reducedMotion } = scene;
+  const image = OBSTACLE_SPRITES.pan;
+  const sway = reducedMotion || event.resolved ? 0 : Math.round(Math.sin(world.beat * Math.PI) * 0.8);
+  const centre = Math.round(TOAST_CENTER + eventOffset(world, event));
+  const left = centre - Math.floor(image.width / 2) + sway;
+  const top = groundY(height) - panBottom() - image.height;
+  ctx.fillStyle = '#4a4760';
+  for (let y = 0; y < top; y += 2) ctx.fillRect(centre + Math.round((sway * y) / Math.max(1, top)), y, 1, 1);
+  drawSprite(ctx, image, left, top);
+  // Its shadow on the counter shows where not to jump.
+  ctx.fillStyle = SHADOW;
+  ctx.fillRect(left + 2, groundY(height), image.width - 4, 1);
+  if (!reducedMotion && pulse > 0.5 && !event.resolved) {
+    ctx.globalAlpha = (pulse - 0.5) * 1.4;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(left + 2, top + 6, 2, 1);
+    ctx.globalAlpha = 1;
+  }
 }
 
 function drawObstacle(ctx: CanvasRenderingContext2D, scene: RunnerScene, event: RunnerEvent, pulse: number) {
@@ -542,6 +579,19 @@ function drawObstacle(ctx: CanvasRenderingContext2D, scene: RunnerScene, event: 
     ctx.fillStyle = '#ff9445';
     ctx.fillRect(left + 4, top - 1 - Math.floor(rise * 5), 1, 1);
     ctx.fillRect(left + 10, top - 2 - Math.floor(rise * 5), 1, 1);
+    ctx.globalAlpha = 1;
+  } else if (event.kind === 'grill' || event.kind === 'grillLong') {
+    // Coals glow with the beat and heat shimmers up off the bars.
+    ctx.globalAlpha = 0.35 + pulse * 0.6;
+    ctx.fillStyle = '#ffd9a1';
+    for (let column = 3; column < image.width - 2; column += 6) ctx.fillRect(left + column, top + 1, 1, 1);
+    const beat = scene.world.beat;
+    ctx.fillStyle = '#ff9445';
+    for (let column = 4; column < image.width - 2; column += 7) {
+      const rise = (beat * 1.5 + column * 0.37) % 1;
+      ctx.globalAlpha = (1 - rise) * 0.6;
+      ctx.fillRect(left + column + (Math.floor(rise * 6) % 2), top - 1 - Math.floor(rise * 7), 1, 1);
+    }
     ctx.globalAlpha = 1;
   } else if ((event.kind === 'eq' || event.kind === 'eqWide') && pulse > 0.2) {
     // Equalizer obstacles light up on the beat, like a meter catching the kick.
@@ -592,6 +642,24 @@ function toastSprite(scene: RunnerScene): Sprite {
     return blink ? TOAST_RUN_A_BLINK : TOAST_RUN_A;
   }
   return blink ? TOAST_STAND_BLINK : TOAST_STAND;
+}
+
+/** While the toast floats, puffs of steam trail behind it and hold it up. */
+function drawGlide(ctx: CanvasRenderingContext2D, scene: RunnerScene) {
+  const { world, height, mode, reducedMotion } = scene;
+  if (mode !== 'running' || !gliding(world)) return;
+  const top = toastTop(world, height, TOAST_JUMP);
+  const flap = reducedMotion ? 0 : Math.floor(world.songTime * 12) % 2;
+  ctx.fillStyle = '#ece9ff';
+  ctx.globalAlpha = 0.8;
+  ctx.fillRect(TOAST_X - 2, top + 4 + flap, 2, 1);
+  ctx.fillRect(TOAST_X + TOAST_JUMP.width, top + 4 + flap, 2, 1);
+  for (let index = 0; index < 4; index += 1) {
+    const drift = (world.songTime * 3 + index / 4) % 1;
+    ctx.globalAlpha = (1 - drift) * 0.5;
+    ctx.fillRect(Math.round(TOAST_X - 2 - drift * 22), Math.round(top + TOAST_JUMP.height + drift * 3) - (index % 2), 1, 1);
+  }
+  ctx.globalAlpha = 1;
 }
 
 /** Streaks behind the toast once the combo is paying a multiplier. */
@@ -812,8 +880,10 @@ export function drawScene(ctx: CanvasRenderingContext2D, scene: RunnerScene) {
   }
   for (const event of world.events) {
     if (event.type === 'obstacle') drawObstacle(ctx, scene, event, pulse);
+    else if (event.type === 'overhead') drawOverhead(ctx, scene, event, pulse);
     else drawNote(ctx, scene, event, pulse);
   }
+  drawGlide(ctx, scene);
   drawSpeedLines(ctx, scene);
   drawToast(ctx, scene);
   drawFeverSparkles(ctx, scene);

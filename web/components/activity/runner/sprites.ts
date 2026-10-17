@@ -181,7 +181,37 @@ export const NOTE = sprite([
   '.MM...',
 ]);
 
-export type ObstacleKind = 'knife' | 'knives' | 'toaster' | 'eq' | 'eqWide';
+// A cast-iron pan hanging by its handle, low enough to clip a jumping toast.
+const PAN = sprite([
+  '....KWK....',
+  '....KWK....',
+  '....KVK....',
+  '....KWK....',
+  '...KKKKK...',
+  '.KKSSSSSKK.',
+  '.KSssSSSTK.',
+  'KSsSSSSSSTK',
+  'KSsSSSSSSTK',
+  'KSSSSSSSSTK',
+  'KSSSSSSSTTK',
+  '.KSSSSSTTK.',
+  '.KKTTTTTKK.',
+  '...KKKKK...',
+]);
+
+/** A long grill with flames licking over its bars: too long to clear with a plain jump. */
+function grill(width: number): Sprite {
+  const flames = (pick: (place: number) => string) => Array.from({ length: width }, (_, column) => (column < 2 || column > width - 3 ? '.' : pick(column % 6))).join('');
+  return sprite([
+    flames((place) => (place === 3 ? 'e' : '.')),
+    flames((place) => (place === 3 ? 'H' : place === 2 || place === 4 ? 'e' : '.')),
+    'K'.repeat(width),
+    'K' + 'T'.repeat(width - 2) + 'K',
+    '.K' + '.'.repeat(width - 4) + 'K.',
+  ]);
+}
+
+export type ObstacleKind = 'knife' | 'knives' | 'toaster' | 'eq' | 'eqWide' | 'grill' | 'grillLong' | 'pan';
 
 export const OBSTACLE_SPRITES: Record<ObstacleKind, Sprite> = {
   knife: KNIFE,
@@ -189,6 +219,9 @@ export const OBSTACLE_SPRITES: Record<ObstacleKind, Sprite> = {
   toaster: TOASTER,
   eq: equalizer([5, 9, 7]),
   eqWide: equalizer([4, 7, 9, 7, 4]),
+  grill: grill(72),
+  grillLong: grill(96),
+  pan: PAN,
 };
 
 /** Height of the topmost solid pixel in every column, used for pixel-accurate collisions. */
