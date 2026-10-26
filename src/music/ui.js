@@ -94,6 +94,15 @@ class MusicUI {
         .setDisabled(disabled),
     );
 
+    // Saves the track to the presser's own Liked list. It leads the last row, next to the thumbs when autoplay is on.
+    const heart = new ButtonBuilder()
+      .setCustomId(this.buildCustomId(BUTTONS.HEART, player.guildId))
+      .setEmoji(icon('heart'))
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(disabled || !canHeartTrack(player.queue.current));
+
+    // A live stream has no lyrics, so the heart takes that slot and both rows hold four buttons.
+    const live = !disabled && isStreamTrack(player.queue.current);
     const rowTwo = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.LOOP, player.guildId))
@@ -105,27 +114,23 @@ class MusicUI {
         .setEmoji(icon('shuffle'))
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(disabled || player.queue.tracks.length === 0),
-      new ButtonBuilder()
-        .setCustomId(this.buildCustomId(BUTTONS.LYRICS, player.guildId))
-        .setEmoji(icon('lyrics'))
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(disabled),
+      live
+        ? heart
+        : new ButtonBuilder()
+          .setCustomId(this.buildCustomId(BUTTONS.LYRICS, player.guildId))
+          .setEmoji(icon('lyrics'))
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(disabled),
       new ButtonBuilder()
         .setCustomId(this.buildCustomId(BUTTONS.ACTIVITY, player.guildId))
         .setEmoji(icon('dashboard'))
         .setStyle(ButtonStyle.Secondary),
     );
 
-    // Saves the track to the presser's own Liked list. It leads the last row, next to the thumbs when autoplay is on.
-    const heart = new ButtonBuilder()
-      .setCustomId(this.buildCustomId(BUTTONS.HEART, player.guildId))
-      .setEmoji(icon('heart'))
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(disabled || !canHeartTrack(player.queue.current));
-
     const rows = [rowOne, rowTwo];
+    if (live) return rows;
     // Autoplay feedback only appears while autoplay is on, so the player stays two rows otherwise.
-    if (!disabled && isAutoplayEnabled(player.guildId) && !isStreamTrack(player.queue.current)) {
+    if (!disabled && isAutoplayEnabled(player.guildId)) {
       const canReroll = player.queue.tracks.length === 0 && Boolean(getAutoplayNext(player.guildId));
       rows.push(new ActionRowBuilder().addComponents(
         heart,

@@ -1376,7 +1376,10 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
       ? 'Loop queue'
       : 'Loop on';
   const displayedVolume = Math.min(volumeLimit, volumeDraft ?? status.volume);
-  const currentDuration = status.currentTrack?.duration || 0;
+  // Radio and other live streams have no end, so they read Live instead of a length.
+  const isLiveTrack = Boolean(status.currentTrack?.isStream);
+  const currentDuration = isLiveTrack ? 0 : status.currentTrack?.duration || 0;
+  const durationLabel = isLiveTrack ? 'Live' : formatMs(currentDuration);
   const displayedPosition = seekDraft ?? position;
   // Signed upload URLs are for playback, not public track pages.
   const trackKey = status.currentTrack?.uri || 'idle';
@@ -1653,10 +1656,10 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
           }}
           style={{ '--range-progress': `${percent}%` } as CSSProperties}
           aria-label={canSeekTrack ? 'Track position' : 'Track position (not seekable)'}
-          aria-valuetext={`${formatMs(displayedPosition)} of ${formatMs(currentDuration)}`}
+          aria-valuetext={`${formatMs(displayedPosition)} of ${durationLabel}`}
         />
       </div>
-      <div className="activity-time-row"><span>{formatMs(displayedPosition)}</span><span>{formatMs(currentDuration)}</span></div>
+      <div className="activity-time-row"><span>{formatMs(displayedPosition)}</span><span>{durationLabel}</span></div>
     </div>
   );
 
@@ -1832,7 +1835,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
             </div>
           </div>
 
-          <div className="activity-compact-progress" aria-label={`${formatMs(displayedPosition)} of ${formatMs(currentDuration)}`}>
+          <div className="activity-compact-progress" aria-label={`${formatMs(displayedPosition)} of ${durationLabel}`}>
             <span><i style={{ transform: `scaleX(${percent / 100})` }} /></span>
           </div>
 
@@ -1934,7 +1937,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
               {hasTrack && (
                 <div className="activity-mini-progress" aria-hidden="true">
                   <span><i style={{ transform: `scaleX(${percent / 100})` }} /></span>
-                  <time>{formatMs(displayedPosition)} / {formatMs(currentDuration)}</time>
+                  <time>{formatMs(displayedPosition)} / {durationLabel}</time>
                 </div>
               )}
               {renderSeek()}

@@ -12,6 +12,7 @@ const { getSoundState } = require('../music/sound');
 const library = require('../music/library');
 const { getVoteSkipSnapshot } = require('../music/skipManager');
 const { isTrackSeekable } = require('../music/trackCapabilities');
+const { isStreamTrack } = require('../music/autoplay/normalize');
 
 const ACTIVITY_ARTWORK_HOSTS = [
   'i.ytimg.com',
@@ -96,12 +97,15 @@ function buildPlayerStatusSnapshot(client, guildId, viewerId = null) {
   if (player.queue.current) {
     const info = player.queue.current.info || {};
     const isLocalUpload = isLocalUploadInfo(info, player.queue.current);
+    const live = isStreamTrack(player.queue.current);
     currentTrack = {
       title: info.title || 'Unknown',
       author: isLocalUpload && isUnknownTrackAuthor(info.author) ? 'Local upload' : info.author || 'Unknown',
       uri: info.uri || '',
-      duration: info.duration || 0,
+      // Lavalink reports a stream's length as the largest long, which is not a duration anyone can show.
+      duration: live ? 0 : info.duration || 0,
       position: player.position || 0,
+      isStream: live,
       seekable: isTrackSeekable(player.queue.current),
       artwork: extractArtwork(info),
       requester: formatRequester(player.queue.current.requester),

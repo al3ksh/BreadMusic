@@ -346,4 +346,13 @@ test('now playing shows the prepared track and a feedback row while autoplay is 
   const heart = ui.buildControlRows(player)[1].toJSON().components.at(-1);
   assert.equal(heart.custom_id.split(':')[1], 'heart', 'the library heart stays on the player without autoplay');
   assert.equal(heart.disabled, false);
+
+  setAutoplay(guildId, true);
+  player.queue.current = {
+    encoded: 'encoded-radio',
+    info: { title: 'RMF FM', author: 'Radio', uri: 'https://stream.example/rmf', identifier: 'radio-rmf', isStream: true, duration: 0 },
+    radioStation: { id: 'station-1', source: 'radio-browser' },
+  };
+  const radioRows = ui.buildControlRows(player).map((row) => row.toJSON().components.map((button) => button.custom_id.split(':')[1]));
+  assert.deepEqual(radioRows, [['back', 'playpause', 'skip', 'stop'], ['loop', 'shuffle', 'heart', 'activity']], 'a station swaps lyrics for the heart and stays two rows');
 });
