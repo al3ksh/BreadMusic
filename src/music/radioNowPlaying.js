@@ -49,7 +49,7 @@ function isPublicAddress(address) {
 function publicLookup(hostname, options, callback) {
   dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
     if (error) return callback(error);
-    const list = /** @type {Array<{ address: string, family: number }>} */ (addresses);
+    const list = /** @type {Array<{ address: string, family: number }>} */ (/** @type {unknown} */ (addresses));
     if (!list.length || !list.every((entry) => isPublicAddress(entry.address))) {
       return callback(new Error('Stream resolves to a private address'));
     }
@@ -133,6 +133,15 @@ function readStreamTitle(streamUrl, { redirects = 0, timeoutMs = REQUEST_TIMEOUT
 
 // Follows what a playing radio station is airing and stores it on the track as radioStation.nowPlaying.
 // onChange runs only when the title actually changes, so the player message is not edited every poll.
+/**
+ * @param {{
+ *   onChange?: (player: any, track: any) => unknown,
+ *   readTitle?: (streamUrl: string) => Promise<{ supported: boolean, title?: string | null }>,
+ *   intervalMs?: number,
+ *   setTimer?: (fn: () => void, ms: number) => any,
+ *   clearTimer?: (timer: any) => void,
+ * }} [options]
+ */
 function createRadioNowPlaying({
   onChange,
   readTitle = readStreamTitle,
