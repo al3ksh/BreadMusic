@@ -8,6 +8,8 @@ lavalink:
       snapshot: false
     - dependency: "dev.lavalink.youtube:youtube-plugin:f45bbb7aebfcbc1c553769e04af6cd43afa8b7c3"
       snapshot: true
+    - dependency: "com.github.Devoxin:LavaDSPX-Plugin:0.0.5"
+      repository: "https://jitpack.io"
   server:
     password: "${LAVALINK_PASSWORD}"
     bufferDurationMs: 400

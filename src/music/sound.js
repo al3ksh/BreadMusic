@@ -3,6 +3,8 @@
 // Every change rebuilds the whole Lavalink filter payload from this state, so presets never
 // stack on top of each other and the dashboard, Activity and /sound always agree.
 
+const { buildGainStage, volumeOf, writeGainStage } = require('./volume');
+
 const BAND_COUNT = 15;
 const EQ_RANGE_DB = 6;
 const TEMPO_MIN = 0.5;
@@ -114,10 +116,10 @@ function isDefaultSound(state) {
   return !state.preset && state.speed === 1 && state.pitch === 1 && state.eq.every((value) => value === 0);
 }
 
-// Boosts follow the dB curve (+6 dB ≈ gain 1.0); cuts are linear down to Lavalink's -0.25 floor.
+// Lavaplayer scales a band by 1 + 4 * gain at its centre (0.25 doubles it), so the slider's dB
+// map straight onto that: +6 dB ≈ 0.25, -6 dB ≈ -0.125.
 function sliderToGain(db) {
-  if (db >= 0) return 10 ** (db / 20) - 1;
-  return (db / EQ_RANGE_DB) * 0.25;
+  return (10 ** (db / 20) - 1) / 4;
 }
 
 function round(value, digits = 4) {
@@ -167,6 +169,7 @@ async function applySound(player, input) {
   manager.filters.vaporwave = false;
   manager.data = { ...manager.data, ...data };
   manager.equalizerBands = equalizer;
+  writeGainStage(manager, buildGainStage(equalizer, volumeOf(player)));
   await manager.applyPlayerFilters();
   manager.soundState = state;
   manager.activePreset = state.preset;

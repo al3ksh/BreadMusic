@@ -2,6 +2,7 @@
 const { REROLL_FAILURES } = require('../music/autoplay');
 const { applySound, getSoundState, normalizePreset, resetSound } = require('../music/sound');
 const { toggleStationHeart } = require('../music/radioPlayback');
+const { setPlayerVolume } = require('../music/volume');
 
 // Playback controls. Returning without a response lets the router refresh and save the player.
 function createControlActions({
@@ -133,7 +134,7 @@ function createControlActions({
       const volume = parseInt(req.body.volume, 10);
       if (isNaN(volume) || volume < 0 || volume > 500) return res.status(400).json({ error: 'Invalid volume value' });
       const clamped = Math.min(guildConfig.maxVolume, Math.max(0, volume));
-      await player.setVolume(clamped);
+      await setPlayerVolume(player, clamped);
       await client.musicUI?.refresh(player).catch(() => {});
       return res.json({ success: true, volume: clamped });
     },

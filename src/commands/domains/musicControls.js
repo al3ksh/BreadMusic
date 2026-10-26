@@ -1,6 +1,7 @@
 // @ts-check
 const { likeTrack, dislikeTrack, rerollNext, REROLL_FAILURES } = require('../../music/autoplay');
 const { buildDislikedPanel, handleDislikedComponent } = require('./autoplayDisliked');
+const { setPlayerVolume } = require('../../music/volume');
 
 const createMusicControlCommands = (context) => {
   const {
@@ -142,7 +143,7 @@ const createMusicControlCommands = (context) => {
 
       const requested = interaction.options.getInteger('value', true);
       const clamped = Math.min(config.maxVolume, Math.max(0, requested));
-      await player.setVolume(clamped);
+      await setPlayerVolume(player, clamped);
       await queuePersist(player);
       await interaction.editReply(`Volume set to ${clamped}% (limit: ${config.maxVolume}%).`);
       await interaction.client.musicUI.refresh(player);

@@ -24,6 +24,7 @@ const { isPlayerStopping } = require('./music/playerLifecycle');
 const { savePlayerState, hydratePlayer, flushQueueStore } = require('./state/queueStore');
 const { recordTrackPlay, getUserInsights } = require('./state/analyticsStore');
 const { isStreamTrack } = require('./music/autoplay/normalize');
+const { VOLUME_DECREMENTER, capLavalinkVolume, syncGainStage } = require('./music/volume');
 const { scheduleIdleLeave, handleVoiceStateUpdate, clearEmptyChannelTimer, clearIdleTimer } = require('./music/idleTracker');
 const { getConfig, listConfigs } = require('./state/guildConfig');
 const { createSelection } = require('./state/searchCache');
@@ -295,7 +296,7 @@ client.lavalink = new LavalinkManager({
   autoSkip: true,
   playerOptions: {
     defaultSearchPlatform: /** @type {import('lavalink-client', { with: { 'resolution-mode': 'import' } }).SearchPlatform} */ (config.lavalink.defaultSource),
-    volumeDecrementer: 0.75,
+    volumeDecrementer: VOLUME_DECREMENTER,
   },
 });
 
@@ -549,8 +550,12 @@ const radioNowPlaying = createRadioNowPlaying({
   },
 });
 
+// A player created at a loud default volume would otherwise reach Lavalink above unity.
+client.lavalink.on('playerCreate', (player) => capLavalinkVolume(player));
+
 client.lavalink.on('trackStart', safeEventHandler('trackStart', async (player, track) => {
   radioNowPlaying.watch(player);
+  await syncGainStage(player).catch((error) => console.error('Failed to sync gain stage:', error.message));
   resumeAutoplayAfterPlaybackSuccess(player.guildId);
   await clearVoteSkip(player.guildId);
   clearIdleTimer(player.guildId);

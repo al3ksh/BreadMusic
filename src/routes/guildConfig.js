@@ -1,5 +1,6 @@
 // @ts-check
 const express = require('express');
+const { setPlayerVolume } = require('../music/volume');
 
 function createGuildConfigRouter({
   client,
@@ -254,7 +255,7 @@ function createGuildConfigRouter({
     if (Object.prototype.hasOwnProperty.call(updates, 'maxVolume')) {
       const player = client.lavalink?.players?.get(guildId);
       if (player && Number.isFinite(player.volume) && player.volume > updated.maxVolume) {
-        await player.setVolume(updated.maxVolume);
+        await setPlayerVolume(player, updated.maxVolume);
         await savePlayerState(player).catch(() => {});
         await client.musicUI?.refresh(player).catch(() => {});
         broadcastPlayerUpdate(guildId);
@@ -294,7 +295,7 @@ function createGuildConfigRouter({
     const fresh = getConfig(guildId);
     const player = client.lavalink?.players?.get(guildId);
     if (player && Number.isFinite(player.volume) && player.volume > fresh.maxVolume) {
-      await player.setVolume(fresh.maxVolume);
+      await setPlayerVolume(player, fresh.maxVolume);
       await savePlayerState(player).catch(() => {});
       await client.musicUI?.refresh(player).catch(() => {});
       broadcastPlayerUpdate(guildId);

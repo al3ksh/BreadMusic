@@ -4,6 +4,7 @@ const { FileStore } = require('./fileStore');
 const { getConfig } = require('./guildConfig');
 const { createSignedUploadUrl, getUploadPlaybackBaseUrl } = require('../music/uploadUrls');
 const { artworkPath, uploadArtworkUrl } = require('../music/uploadArtworkUrls');
+const { setPlayerVolume } = require('../music/volume');
 
 const queueStore = new FileStore('queues.json', {});
 
@@ -183,7 +184,7 @@ async function hydratePlayer(player, client) {
   }
 
   if (Number.isFinite(payload.volume)) {
-    await player.setVolume(Math.max(0, Math.min(500, payload.volume)));
+    await setPlayerVolume(player, Math.max(0, Math.min(500, payload.volume)));
   }
   if (['off', 'track', 'queue'].includes(payload.repeatMode)) {
     await player.setRepeatMode(payload.repeatMode);

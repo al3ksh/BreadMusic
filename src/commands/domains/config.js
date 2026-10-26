@@ -1,4 +1,5 @@
 // @ts-check
+const { setPlayerVolume } = require('../../music/volume');
 const createConfigCommands = (context) => {
   const {
     SlashCommandBuilder,
@@ -130,7 +131,7 @@ const createConfigCommands = (context) => {
         const fresh = getConfig(interaction.guildId);
         const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
         if (player && Number.isFinite(player.volume) && player.volume > fresh.maxVolume) {
-          await player.setVolume(fresh.maxVolume);
+          await setPlayerVolume(player, fresh.maxVolume);
           await queuePersist(player);
           await interaction.client.musicUI?.refresh(player).catch(() => {});
         }
@@ -181,7 +182,7 @@ const createConfigCommands = (context) => {
       const updated = setConfig(interaction.guildId, updates);
       const player = interaction.client.lavalink?.getPlayer(interaction.guildId);
       if (player && Number.isFinite(player.volume) && player.volume > updated.maxVolume) {
-        await player.setVolume(updated.maxVolume);
+        await setPlayerVolume(player, updated.maxVolume);
         await queuePersist(player);
         await interaction.client.musicUI?.refresh(player).catch(() => {});
       }

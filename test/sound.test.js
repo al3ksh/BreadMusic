@@ -30,11 +30,10 @@ test('normalizeSoundState clamps and snaps every field', () => {
   assert.equal(normalizeSoundState({ speed: 1.234 }).speed, 1.25);
 });
 
-test('slider gains follow a dB curve for boosts and a linear cut', () => {
-  assert.ok(Math.abs(sliderToGain(6) - 0.9953) < 0.001);
+test('slider gains map dB onto lavaplayer band gains, where 0.25 doubles a band', () => {
+  assert.ok(Math.abs(sliderToGain(6) - 0.2488) < 0.001);
   assert.equal(sliderToGain(0), 0);
-  assert.equal(sliderToGain(-6), -0.25);
-  assert.equal(sliderToGain(-3), -0.125);
+  assert.ok(Math.abs(sliderToGain(-6) + 0.1247) < 0.001);
 });
 
 test('the default state produces neutral filters and no equalizer', () => {
@@ -49,9 +48,9 @@ test('the default state produces neutral filters and no equalizer', () => {
 test('EQ sliders add onto the preset curve and stay inside Lavalink limits', () => {
   const { equalizer } = buildFilterData({ preset: 'bassboost', eq: [6, 0, 0, 0, 0, -6] });
   assert.equal(equalizer.length, 15);
-  assert.equal(equalizer[0].gain, 1);
+  assert.equal(equalizer[0].gain, 0.3988);
   assert.equal(equalizer[2].gain, 0.18);
-  assert.equal(equalizer[14].gain, -0.25);
+  assert.equal(equalizer[14].gain, -0.1247);
 });
 
 test('speed and pitch multiply the preset timescale', () => {
@@ -68,6 +67,7 @@ test('applySound replaces the previous preset in one request', async () => {
   assert.equal(data.rotation.rotationHz, 0);
   assert.equal(data.lowPass.smoothing, 15);
   assert.equal(data.volume, 1);
+  assert.ok(data.pluginFilters.normalization.maxAmplitude < 0.97, 'the radio EQ boost gets headroom');
   assert.equal(equalizer[0].gain, -0.25);
   assert.equal(player.filterManager.filters.nightcore, false);
   assert.equal(player.filterManager.activePreset, 'radio');
