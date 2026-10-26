@@ -184,6 +184,7 @@ export interface PlayerStatus {
   // The viewer's own library Liked list, separate from the autoplay thumbs.
   liked?: boolean;
   likeable?: boolean;
+  likeKind?: 'track' | 'station';
   voteSkip: {
     votes: number;
     requiredVotes: number;

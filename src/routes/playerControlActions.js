@@ -1,6 +1,7 @@
 // @ts-check
 const { REROLL_FAILURES } = require('../music/autoplay');
 const { applySound, getSoundState, normalizePreset, resetSound } = require('../music/sound');
+const { toggleStationHeart } = require('../music/radioPlayback');
 
 // Playback controls. Returning without a response lets the router refresh and save the player.
 function createControlActions({
@@ -39,6 +40,16 @@ function createControlActions({
     async library_like({ req, res, guildId, player }) {
       // The heart is the listener's own library Liked list.
       if (!library) return res.status(503).json({ error: 'The library is not available' });
+      if (library.stationIdOf?.(player.queue.current)) {
+        const station = await toggleStationHeart(getRequestUser(req)?.id, player.queue.current);
+        if (!station.ok) {
+          return res.status(409).json({ error: station.reason === 'limit'
+            ? `You can save up to ${library.LIBRARY_LIMITS.stations} stations. Remove one first.`
+            : 'This station cannot be saved.' });
+        }
+        broadcastPlayerUpdate(guildId);
+        return res.json({ success: true, liked: station.saved, station: true });
+      }
       const result = library.toggleLiked(getRequestUser(req)?.id, player.queue.current);
       if (!result) return res.status(409).json({ error: 'This track cannot be saved.' });
       broadcastPlayerUpdate(guildId);

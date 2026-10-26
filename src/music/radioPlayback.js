@@ -2,6 +2,7 @@
 const defaultRadio = require('./radio');
 const { isStreamTrack } = require('./autoplay/normalize');
 const { queueRequestedTracks } = require('./queueInsert');
+const library = require('./library');
 
 // The stream itself carries no useful metadata, so the station details become the track info.
 function dressStationTrack(track, station, radio = defaultRadio) {
@@ -37,6 +38,32 @@ async function playStation(player, station, requester, { radio = defaultRadio } 
   return { track, result, replaced };
 }
 
+// The player heart on a radio track toggles the station in the listener's saved stations,
+// the same list as the ⭐ on /radio and the Activity radio tab.
+// Returns { ok, saved, name } or { ok: false, reason: 'invalid' | 'limit' }.
+async function toggleStationHeart(userId, track, { radio = defaultRadio } = {}) {
+  const stationId = library.stationIdOf(track);
+  if (!userId || !stationId) return { ok: false, reason: 'invalid' };
+  const name = track.info?.title || 'Radio station';
+  if (library.isStationSaved(userId, stationId)) {
+    library.removeStation(userId, stationId);
+    return { ok: true, saved: false, name };
+  }
+  // A fresh lookup brings back the tags and country; the playing track is enough if it fails.
+  // The name stays the one the listener saw on the player.
+  const fromTrack = {
+    id: stationId,
+    source: track.radioStation.source,
+    name,
+    homepage: track.info?.uri || '',
+    favicon: track.info?.artworkUrl || '',
+  };
+  const station = await radio.resolveStation(stationId).catch(() => null);
+  const result = library.saveStation(userId, station?.id === stationId ? { ...fromTrack, ...station, name } : fromTrack);
+  if (!result.ok) return result;
+  return { ok: true, saved: true, name };
+}
+
 // What the dashboard and Activity show for a station (the stream URL stays on the server).
 function publicStation(station) {
   return {
@@ -54,4 +81,4 @@ function publicStation(station) {
   };
 }
 
-module.exports = { dressStationTrack, playStation, publicStation };
+module.exports = { dressStationTrack, playStation, publicStation, toggleStationHeart };

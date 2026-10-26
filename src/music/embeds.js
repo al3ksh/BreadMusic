@@ -32,7 +32,7 @@ function buildTrackEmbed(track, requester, voiceChannelId, { next = false } = {}
       { name: LABELS.ARTIST, value: trackAuthor, inline: true },
       {
         name: LABELS.DURATION,
-        value: formatDuration(track.info.duration ?? track.info.length ?? 0),
+        value: formatTrackDuration(track),
         inline: true,
       },
       {
@@ -63,25 +63,26 @@ function buildNowPlayingEmbed(player, track) {
 
   const duration = track.info.duration ?? track.info.length ?? 0;
   const position = player?.position ?? 0;
-  const progressBar = buildProgressBar(position, duration, 18);
-  
+  const live = isStreamTrack(track);
+  const timeline = live
+    ? '🔴 Live'
+    : `${buildProgressBar(position, duration, 18)}
+${formatDuration(position)} / ${formatDuration(duration)}`;
+
   const autoplayOn = player?.guildId && isAutoplayEnabled(player.guildId);
-  const title = autoplayOn ? 'Now Playing · Autoplay' : 'Now Playing';
+  const title = formatNowPlayingTitle(track, autoplayOn);
   const trackTitle = formatTrackTitle(track);
   const trackAuthor = formatTrackAuthor(track);
   const source = formatTrackSource(track);
 
   const embed = new EmbedBuilder()
     .setTitle(title)
-    .setDescription(
-      `${formatTrackLink(track, `${trackAuthor} - ${trackTitle}`)}\n${progressBar}\n${formatDuration(position)} / ${formatDuration(
-        duration,
-      )}`,
-    )
+    .setDescription(`${formatTrackLink(track, `${trackAuthor} - ${trackTitle}`)}
+${timeline}`)
     .setColor(player?.paused ? BRAND_COLORS.secondary : BRAND_COLORS.primary)
     .addFields(
       { name: LABELS.ARTIST, value: trackAuthor, inline: true },
-      { name: LABELS.DURATION, value: formatDuration(duration), inline: true },
+      { name: LABELS.DURATION, value: formatTrackDuration(track), inline: true },
       { name: LABELS.VOLUME, value: formatVolume(player?.volume), inline: true },
       { name: LABELS.LOOP, value: formatLoopMode(player?.repeatMode), inline: true },
       {
@@ -109,6 +110,18 @@ function buildNowPlayingEmbed(player, track) {
   }
 
   return embed;
+}
+
+function formatNowPlayingTitle(track, autoplayOn) {
+  if (track.radioStation) return 'Now Playing · Radio';
+  if (isStreamTrack(track)) return 'Now Playing · Live';
+  return autoplayOn ? 'Now Playing · Autoplay' : 'Now Playing';
+}
+
+// Streams report a huge or missing length, so they read as Live instead of a timestamp.
+function formatTrackDuration(track) {
+  if (isStreamTrack(track)) return 'Live';
+  return formatDuration(track.info.duration ?? track.info.length ?? 0);
 }
 
 function formatRequester(track) {
@@ -154,6 +167,7 @@ function formatTrackAuthor(track) {
 
 function formatTrackSource(track) {
   if (isLocalUploadTrack(track)) return 'upload';
+  if (track?.radioStation) return 'Radio';
   return normalizeSourceName(track?.info) ?? 'Unknown';
 }
 

@@ -896,7 +896,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
 
     setActionBusy(action);
     try {
-      const result = await activityFetch<{ message?: string; liked?: boolean; disliked?: boolean; count?: number; skipped?: number; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
+      const result = await activityFetch<{ message?: string; liked?: boolean; station?: boolean; disliked?: boolean; count?: number; skipped?: number; voteSkip?: { votes: number; requiredVotes: number } | null }>(`/api/guilds/${guildId}/player/${action}`, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -911,7 +911,8 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
       }
       if (action === 'library_like') {
         setStatus((current) => ({ ...current, liked: Boolean(result.liked) }));
-        notify(result.liked ? 'Saved to your Library' : 'Removed from your Library', 'success');
+        if (result.station) notify(result.liked ? 'Saved to your stations' : 'Removed from your stations', 'success');
+        else notify(result.liked ? 'Saved to your Library' : 'Removed from your Library', 'success');
         setLibraryRefreshKey((key) => key + 1);
       }
       return result;

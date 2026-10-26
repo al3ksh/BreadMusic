@@ -138,9 +138,10 @@ function buildPlayerStatusSnapshot(client, guildId, viewerId = null) {
     autoplayNext: buildAutoplayNextSnapshot(guildId, config),
     autoplayFeedback: config.autoplay ? getTrackFeedback(viewerId, player.queue.current) : null,
     autoplayRateable: Boolean(config.autoplay && canRateTrack(player.queue.current)),
-    // The heart is the viewer's own library Liked list.
-    liked: Boolean(viewerId && library.isLiked(viewerId, player.queue.current)),
-    likeable: library.canSaveTrack(player.queue.current),
+    // The heart is the viewer's own library: Liked for tracks, saved stations on radio.
+    liked: Boolean(viewerId && library.isHearted(viewerId, player.queue.current)),
+    likeable: library.canHeartTrack(player.queue.current),
+    likeKind: library.stationIdOf(player.queue.current) ? 'station' : 'track',
     voteSkip: getVoteSkipSnapshot(player, config, guild),
     sessionHistory,
   };

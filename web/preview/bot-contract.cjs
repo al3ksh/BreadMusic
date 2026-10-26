@@ -16,7 +16,7 @@ function load(relative) {
     if (name === './autoplay') return { isAutoplayEnabled: () => false, getAutoplayNext: () => null };
     if (name === './playerEmojis') return { playerEmoji: (_, fallback) => fallback };
     if (name === './playbackErrors') return {};
-    if (name === './library') return { canSaveTrack: () => true };
+    if (name === './library') return { canHeartTrack: () => true };
     if (name === './uploadArtworkUrls') return { uploadArtworkUrl: () => null };
     const resolved = path.relative(root, path.resolve(path.dirname(filename), `${name}.js`)).replaceAll('\\', '/');
     return load(resolved);

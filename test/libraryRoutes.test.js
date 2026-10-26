@@ -345,3 +345,21 @@ test('sound presets are saved, listed and removed through the library routes', a
     assert.equal((await post('/library/sounds/remove', { id: saved.body.sound.id })).status, 404);
   });
 });
+
+test('the player heart on radio saves the station to the saved stations list', async () => {
+  const radioTrack = {
+    ...track('Live FM', 'live0000001'),
+    info: { ...track('Live FM', 'live0000001').info, uri: 'https://live.example', isStream: true, duration: 0 },
+    radioStation: { id: 'url:https://live.example/stream', source: 'url' },
+  };
+  await withApp({ current: radioTrack }, async ({ post, userId }) => {
+    const saved = await post('/player/library_like');
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.liked, true);
+    assert.equal(saved.body.station, true);
+    assert.deepEqual(library.listStations(userId).map((entry) => entry.id), ['url:https://live.example/stream']);
+    assert.equal(library.listLiked(userId).length, 0);
+    assert.equal((await post('/player/library_like')).body.liked, false);
+    assert.equal(library.listStations(userId).length, 0);
+  });
+});

@@ -5,7 +5,7 @@ const { buildPlaybackErrorEmbed, buildReplacementEmbed } = require('./playbackEr
 const { isAutoplayEnabled, getAutoplayNext } = require('./autoplay');
 const { isStreamTrack } = require('./autoplay/normalize');
 const { playerEmoji } = require('./playerEmojis');
-const { canSaveTrack } = require('./library');
+const { canHeartTrack } = require('./library');
 
 const BUTTON_PREFIX = 'music';
 const PLAYBACK_ERROR_TTL_MS = 30_000;
@@ -121,7 +121,7 @@ class MusicUI {
       .setCustomId(this.buildCustomId(BUTTONS.HEART, player.guildId))
       .setEmoji(icon('heart'))
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(disabled || !canSaveTrack(player.queue.current));
+      .setDisabled(disabled || !canHeartTrack(player.queue.current));
 
     const rows = [rowOne, rowTwo];
     // Autoplay feedback only appears while autoplay is on, so the player stays two rows otherwise.

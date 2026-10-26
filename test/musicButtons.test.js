@@ -11,6 +11,7 @@ process.env.BREAD_DB_PATH = path.join(tempDir, 'bread.sqlite');
 const { closeDatabases } = require('../src/state/sqliteStore');
 const { setConfig } = require('../src/state/guildConfig');
 const { createMusicButtons } = require('../src/music/buttons');
+const { listStations } = require('../src/music/library');
 
 let guildCounter = 0;
 
@@ -224,4 +225,19 @@ test('a vote-skip button for a track that already ended is refused', async () =>
   const wrongGuild = ctx.interaction('voteskip:another-guild:token');
   await ctx.buttons.handleVoteSkipButton(wrongGuild);
   assert.match(wrongGuild.replies[0].payload.content, /no longer valid/);
+});
+
+test('the heart on radio saves the station and a second press removes it', async () => {
+  const ctx = setup();
+  ctx.player.queue.current = {
+    encoded: 'encoded-radio',
+    info: { identifier: 'radio', title: 'Live FM', author: 'Warsaw, Poland', uri: 'https://live.example', duration: 0, isStream: true },
+    radioStation: { id: 'url:https://live.example/stream', source: 'url' },
+  };
+  const saved = await press(ctx, 'heart', { userId: 'radio-heart-user' });
+  assert.match(saved.replies[0].payload.content, /Saved \*\*Live FM\*\*.*radio/);
+  assert.deepEqual(listStations('radio-heart-user').map((entry) => entry.name), ['Live FM']);
+  const removed = await press(ctx, 'heart', { userId: 'radio-heart-user' });
+  assert.match(removed.replies[0].payload.content, /Removed \*\*Live FM\*\* from your saved stations/);
+  assert.equal(listStations('radio-heart-user').length, 0);
 });

@@ -360,6 +360,22 @@ function saveStation(userId, station, now = Date.now()) {
   return { ok: true, saved: true };
 }
 
+// A radio track carries its station id, so the player heart saves the station instead.
+function stationIdOf(track) {
+  const id = track?.radioStation?.id;
+  return typeof id === 'string' && id ? id : null;
+}
+
+function canHeartTrack(track) {
+  return Boolean(stationIdOf(track)) || canSaveTrack(track);
+}
+
+function isHearted(userId, track) {
+  const stationId = stationIdOf(track);
+  if (stationId) return Boolean(userId) && isStationSaved(userId, stationId);
+  return isLiked(userId, track);
+}
+
 function removeStation(userId, stationId) {
   const library = getUserLibrary(userId);
   if (!library) return false;
@@ -449,6 +465,9 @@ module.exports = {
   shuffled,
   listStations,
   isStationSaved,
+  stationIdOf,
+  canHeartTrack,
+  isHearted,
   saveStation,
   removeStation,
   listSounds,

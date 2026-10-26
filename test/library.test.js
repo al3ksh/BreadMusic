@@ -204,3 +204,14 @@ test('saved sound presets: normalized, overwritten by name, capped', () => {
   assert.equal(library.removeSound(user, first.entry.id).name, 'night DRIVE');
   assert.equal(library.removeSound(user, first.entry.id), null);
 });
+
+test('the heart on a radio track follows the saved station', () => {
+  const alice = nextUser();
+  const radioTrack = { ...track('Live FM', 'radio000001', { isStream: true, duration: 0 }), radioStation: { id: 'garden:abc', source: 'garden' } };
+  assert.equal(library.canSaveTrack(radioTrack), false);
+  assert.equal(library.canHeartTrack(radioTrack), true);
+  assert.equal(library.canHeartTrack(track('Live', 'stream00001', { isStream: true })), false);
+  assert.equal(library.isHearted(alice, radioTrack), false);
+  library.saveStation(alice, { id: 'garden:abc', name: 'Live FM' });
+  assert.equal(library.isHearted(alice, radioTrack), true);
+});

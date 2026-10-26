@@ -17,7 +17,8 @@ const {
   rerollNext,
   REROLL_FAILURES,
 } = require('./autoplay');
-const { toggleLiked } = require('./library');
+const { toggleLiked, stationIdOf, LIBRARY_LIMITS } = require('./library');
+const { toggleStationHeart } = require('./radioPlayback');
 const { clearVoiceTrackStatus } = require('./voiceStatus');
 
 // Buttons on the player, queue and vote-skip messages.
@@ -110,9 +111,26 @@ function createMusicButtons({ client, broadcastPlayerUpdate }) {
   }
 
   // The heart saves the track to the listener's own Liked list, so only they see the confirmation.
+  // On radio it saves the station instead.
   async function heartCurrent(interaction) {
     const { player } = await ensurePlayer(interaction, { requireSameChannel: true });
     const track = player.queue.current;
+    if (stationIdOf(track)) {
+      const station = await toggleStationHeart(interaction.user.id, track);
+      if (!station.ok) {
+        throw new CommandError(station.reason === 'limit'
+          ? `You can save up to ${LIBRARY_LIMITS.stations} stations. Remove one in the Activity first.`
+          : 'This station cannot be saved.');
+      }
+      broadcastPlayerUpdate(interaction.guildId);
+      await interaction.reply({
+        content: station.saved
+          ? `⭐ Saved **${station.name}**. Find it at the top of \`/radio\` and in the Activity radio tab.`
+          : `Removed **${station.name}** from your saved stations.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
     const result = toggleLiked(interaction.user.id, track);
     if (!result) throw new CommandError('This track cannot be saved.');
     broadcastPlayerUpdate(interaction.guildId);

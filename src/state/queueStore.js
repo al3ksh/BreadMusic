@@ -16,6 +16,7 @@ function packTrack(track) {
     localUpload: packLocalUpload(track.localUpload),
     isAutoplay: Boolean(track.isAutoplay),
     origin: typeof track.origin === 'string' ? track.origin : null,
+    radioStation: typeof track.radioStation?.id === 'string' ? { id: track.radioStation.id, source: track.radioStation.source ?? '' } : null,
   };
 }
 
@@ -67,6 +68,7 @@ async function decodeTrack(node, entry, fallbackRequester) {
     if (entry?.localUpload) decoded.localUpload = entry.localUpload;
     if (entry?.isAutoplay) decoded.isAutoplay = true;
     if (entry?.origin) decoded.origin = entry.origin;
+    if (entry?.radioStation?.id) decoded.radioStation = entry.radioStation;
     return decoded;
   } catch {
     return null;

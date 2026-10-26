@@ -9,11 +9,12 @@ type ActivityHeartButtonProps = {
   onToggle: () => void;
 };
 
-// Saves the current track to the listener's Liked list. It sits by the title, apart from the playback controls.
+// Saves the current track to the listener's Liked list, or the station on radio. It sits by the title, apart from the playback controls.
 export function ActivityHeartButton({ status, hasTrack, actionBusy, controlFeedback, onToggle }: ActivityHeartButtonProps) {
   if (!hasTrack || !status.likeable) return null;
   const liked = Boolean(status.liked);
-  const label = liked ? 'Saved to your Library' : 'Save to your Library';
+  const target = status.likeKind === 'station' ? 'stations' : 'Library';
+  const label = liked ? `Saved to your ${target}` : `Save to your ${target}`;
   return (
     <button
       type="button"
