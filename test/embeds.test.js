@@ -45,7 +45,7 @@ test('local upload titles are plain text in queue and now playing embeds', () =>
 
 test('radio streams show Live instead of a duration and no progress bar', () => {
   const radioTrack = makeTrack({
-    info: { title: 'RMF FM', author: 'Radio', uri: 'http://stream.example/rmf', duration: 9223372036854775807, sourceName: 'http', isStream: true },
+    info: { title: 'RMF FM', author: 'Radio', uri: 'http://stream.example/rmf', duration: Number.MAX_SAFE_INTEGER, sourceName: 'http', isStream: true },
     radioStation: { id: 'station-1', source: 'radio-browser' },
     requester: { username: 'alex' },
   });
