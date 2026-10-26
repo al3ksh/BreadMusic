@@ -2,9 +2,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   clearVoiceTrackStatus,
+  formatVoiceTrackStatus,
   handleVoiceStatusGatewayEvent,
   setVoiceTrackStatus,
 } = require('../src/music/voiceStatus');
+
+test('a radio station status leads with the song it is airing', () => {
+  const track = { info: { title: 'RMF FM', author: 'Radio', isStream: true }, radioStation: { id: 's1', nowPlaying: 'Linkin Park - Numb' } };
+  assert.equal(formatVoiceTrackStatus(track), '♪ Linkin Park - Numb · RMF FM');
+  delete track.radioStation.nowPlaying;
+  assert.equal(formatVoiceTrackStatus(track), '♪ Radio - RMF FM');
+});
 
 test('voice status preserves and restores an existing channel status', async () => {
   const updates = [];

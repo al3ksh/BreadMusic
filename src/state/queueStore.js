@@ -16,7 +16,7 @@ function packTrack(track) {
     localUpload: packLocalUpload(track.localUpload),
     isAutoplay: Boolean(track.isAutoplay),
     origin: typeof track.origin === 'string' ? track.origin : null,
-    radioStation: typeof track.radioStation?.id === 'string' ? { id: track.radioStation.id, source: track.radioStation.source ?? '' } : null,
+    radioStation: typeof track.radioStation?.id === 'string' ? { id: track.radioStation.id, source: track.radioStation.source ?? '', url: track.radioStation.url ?? '' } : null,
   };
 }
 

@@ -1,5 +1,5 @@
 // @ts-check
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 const { formatDuration, buildProgressBar } = require('../utils/time');
 const { isAutoplayEnabled, getAutoplayNext } = require('./autoplay');
 const { isStreamTrack } = require('./autoplay/normalize');
@@ -64,8 +64,10 @@ function buildNowPlayingEmbed(player, track) {
   const duration = track.info.duration ?? track.info.length ?? 0;
   const position = player?.position ?? 0;
   const live = isStreamTrack(track);
+  const onAir = track.radioStation?.nowPlaying;
   const timeline = live
-    ? '🔴 Live'
+    ? `${onAir ? `🎵 **${escapeMarkdown(onAir)}**
+` : ''}🔴 Live`
     : `${buildProgressBar(position, duration, 18)}
 ${formatDuration(position)} / ${formatDuration(duration)}`;
 

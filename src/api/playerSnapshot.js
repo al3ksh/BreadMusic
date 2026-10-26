@@ -105,6 +105,8 @@ function buildPlayerStatusSnapshot(client, guildId, viewerId = null) {
       seekable: isTrackSeekable(player.queue.current),
       artwork: extractArtwork(info),
       requester: formatRequester(player.queue.current.requester),
+      // What a radio station is airing right now, when its stream says.
+      nowPlaying: player.queue.current.radioStation?.nowPlaying || null,
     };
   }
 

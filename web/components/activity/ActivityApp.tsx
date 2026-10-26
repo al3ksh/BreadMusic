@@ -644,6 +644,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
     status.currentTrack?.artwork,
     status.currentTrack?.author,
     status.currentTrack?.duration,
+    status.currentTrack?.nowPlaying,
     status.currentTrack?.title,
     status.currentTrack?.uri,
     status.paused,
@@ -1379,6 +1380,8 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
   const displayedPosition = seekDraft ?? position;
   // Signed upload URLs are for playback, not public track pages.
   const trackKey = status.currentTrack?.uri || 'idle';
+  // Stations that report their current song show it where the artist usually goes.
+  const onAirLine = status.currentTrack?.nowPlaying ? `♪ ${status.currentTrack.nowPlaying}` : '';
   const currentTrackLink = /^https?:\/\//i.test(currentTrackUri) && !currentTrackUri.includes('/api/uploads/')
     ? currentTrackUri
     : '';
@@ -1780,7 +1783,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
               <div>
                 <div className="activity-mini-brand"><img src="/assets/breadicon.png?v=3" alt="" /><span>{status.paused ? 'Paused' : 'Playing'}</span></div>
                 <strong>{status.currentTrack?.title || 'Nothing is playing'}</strong>
-                <span className="activity-karaoke-author">{status.currentTrack?.author || 'Bread'}</span>
+                <span className="activity-karaoke-author">{onAirLine || status.currentTrack?.author || 'Bread'}</span>
               </div>
               <button type="button" onClick={() => switchKaraoke(false)} title="Exit karaoke" aria-label="Exit karaoke"><X size={16} /></button>
             </div>
@@ -1825,7 +1828,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
                 </h1>
                 <ActivityHeartButton status={status} hasTrack={hasTrack} actionBusy={actionBusy} controlFeedback={controlFeedback} onToggle={() => runControlAction('library_like')} />
               </div>
-              <p key={`author-${trackKey}`} className="activity-track-swap is-second">{status.currentTrack?.author || 'Bread'}</p>
+              <p key={`author-${trackKey}-${onAirLine}`} className="activity-track-swap is-second">{onAirLine || status.currentTrack?.author || 'Bread'}</p>
             </div>
           </div>
 
@@ -1926,7 +1929,7 @@ export function ActivityApp({ backend }: { backend?: ActivityBackend } = {}) {
                 </h1>
                 <ActivityHeartButton status={status} hasTrack={hasTrack} actionBusy={actionBusy} controlFeedback={controlFeedback} onToggle={() => runControlAction('library_like')} />
               </div>
-              <p key={`author-${trackKey}`} className="activity-track-swap is-second">{status.currentTrack?.author || 'Open Add music to start playback.'}</p>
+              <p key={`author-${trackKey}-${onAirLine}`} className="activity-track-swap is-second">{onAirLine || status.currentTrack?.author || 'Open Add music to start playback.'}</p>
               {hasTrack && <small className="activity-track-requester">Requested by <strong>{status.currentTrack?.requester || 'Unknown'}</strong></small>}
               {hasTrack && (
                 <div className="activity-mini-progress" aria-hidden="true">

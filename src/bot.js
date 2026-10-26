@@ -57,6 +57,7 @@ const {
   handleVoiceStatusGatewayEvent,
   setVoiceTrackStatus,
 } = require('./music/voiceStatus');
+const { createRadioNowPlaying } = require('./music/radioNowPlaying');
 const { buildAccessDeniedMessage, isGuildAllowed } = require('./access/guildAccess');
 const { createPlaybackRecovery } = require('./music/playbackRecovery');
 const { createPlaybackFallback } = require('./music/playbackFallback');
@@ -537,7 +538,19 @@ client.on(Events.VoiceStateUpdate, safeEventHandler('VoiceStateUpdate', async (o
   await handleVoiceStateUpdate(player, client);
 }));
 
+// Radio streams say what they are airing, so the player and channel status follow the song.
+const radioNowPlaying = createRadioNowPlaying({
+  onChange: async (player, track) => {
+    await Promise.all([
+      client.musicUI.refresh(player),
+      setVoiceTrackStatus(client, player, track),
+    ]);
+    broadcastPlayerUpdate(player.guildId);
+  },
+});
+
 client.lavalink.on('trackStart', safeEventHandler('trackStart', async (player, track) => {
+  radioNowPlaying.watch(player);
   resumeAutoplayAfterPlaybackSuccess(player.guildId);
   await clearVoteSkip(player.guildId);
   clearIdleTimer(player.guildId);
@@ -587,6 +600,7 @@ client.lavalink.on('trackStuck', safeEventHandler('trackStuck', async (player, t
 client.lavalink.on('queueEnd', safeEventHandler('queueEnd', async (player, track) => {
   await savePlayerState(player).catch(() => {});
 
+  radioNowPlaying.stop(player.guildId);
   if (isPlayerStopping(player)) return;
   
   const autoplayTriggered = await handleAutoplay(player, track, client);
@@ -600,6 +614,7 @@ client.lavalink.on('queueEnd', safeEventHandler('queueEnd', async (player, track
 }));
 
 client.lavalink.on('playerDestroy', safeEventHandler('playerDestroy', async (player) => {
+  radioNowPlaying.stop(player.guildId);
   clearEmptyChannelTimer(player.guildId);
   // Players destroyed by a shutdown are restored on start, so their autoplay session is kept.
   if (!isShuttingDown) clearAutoplayState(player.guildId);
@@ -894,6 +909,7 @@ async function gracefulShutdown(signal) {
   console.log(`\n[${signal}] Shutting down gracefully...`);
 
   clearInterval(activityIntervalId);
+  radioNowPlaying.stopAll();
   alertMonitor?.stop();
   alertMonitor = null;
 

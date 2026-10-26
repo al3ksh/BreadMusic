@@ -46,8 +46,10 @@ export function buildActivityRichPresence(
     };
   }
 
-  const title = presenceText(track.title, 'Unknown track');
-  const author = presenceText(track.author, 'Unknown artist');
+  // A radio station leads with the song it is airing and keeps its own name underneath.
+  const onAir = track.nowPlaying ? presenceText(track.nowPlaying, '') : '';
+  const title = onAir || presenceText(track.title, 'Unknown track');
+  const author = onAir ? presenceText(track.title, 'Radio') : presenceText(track.author, 'Unknown artist');
   const activity: RichPresenceActivity = {
     type: 2,
     details: title,

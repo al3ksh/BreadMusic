@@ -171,6 +171,7 @@ export interface PlayerStatus {
     seekable: boolean;
     artwork?: string;
     requester: string;
+    nowPlaying?: string | null;
   } | null;
   queueLength: number;
   repeatMode: string;

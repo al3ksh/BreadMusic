@@ -61,6 +61,8 @@ function forgetRecentlyCleared(channelId) {
 
 function formatVoiceTrackStatus(track) {
   const title = track?.info?.title || track?.localUpload?.fileName || 'Unknown track';
+  const onAir = track?.radioStation?.nowPlaying;
+  if (onAir) return truncate(`♪ ${onAir} · ${title}`, MAX_VISIBLE_STATUS_LENGTH);
   const author = track?.info?.author;
   const label =
     !isYouTubeTrack(track) && author && !isUnknownAuthor(author)

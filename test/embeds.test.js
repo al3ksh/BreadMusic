@@ -59,6 +59,17 @@ test('radio streams show Live instead of a duration and no progress bar', () => 
   assert.equal(field('Source'), 'Radio');
 });
 
+test('a station that reports its song shows it above the Live line', () => {
+  const radioTrack = makeTrack({
+    info: { title: 'RMF FM', author: 'Radio', uri: 'http://stream.example/rmf', duration: 0, sourceName: 'http', isStream: true },
+    radioStation: { id: 'station-1', source: 'radio-browser', nowPlaying: 'Evanescence - Bring Me To Life' },
+    requester: { username: 'alex' },
+  });
+
+  const embed = buildNowPlayingEmbed({ position: 0, volume: 60, repeatMode: 'off' }, radioTrack).toJSON();
+  assert.equal(embed.description, '[Radio - RMF FM](http://stream.example/rmf)\n🎵 **Evanescence - Bring Me To Life**\n🔴 Live');
+});
+
 test('a plain live stream is labelled Live, not Autoplay', () => {
   const liveTrack = makeTrack({ info: { title: 'Lofi stream', duration: 0, isStream: true } });
 

@@ -12,7 +12,8 @@ function dressStationTrack(track, station, radio = defaultRadio) {
   track.info.isStream = true;
   if (station.favicon) track.info.artworkUrl = station.favicon;
   if (station.homepage) track.info.uri = station.homepage;
-  track.radioStation = { id: station.id, source: station.source };
+  // The stream URL stays on the server; the bot reads what the station is airing from it.
+  track.radioStation = { id: station.id, source: station.source, url: station.url };
   return track;
 }
 
